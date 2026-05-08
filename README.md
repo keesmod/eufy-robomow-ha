@@ -15,16 +15,26 @@ Control and monitor your Eufy mower directly from Home Assistant over your local
 | Mower | `lawn_mower` | Start, pause, dock — with activity state (mowing / returning / docked / paused) |
 | Battery | `sensor` | Battery level (%) |
 | Mowed Area | `sensor` | Area covered in the current or last session |
-| Progress | `sensor` | Return-to-base progress (%) |
+| Mowing Progress | `sensor` | Real-time session completion % (from DP113 telemetry blob) |
+| Return Progress | `sensor` | Return-to-base progress (%) |
+| Session Distance | `sensor` | Distance traveled in the current session (m) |
 | Network | `sensor` | WiFi / Cellular connection type |
+| Signal Strength | `sensor` | WiFi signal strength (dBm) |
 | Cut Height | `number` | Blade height 25–75 mm, step 5 mm (local, instant) |
+| Volume | `number` | Speaker volume 0–100 % (local) |
 | Edge Distance | `number` | −15 to +15 cm — how far inside/outside the border wire the mower cuts |
 | Pad Direction | `number` | Mowing path angle 0–359° |
 | Travel Speed | `select` | Mower driving speed: slow / normal / fast |
 | Blade Speed | `select` | Blade motor speed: slow / normal / fast |
 | Path Distance | `select` | Lane spacing: 8 cm / 10 cm / 12 cm |
+| Stop on Rain | `switch` | Pause mowing when rain is detected |
+| Child Protection | `switch` | Enable child/pet protection mode |
+| Smart No-Go Suggestions | `switch` | AI-assisted no-go zone suggestions |
+| Mow Yellow Grass | `switch` | Allow mowing on dry/yellow grass |
 
 > **Cloud entities** (edge distance, pad direction, speeds, path distance) require your Eufy account credentials. They are polled every 5 minutes and written back via the Tuya mobile API.
+>
+> Some entities (generic raw DP sensors, map coverage) are **disabled by default** — enable them in HA if you want to explore unconfirmed data points.
 
 ---
 
@@ -68,15 +78,15 @@ That's it — no external tools, no manual key extraction.
 
 ## How it works
 
-- **Local polling** (every 30 s) via the [Tuya local protocol](https://github.com/jasonacox/tinytuya) for real-time status (battery, activity state, etc.).
-- **Cloud polling** (every 5 min) via the Tuya mobile API for settings stored as protobuf blobs in DP154/DP155.
+- **Local polling** (every 10 s) via the [Tuya local protocol](https://github.com/jasonacox/tinytuya) for real-time status (battery, activity state, etc.).
+- **Cloud polling** (every 5 min) via the Tuya mobile API for settings stored as protobuf blobs in DP155.
 - **Writes** go directly to the cloud API and are immediately reflected in the Eufy app.
 
 ---
 
 ## Known limitations
 
-- **Zone mowing** — the E15/E18 supports zone-specific settings in the app; this is not yet implemented.
+- **Zone mowing** — the local Tuya protocol cannot distinguish zone 1 from zone 2 (both send an identical DP154 value; zone selection happens over cloud MQTT which is not locally accessible). Full-area mow only for now.
 - **Map display** — live GPS map is not yet supported.
 
 ---
