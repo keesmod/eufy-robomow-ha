@@ -78,7 +78,6 @@ That's it — no external tools, no manual key extraction.
 
 - **Zone mowing** — the E15/E18 supports zone-specific settings in the app; this is not yet implemented.
 - **Map display** — live GPS map is not yet supported.
-- **Pad direction unit** — the app shows a rotary dial; the integration exposes it as 0–359°. Verify the degree → direction mapping matches your app if the direction appears off.
 
 ---
 
