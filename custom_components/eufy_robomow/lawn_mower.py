@@ -82,15 +82,14 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
             return LawnMowerActivity.PAUSED
 
         if dp1 and not dp2:
-            # DP118 climbing (5–99) → mower returning to base
-            # DP118=100 means briefly docked mid-session for charging; DP1 is still
-            # True so we report MOWING rather than DOCKED (fixes stuck-docked bug).
-            if dp118 >= RETURNING_THRESHOLD:
+            # DP118 5–99 → mower returning to base
+            # DP118=100 while DP1=True means briefly docked mid-session for
+            # charging (will resume); treat as MOWING, not RETURNING.
+            if RETURNING_THRESHOLD <= dp118 < 100:
                 try:
                     return LawnMowerActivity.RETURNING
                 except AttributeError:
                     return LawnMowerActivity.MOWING
-            # DP118 near 0 → actively mowing
             return LawnMowerActivity.MOWING
 
         # DP1 absent or False → no active session → docked / idle
