@@ -489,6 +489,13 @@ class EufyCloudClient:
         resp.raise_for_status()
         data = resp.json()
 
+        if "access_token" not in data:
+            # The server returned a well-formed response but without a token —
+            # this usually means wrong credentials or a transient server error.
+            # Raise a clear exception so config_flow can show the right error.
+            msg = data.get("msg") or data.get("message") or data.get("error") or str(data)
+            raise ValueError(f"Eufy login failed: {msg}")
+
         self._eufy_token = data["access_token"]
         self._eufy_uid = data["user_info"]["id"]
         # The response contains the correct regional base URL for subsequent calls

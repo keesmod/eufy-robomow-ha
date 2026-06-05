@@ -94,9 +94,14 @@ class EufyRobomowConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             except NoDevicesFound:
                 errors["base"] = "no_devices"
-            except Exception:  # noqa: BLE001
-                _LOGGER.exception("Error during device discovery")
+            except ValueError:
+                # Explicit login failure (wrong credentials or server rejection)
+                _LOGGER.exception("Eufy login rejected")
                 errors["base"] = "invalid_auth"
+            except Exception:  # noqa: BLE001
+                # Transient errors: network issues, timeouts, 5xx responses
+                _LOGGER.exception("Unexpected error during device discovery")
+                errors["base"] = "unknown"
 
             if not errors:
                 self._email      = email
