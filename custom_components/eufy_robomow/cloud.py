@@ -428,6 +428,21 @@ def _unpadded_rsa(exponent: int, n: int, plaintext: bytes) -> bytes:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
+class TuyaSessionError(RuntimeError):
+    """The Tuya session is invalid/expired — re-authentication should fix it."""
+
+
+# Error codes that indicate an expired or invalid session rather than a
+# device-side problem.  These trigger invalidate + re-login + retry.
+_SESSION_ERROR_CODES = {
+    "USER_SESSION_INVALID",
+    "USER_SESSION_LOSS",
+    "TOKEN_INVALID",
+    "TOKEN_EXPIRED",
+    "SING_VALIDATE_FAILED",
+}
+
+
 class EufyCloudClient:
     """Synchronous client for reading/writing Eufy cloud settings via Tuya mobile API.
 
@@ -486,14 +501,25 @@ class EufyCloudClient:
             },
             timeout=15,
         )
-        resp.raise_for_status()
-        data = resp.json()
+        # Parse the body BEFORE raising on HTTP status: Eufy returns a JSON
+        # error payload even on 401/403, and we want to surface its message as
+        # a credential error (ValueError) rather than a generic HTTPError.
+        try:
+            data = resp.json()
+        except ValueError:
+            data = None
 
-        if "access_token" not in data:
-            # The server returned a well-formed response but without a token —
-            # this usually means wrong credentials or a transient server error.
-            # Raise a clear exception so config_flow can show the right error.
-            msg = data.get("msg") or data.get("message") or data.get("error") or str(data)
+        if not isinstance(data, dict) or "access_token" not in data:
+            msg = ""
+            if isinstance(data, dict):
+                msg = data.get("msg") or data.get("message") or data.get("error") or str(data)
+            if 400 <= resp.status_code < 500:
+                # Client error → credentials rejected by the server
+                raise ValueError(
+                    f"Eufy login rejected (HTTP {resp.status_code}): {msg}"
+                )
+            # 5xx or malformed body → transient server problem
+            resp.raise_for_status()
             raise ValueError(f"Eufy login failed: {msg}")
 
         self._eufy_token = data["access_token"]
@@ -556,9 +582,12 @@ class EufyCloudClient:
         payload = resp.json()
 
         if "result" not in payload:
-            # Surface device-side errors with a recognisable prefix so callers
-            # can distinguish them from transient session / auth failures.
-            error_code = payload.get("errorCode", "unknown")
+            error_code = str(payload.get("errorCode", "unknown"))
+            # Session/auth errors get their own type so the retry wrapper can
+            # re-authenticate; everything else is a device-side error that a
+            # fresh session would not fix.
+            if error_code in _SESSION_ERROR_CODES or "SESSION" in error_code.upper():
+                raise TuyaSessionError(f"Session error [{error_code}]: {payload}")
             raise RuntimeError(f"Device error [{error_code}]: {payload}")
 
         return payload["result"]
@@ -606,19 +635,16 @@ class EufyCloudClient:
         self._eufy_token = None
 
     def _tuya_request_with_retry(self, *args, **kwargs) -> Any:
-        """Call _tuya_request; on session/auth failure invalidate and retry once.
+        """Call _tuya_request; on session expiry invalidate, re-login and retry once.
 
         Device-side errors (DEVICE_OFFLINE, etc.) are not retried because
         invalidating the session won't fix them.
         """
         try:
             return self._tuya_request(*args, **kwargs)
-        except RuntimeError as exc:
-            # "Device error [...]" prefix → device-side issue, no point retrying
-            if str(exc).startswith("Device error"):
-                raise
+        except TuyaSessionError as exc:
             _LOGGER.warning(
-                "Tuya API call failed, invalidating sessions and retrying once"
+                "Tuya session expired (%s) — re-authenticating and retrying once", exc
             )
             self._invalidate_sessions()
             return self._tuya_request(*args, **kwargs)

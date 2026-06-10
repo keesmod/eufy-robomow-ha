@@ -14,6 +14,10 @@ fetch_device_schema.py
 pad_direction_before.py
 pad_direction_after.py
 snapshot.json
+fetch_all_dps.py
+debug_fetch_all_dps.py
+verify_fix.py
+AGENT_CONTEXT.md
 
 # Local Claude settings
 .claude/
