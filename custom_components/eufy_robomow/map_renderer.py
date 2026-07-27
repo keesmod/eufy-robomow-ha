@@ -37,11 +37,7 @@ def render_map_svg(
     include_cleaned_paths: bool = False,
 ) -> bytes:
     """Render a normalized map snapshot as an iOS-like SVG."""
-    pathways = tuple(
-        pathway
-        for pathway in snapshot.pathways
-        if any(not _point_in_polygon(point, snapshot.boundary) for point in pathway)
-    )
+    pathways = snapshot.pathways
     cleaned_paths = snapshot.cleaned_paths if include_cleaned_paths else ()
     mower_position = _rendered_mower_position(
         snapshot,
@@ -195,22 +191,6 @@ def _rendered_mower_position(
                 return path[-1]
         return None
     return snapshot.mower_position
-
-
-def _point_in_polygon(point: Point, polygon: tuple[Point, ...]) -> bool:
-    inside = False
-    previous = polygon[-1]
-    for current in polygon:
-        crosses_y = (current.y > point.y) != (previous.y > point.y)
-        if crosses_y:
-            crossing_x = (
-                ((previous.x - current.x) * (point.y - current.y))
-                / (previous.y - current.y)
-            ) + current.x
-            if point.x < crossing_x:
-                inside = not inside
-        previous = current
-    return inside
 
 
 def _visible_points(

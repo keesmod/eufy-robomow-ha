@@ -55,7 +55,7 @@ def test_render_map_svg_is_deterministic_and_script_free() -> None:
     assert b'class="boundary"' in rendered
     assert b'class="base-area"' in rendered
     assert b'class="no-go-area"' in rendered
-    assert rendered.count(b'class="pathway"') == 1
+    assert rendered.count(b'class="pathway"') == 2
     assert b'class="mower-marker"' in rendered
 
 
