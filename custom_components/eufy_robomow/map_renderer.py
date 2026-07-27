@@ -11,9 +11,13 @@ _WIDTH = 720
 _HEIGHT = 900
 _MARGIN = 48
 
-# The mower coordinates describe the navigation anchor, not the icon centre.
-_MOWER_ICON_OFFSET_X = 20
-_MOWER_ICON_OFFSET_Y = 68
+# The observed mower fields locate a navigation anchor, while these fixed-size
+# SVG icons need a visual pixel offset. This affects presentation only; marker
+# centres are clamped so the offset cannot push an icon outside the canvas.
+_MARKER_VISUAL_OFFSET_X = 20
+_MARKER_VISUAL_OFFSET_Y = 68
+_MARKER_HALF_WIDTH = 20
+_MARKER_HALF_HEIGHT = 28
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,19 +90,24 @@ def render_map_svg(
         elements.append(f'<polyline class="pathway-center" points="{rendered}" />')
 
     if station_position is not None:
-        station_x, station_y = projection.point(station_position)
+        station_x, station_y = _marker_position(
+            station_position,
+            projection,
+            apply_visual_offset=True,
+        )
         elements.append(
             _render_charging_station(
-                station_x + _MOWER_ICON_OFFSET_X,
-                station_y + _MOWER_ICON_OFFSET_Y,
+                station_x,
+                station_y,
             )
         )
 
     if mower_position is not None:
-        mower_x, mower_y = projection.point(mower_position)
-        if not include_cleaned_paths:
-            mower_x += _MOWER_ICON_OFFSET_X
-            mower_y += _MOWER_ICON_OFFSET_Y
+        mower_x, mower_y = _marker_position(
+            mower_position,
+            projection,
+            apply_visual_offset=not include_cleaned_paths,
+        )
         elements.append(
             _render_mower(
                 mower_x,
@@ -148,6 +157,22 @@ def _render_points(
     projection: _Projection,
 ) -> str:
     return " ".join(f"{x:.2f},{y:.2f}" for x, y in map(projection.point, points))
+
+
+def _marker_position(
+    position: Point,
+    projection: _Projection,
+    *,
+    apply_visual_offset: bool,
+) -> tuple[float, float]:
+    x, y = projection.point(position)
+    if apply_visual_offset:
+        x += _MARKER_VISUAL_OFFSET_X
+        y += _MARKER_VISUAL_OFFSET_Y
+    return (
+        min(max(x, _MARKER_HALF_WIDTH), _WIDTH - _MARKER_HALF_WIDTH),
+        min(max(y, _MARKER_HALF_HEIGHT), _HEIGHT - _MARKER_HALF_HEIGHT),
+    )
 
 
 def _render_mower(x: float, y: float, *, is_live: bool) -> str:
