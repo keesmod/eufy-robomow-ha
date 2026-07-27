@@ -40,6 +40,7 @@ def _snapshot() -> MapSnapshot:
         ),
         cleaned_paths=((Point(10, 10), Point(20, 10)),),
         mower_position=Point(45, 50),
+        tracking_position=Point(20, 10),
     )
 
 
@@ -63,7 +64,13 @@ def test_render_map_svg_hides_historical_cleaned_path_by_default() -> None:
 
 
 def test_render_map_svg_can_show_current_cleaned_path() -> None:
-    assert b'class="cleaned-path"' in render_map_svg(
+    rendered = render_map_svg(
         _snapshot(),
         include_cleaned_paths=True,
     )
+
+    assert b'class="cleaned-area" clip-path="url(#mowing-boundary-clip)"' in rendered
+    assert b'class="cleaned-path"' in rendered
+    assert b'class="charging-station"' in rendered
+    assert b"scale(.75)" in rendered
+    assert b'class="mower-lightning"' not in rendered

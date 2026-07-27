@@ -6,7 +6,9 @@ import pytest
 
 from custom_components.eufy_robomow.map import (
     MapDecodeError,
+    MapSnapshot,
     Point,
+    merge_live_snapshots,
     parse_map_snapshot,
 )
 
@@ -37,8 +39,9 @@ def test_parse_map_snapshot_builds_confirmed_geometry() -> None:
     assert len(snapshot.base_areas) == 1
     assert len(snapshot.no_go_areas) == 1
     assert len(snapshot.pathways) == 1
-    assert tuple(map(len, snapshot.cleaned_paths)) == (2, 2, 1)
+    assert tuple(map(len, snapshot.cleaned_paths)) == (2,)
     assert snapshot.mower_position == Point(9, 10)
+    assert snapshot.tracking_position == Point(200, 200)
 
 
 def test_parse_map_snapshot_falls_back_to_navigation_position() -> None:
@@ -49,6 +52,87 @@ def test_parse_map_snapshot_falls_back_to_navigation_position() -> None:
     )
 
     assert snapshot.mower_position == Point(11, 12)
+
+
+def test_parse_map_snapshot_keeps_sparse_straight_mowing_pass_connected() -> None:
+    clean_path = b"".join(
+        message(7, message(1, point(x, y))) for x, y in ((100, -5000), (100, 1000))
+    )
+
+    snapshot = parse_map_snapshot(
+        map_payload(),
+        clean_path,
+        point(11, 12, x_field=2, y_field=3),
+    )
+
+    assert snapshot.cleaned_paths == (
+        (
+            Point(100, -5000),
+            Point(100, 1000),
+        ),
+    )
+    assert snapshot.tracking_position == Point(100, 1000)
+
+
+def test_merge_live_snapshots_accumulates_unique_coverage_and_latest_position() -> None:
+    shared = Point(20, 20)
+    previous = MapSnapshot(
+        map_id=539,
+        boundary=(Point(0, 0), Point(100, 0), Point(0, 100)),
+        base_areas=(),
+        no_go_areas=(),
+        pathways=(),
+        cleaned_paths=((Point(10, 10), shared),),
+        mower_position=Point(5, 5),
+        tracking_position=shared,
+    )
+    current = MapSnapshot(
+        map_id=539,
+        boundary=previous.boundary,
+        base_areas=(),
+        no_go_areas=(),
+        pathways=(),
+        cleaned_paths=(
+            (shared, Point(10, 10)),
+            (shared, Point(30, 30)),
+        ),
+        mower_position=Point(5, 5),
+        tracking_position=Point(30, 30),
+    )
+
+    merged = merge_live_snapshots(previous, current)
+
+    assert merged.cleaned_paths == (
+        (
+            Point(10, 10),
+            shared,
+            Point(30, 30),
+        ),
+    )
+    assert merged.tracking_position == Point(30, 30)
+
+
+def test_merge_live_snapshots_resets_when_map_changes() -> None:
+    previous = MapSnapshot(
+        map_id=539,
+        boundary=(Point(0, 0), Point(100, 0), Point(0, 100)),
+        base_areas=(),
+        no_go_areas=(),
+        pathways=(),
+        cleaned_paths=((Point(10, 10), Point(20, 20)),),
+        mower_position=None,
+    )
+    current = MapSnapshot(
+        map_id=540,
+        boundary=previous.boundary,
+        base_areas=(),
+        no_go_areas=(),
+        pathways=(),
+        cleaned_paths=(),
+        mower_position=None,
+    )
+
+    assert merge_live_snapshots(previous, current) is current
 
 
 def test_parse_map_snapshot_rejects_missing_boundary() -> None:

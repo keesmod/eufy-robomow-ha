@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from math import hypot
-from statistics import median
+from dataclasses import dataclass, replace
 
 _MAX_VARINT_BYTES = 10
 
@@ -32,6 +30,7 @@ class MapSnapshot:
     pathways: tuple[tuple[Point, ...], ...]
     cleaned_paths: tuple[tuple[Point, ...], ...]
     mower_position: Point | None
+    tracking_position: Point | None = None
 
 
 ProtoValue = int | bytes
@@ -77,7 +76,7 @@ def parse_map_snapshot(
 
         map_id = _required_integer(map_record, 16, "map identifier")
         boundary = _decode_boundary(map_record)
-        cleaned_paths = _decode_cleaned_paths(clean_path)
+        cleaned_paths, tracking_position = _decode_cleaned_paths(clean_path)
 
         mower_messages = map_record.messages(8)
         mower_position = (
@@ -128,6 +127,26 @@ def parse_map_snapshot(
         pathways=pathways,
         cleaned_paths=cleaned_paths,
         mower_position=mower_position,
+        tracking_position=tracking_position,
+    )
+
+
+def merge_live_snapshots(
+    previous: MapSnapshot,
+    current: MapSnapshot,
+) -> MapSnapshot:
+    """Accumulate deduplicated mowing coverage from consecutive live deltas."""
+    if previous.map_id != current.map_id:
+        return current
+
+    cleaned_paths = _unique_coverage_segments(
+        previous.cleaned_paths,
+        current.cleaned_paths,
+    )
+    return replace(
+        current,
+        cleaned_paths=cleaned_paths,
+        tracking_position=current.tracking_position or previous.tracking_position,
     )
 
 
@@ -192,52 +211,63 @@ def _decode_boundary(map_record: _ProtoMessage) -> tuple[Point, ...]:
 
 def _decode_cleaned_paths(
     clean_path: _ProtoMessage,
-) -> tuple[tuple[Point, ...], ...]:
-    decoded: list[tuple[Point, int]] = []
+) -> tuple[tuple[tuple[Point, ...], ...], Point | None]:
+    """Separate mowing coverage from transport and pose events."""
+    segments: list[tuple[Point, ...]] = []
+    current: list[Point] = []
+    tracking_position: Point | None = None
+
     for path_item in clean_path.messages(7):
         point_messages = path_item.messages(1)
         if not point_messages:
             continue
         point = _decode_position(point_messages[-1], allow_omitted_zero=True)
-        if point is not None:
-            decoded.append((point, path_item.integer(2, default=0) or 0))
+        if point is None:
+            continue
 
-    same_event_distances = [
-        hypot(current.x - previous.x, current.y - previous.y)
-        for (previous, previous_event), (current, current_event) in zip(
-            decoded,
-            decoded[1:],
-            strict=False,
-        )
-        if current_event == previous_event
-    ]
-    typical_distance = median(same_event_distances) if same_event_distances else 0
-    maximum_contiguous_distance = max(typical_distance * 4, 1)
+        tracking_position = point
+        path_event = path_item.integer(2, default=0) or 0
+        if path_event != 0:
+            if current:
+                segments.append(tuple(current))
+                current = []
+            continue
 
-    segments: list[list[Point]] = []
-    current_segment: list[Point] = []
-    previous_event: int | None = None
+        current.append(point)
 
-    for point, path_event in decoded:
-        distance = (
-            hypot(
-                point.x - current_segment[-1].x,
-                point.y - current_segment[-1].y,
-            )
-            if current_segment
-            else 0
-        )
-        if current_segment and (
-            path_event != previous_event or distance > maximum_contiguous_distance
-        ):
-            segments.append(current_segment)
-            current_segment = []
-        current_segment.append(point)
-        previous_event = path_event
+    if current:
+        segments.append(tuple(current))
+    return tuple(segments), tracking_position
 
-    if current_segment:
-        segments.append(current_segment)
-    return tuple(tuple(segment) for segment in segments)
+
+def _unique_coverage_segments(
+    *path_groups: tuple[tuple[Point, ...], ...],
+) -> tuple[tuple[Point, ...], ...]:
+    """Return stable continuous paths without duplicate coverage."""
+    merged: list[list[Point]] = []
+    seen: set[tuple[tuple[int, int], tuple[int, int]]] = set()
+
+    for paths in path_groups:
+        for path in paths:
+            for start, end in zip(path, path[1:], strict=False):
+                if start == end:
+                    continue
+                start_key = (start.x, start.y)
+                end_key = (end.x, end.y)
+                key = (
+                    (start_key, end_key)
+                    if start_key <= end_key
+                    else (end_key, start_key)
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                if merged and merged[-1][-1] == start:
+                    merged[-1].append(end)
+                else:
+                    merged.append([start, end])
+
+    return tuple(tuple(path) for path in merged)
 
 
 def _decode_nested_polygon(

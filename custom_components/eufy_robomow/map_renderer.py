@@ -43,16 +43,38 @@ def render_map_svg(
         if any(not _point_in_polygon(point, snapshot.boundary) for point in pathway)
     )
     cleaned_paths = snapshot.cleaned_paths if include_cleaned_paths else ()
+    mower_position = _rendered_mower_position(
+        snapshot,
+        cleaned_paths=cleaned_paths,
+        include_cleaned_paths=include_cleaned_paths,
+    )
+    station_position = snapshot.mower_position if include_cleaned_paths else None
     projection = _projection(
         _visible_points(
             snapshot,
             pathways=pathways,
             cleaned_paths=cleaned_paths,
+            mower_position=mower_position,
+            station_position=station_position,
         )
     )
-    elements = [
-        f'<polygon class="boundary" points="{_render_points(snapshot.boundary, projection)}" />'
+    rendered_boundary = _render_points(snapshot.boundary, projection)
+    definitions = [
+        '<clipPath id="mowing-boundary-clip">'
+        f'<polygon points="{rendered_boundary}" />'
+        "</clipPath>"
     ]
+    elements = [f'<polygon class="boundary" points="{rendered_boundary}" />']
+
+    rendered_cleaned_paths = "\n      ".join(
+        f'<polyline class="cleaned-path" points="{_render_points(path, projection)}" />'
+        for path in cleaned_paths
+    )
+    if rendered_cleaned_paths:
+        elements.append(
+            '<g class="cleaned-area" clip-path="url(#mowing-boundary-clip)">'
+            f"\n      {rendered_cleaned_paths}\n    </g>"
+        )
 
     elements.extend(
         f'<polygon class="base-area" points="{_render_points(area, projection)}" />'
@@ -66,23 +88,36 @@ def render_map_svg(
         rendered = _render_points(pathway, projection)
         elements.append(f'<polyline class="pathway" points="{rendered}" />')
         elements.append(f'<polyline class="pathway-center" points="{rendered}" />')
-    elements.extend(
-        f'<polyline class="cleaned-path" points="{_render_points(path, projection)}" />'
-        for path in cleaned_paths
-    )
 
-    if snapshot.mower_position is not None:
-        mower_x, mower_y = projection.point(snapshot.mower_position)
+    if station_position is not None:
+        station_x, station_y = projection.point(station_position)
         elements.append(
-            _render_mower(
-                mower_x + _MOWER_ICON_OFFSET_X,
-                mower_y + _MOWER_ICON_OFFSET_Y,
+            _render_charging_station(
+                station_x + _MOWER_ICON_OFFSET_X,
+                station_y + _MOWER_ICON_OFFSET_Y,
             )
         )
 
+    if mower_position is not None:
+        mower_x, mower_y = projection.point(mower_position)
+        if not include_cleaned_paths:
+            mower_x += _MOWER_ICON_OFFSET_X
+            mower_y += _MOWER_ICON_OFFSET_Y
+        elements.append(
+            _render_mower(
+                mower_x,
+                mower_y,
+                is_live=include_cleaned_paths,
+            )
+        )
+
+    defs = "\n    ".join(definitions)
     body = "\n    ".join(elements)
     svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{_WIDTH}" height="{_HEIGHT}" viewBox="0 0 {_WIDTH} {_HEIGHT}">
   <title>Eufy mower map {snapshot.map_id}</title>
+  <defs>
+    {defs}
+  </defs>
   <rect class="background" width="{_WIDTH}" height="{_HEIGHT}" />
   <style>
     .background {{ fill: #020505; }}
@@ -91,13 +126,18 @@ def render_map_svg(
     .no-go-area {{ fill: #050607; stroke: #626a74; stroke-width: 2; stroke-linejoin: round; }}
     .pathway {{ fill: none; stroke: #ffbd00; stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; }}
     .pathway-center {{ fill: none; stroke: #fff7cf; stroke-width: 1.5; stroke-dasharray: 8 8; stroke-linecap: round; }}
-    .cleaned-path {{ fill: none; stroke: #d2f85b; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }}
+    .cleaned-area {{ opacity: .58; }}
+    .cleaned-path {{ fill: none; stroke: #82967e; stroke-width: 54; stroke-linecap: round; stroke-linejoin: round; }}
     .mower-shadow {{ fill: #000; opacity: .6; }}
-    .mower-wheel {{ fill: #25292d; stroke: #666d73; stroke-width: 1; }}
-    .mower-body {{ fill: #4a4f54; stroke: #d6d9dc; stroke-width: 1.5; }}
-    .mower-panel {{ fill: #24282b; stroke: #787f84; stroke-width: 1; }}
+    .mower-wheel {{ fill: #25292d; stroke: #747b80; stroke-width: 1; }}
+    .mower-body {{ fill: #8e9498; stroke: #eceff1; stroke-width: 1.5; }}
+    .mower-panel {{ fill: #d1d4d6; stroke: #61676b; stroke-width: 1; }}
     .mower-accent {{ fill: #e34c56; }}
     .mower-lightning {{ fill: #39f27d; }}
+    .station-shadow {{ fill: #000; opacity: .55; }}
+    .station-body {{ fill: #353a3f; stroke: #5c646a; stroke-width: 1.5; }}
+    .station-top {{ fill: #484f55; }}
+    .station-lightning {{ fill: #f4f7f8; }}
   </style>
   <g>
     {body}
@@ -114,16 +154,47 @@ def _render_points(
     return " ".join(f"{x:.2f},{y:.2f}" for x, y in map(projection.point, points))
 
 
-def _render_mower(x: float, y: float) -> str:
-    return f"""<g class="mower-marker" transform="translate({x:.2f} {y:.2f})">
+def _render_mower(x: float, y: float, *, is_live: bool) -> str:
+    scale = " scale(.75)" if is_live else ""
+    lightning = (
+        ""
+        if is_live
+        else '<path class="mower-lightning" d="M 2 7 L -5 16 L 0 16 L -3 23 L 7 12 L 2 12 Z" />'
+    )
+    return f"""<g class="mower-marker" transform="translate({x:.2f} {y:.2f}){scale}">
       <ellipse class="mower-shadow" cx="0" cy="3" rx="17" ry="25" />
       <rect class="mower-wheel" x="-17" y="-14" width="5" height="29" rx="2" />
       <rect class="mower-wheel" x="12" y="-14" width="5" height="29" rx="2" />
       <path class="mower-body" d="M -11 -20 Q 0 -25 11 -20 L 13 15 Q 0 23 -13 15 Z" />
       <rect class="mower-panel" x="-7" y="-14" width="14" height="22" rx="4" />
       <rect class="mower-accent" x="-2" y="-19" width="4" height="8" rx="2" />
-      <path class="mower-lightning" d="M 2 7 L -5 16 L 0 16 L -3 23 L 7 12 L 2 12 Z" />
+      {lightning}
     </g>"""
+
+
+def _render_charging_station(x: float, y: float) -> str:
+    return f"""<g class="charging-station" transform="translate({x:.2f} {y:.2f})">
+      <ellipse class="station-shadow" cx="0" cy="4" rx="15" ry="24" />
+      <path class="station-body" d="M -11 -19 Q 0 -22 11 -19 L 10 19 Q 0 23 -10 19 Z" />
+      <path class="station-top" d="M -8 -15 Q 0 -18 8 -15 L 7 -8 Q 0 -11 -7 -8 Z" />
+      <path class="station-lightning" d="M 2 -3 L -5 7 L 0 7 L -3 15 L 7 4 L 2 4 Z" />
+    </g>"""
+
+
+def _rendered_mower_position(
+    snapshot: MapSnapshot,
+    *,
+    cleaned_paths: tuple[tuple[Point, ...], ...],
+    include_cleaned_paths: bool,
+) -> Point | None:
+    if include_cleaned_paths:
+        if snapshot.tracking_position is not None:
+            return snapshot.tracking_position
+        for path in reversed(cleaned_paths):
+            if path:
+                return path[-1]
+        return None
+    return snapshot.mower_position
 
 
 def _point_in_polygon(point: Point, polygon: tuple[Point, ...]) -> bool:
@@ -147,6 +218,8 @@ def _visible_points(
     *,
     pathways: tuple[tuple[Point, ...], ...],
     cleaned_paths: tuple[tuple[Point, ...], ...],
+    mower_position: Point | None,
+    station_position: Point | None,
 ) -> tuple[Point, ...]:
     geometry = (
         snapshot.boundary,
@@ -156,8 +229,10 @@ def _visible_points(
         *cleaned_paths,
     )
     points = tuple(point for item in geometry for point in item)
-    if snapshot.mower_position is not None:
-        points += (snapshot.mower_position,)
+    if mower_position is not None:
+        points += (mower_position,)
+    if station_position is not None:
+        points += (station_position,)
     return points
 
 
