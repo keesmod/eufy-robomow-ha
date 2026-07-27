@@ -21,17 +21,18 @@ from .const import (
     DP_TASK_ACTIVE,
 )
 from .coordinator import EufyMowerCoordinator
+from .map import MapSnapshot, merge_live_snapshots
 from .map_renderer import MAP_CONTENT_TYPE, render_map_svg
 from .map_source import (
     MAP_CACHE_DIRECTORY,
-    MAP_REFRESH_INTERVAL,
+    MAP_STREAM_REFRESH_INTERVAL,
     MapSource,
     MapSourceError,
     MapSourceSettings,
 )
 
 _LOGGER = logging.getLogger(__name__)
-SCAN_INTERVAL = MAP_REFRESH_INTERVAL
+SCAN_INTERVAL = MAP_STREAM_REFRESH_INTERVAL
 
 
 async def async_setup_entry(
@@ -98,6 +99,7 @@ class EufyRobomowMapImage(ImageEntity):
         self._source = source
         self._content: bytes | None = None
         self._render_key: tuple[str, bool] | None = None
+        self._live_snapshot: MapSnapshot | None = None
         self._attr_unique_id = f"{entry.data[CONF_DEVICE_ID]}_map"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.data[CONF_DEVICE_ID])},
@@ -127,13 +129,26 @@ class EufyRobomowMapImage(ImageEntity):
 
     async def async_update(self) -> None:
         """Fetch and render the latest valid map."""
+        include_cleaned_paths = bool(self._coordinator.data.get(DP_TASK_ACTIVE, False))
         try:
-            loaded = await self._source.async_refresh()
+            loaded = await self._source.async_refresh(
+                streaming=include_cleaned_paths,
+            )
         except MapSourceError as exc:
             _LOGGER.debug("E15 map is not available yet: %s", exc)
             return
 
-        include_cleaned_paths = bool(self._coordinator.data.get(DP_TASK_ACTIVE, False))
+        if include_cleaned_paths:
+            snapshot = (
+                merge_live_snapshots(self._live_snapshot, loaded.snapshot)
+                if self._live_snapshot is not None
+                else loaded.snapshot
+            )
+            self._live_snapshot = snapshot
+        else:
+            snapshot = loaded.snapshot
+            self._live_snapshot = None
+
         render_key = (loaded.snapshot_id, include_cleaned_paths)
         if render_key == self._render_key:
             return
@@ -141,7 +156,7 @@ class EufyRobomowMapImage(ImageEntity):
         self._content = await self._hass.async_add_executor_job(
             partial(
                 render_map_svg,
-                loaded.snapshot,
+                snapshot,
                 include_cleaned_paths=include_cleaned_paths,
             )
         )

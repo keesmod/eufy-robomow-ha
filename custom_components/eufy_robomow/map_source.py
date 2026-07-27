@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import time
 import uuid
 from urllib.parse import urlsplit
 from zipfile import ZIP_STORED, BadZipFile, ZipFile, ZipInfo
@@ -26,6 +27,10 @@ from .map import MapDecodeError, MapSnapshot, parse_map_snapshot
 MAP_BUNDLE_CONTENT_TYPE = "application/vnd.eufy-robomow-map+zip"
 MAP_CACHE_DIRECTORY = "eufy_robomow_maps"
 MAP_REFRESH_INTERVAL = timedelta(minutes=5)
+MAP_STREAM_REFRESH_INTERVAL = timedelta(seconds=2)
+MAP_MODE_HEADER = "X-Eufy-Map-Mode"
+MAP_MODE_IDLE = "idle"
+MAP_MODE_STREAM = "stream"
 
 _MAP_FILENAME = "map.bin.stream"
 _CLEAN_PATH_FILENAME = "cleanPath.bin.stream"
@@ -151,6 +156,10 @@ class MapSource:
         self._cache_file = cache_file
         self._current: LoadedMap | None = None
         self._last_error: str | None = None
+        self._last_attempt: float | None = None
+        self._consecutive_failures = 0
+        self._streaming = False
+        self._etag: str | None = None
 
     @property
     def status(self) -> MapSourceStatus:
@@ -169,10 +178,28 @@ class MapSource:
             last_error=self._last_error,
         )
 
-    async def async_refresh(self) -> LoadedMap:
+    async def async_refresh(self, *, streaming: bool = False) -> LoadedMap:
         """Fetch the latest bundle, falling back to the cached valid map."""
+        now = time.monotonic()
+        mode_changed = streaming != self._streaming
+        self._streaming = streaming
+        if (
+            not mode_changed
+            and self._current is not None
+            and self._last_attempt is not None
+            and now - self._last_attempt < self._next_refresh_delay(streaming)
+        ):
+            return self._current
+        self._last_attempt = now
+
         try:
-            encoded = await self._async_fetch()
+            encoded = await self._async_fetch(streaming=streaming)
+            if encoded is None:
+                if self._current is None:
+                    raise MapSourceError("Map source returned no initial snapshot")
+                self._last_error = None
+                self._consecutive_failures = 0
+                return self._current
             loaded = await self._hass.async_add_executor_job(
                 decode_map_bundle,
                 encoded,
@@ -187,6 +214,7 @@ class MapSource:
                 )
             self._current = loaded
             self._last_error = None
+            self._consecutive_failures = 0
             return loaded
         except (
             aiohttp.ClientError,
@@ -195,6 +223,7 @@ class MapSource:
             MapSourceError,
             OSError,
         ) as exc:
+            self._consecutive_failures += 1
             self._last_error = _safe_error_message(exc)
 
         if self._current is not None:
@@ -217,21 +246,35 @@ class MapSource:
             ) from exc
         return self._current
 
-    async def _async_fetch(self) -> bytes:
+    def _next_refresh_delay(self, streaming: bool) -> float:
+        interval = (
+            MAP_STREAM_REFRESH_INTERVAL if streaming else MAP_REFRESH_INTERVAL
+        ).total_seconds()
+        if not self._consecutive_failures:
+            return interval
+        return max(interval, min(2**self._consecutive_failures, 60))
+
+    async def _async_fetch(self, *, streaming: bool) -> bytes | None:
         session = async_get_clientsession(self._hass)
         ssl: bool | aiohttp.Fingerprint = True
         if self._settings.certificate_fingerprint is not None:
             ssl = aiohttp.Fingerprint(self._settings.certificate_fingerprint)
 
+        headers = {
+            "Authorization": f"Bearer {self._settings.access_token}",
+            "Accept": MAP_BUNDLE_CONTENT_TYPE,
+            MAP_MODE_HEADER: MAP_MODE_STREAM if streaming else MAP_MODE_IDLE,
+        }
+        if self._etag is not None:
+            headers["If-None-Match"] = self._etag
         async with session.get(
             f"{self._settings.base_url}/v1/map",
-            headers={
-                "Authorization": f"Bearer {self._settings.access_token}",
-                "Accept": MAP_BUNDLE_CONTENT_TYPE,
-            },
+            headers=headers,
             ssl=ssl,
             timeout=_REQUEST_TIMEOUT,
         ) as response:
+            if response.status == 304:
+                return None
             if response.status == 401:
                 raise MapSourceError("Map source rejected authentication")
             if response.status == 503:
@@ -254,6 +297,9 @@ class MapSource:
             encoded = await response.content.read(_MAX_BUNDLE_SIZE + 1)
             if len(encoded) > _MAX_BUNDLE_SIZE:
                 raise MapSourceError("Map source response exceeds 16 MiB")
+            etag = response.headers.get("ETag")
+            if etag and len(etag) <= 256 and "\n" not in etag and "\r" not in etag:
+                self._etag = etag
             return encoded
 
 

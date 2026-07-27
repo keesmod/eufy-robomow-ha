@@ -88,8 +88,9 @@ Configure**:
 
 Authentication is derived from the mower's existing local key; no additional
 token is stored. The source must expose `GET /v1/map` with content type
-`application/vnd.eufy-robomow-map+zip`. The stored ZIP contains a manifest and
-exactly these three files:
+`application/vnd.eufy-robomow-map+zip`, support `ETag` responses, and use the
+`X-Eufy-Map-Mode` request header (`idle` or `stream`) to control its read-only
+P2P session. The stored ZIP contains a manifest and exactly these three files:
 
 - `map.bin.stream`
 - `cleanPath.bin.stream`
@@ -98,8 +99,11 @@ exactly these three files:
 Home Assistant validates the archive, device binding, sizes, hashes, protobuf
 and boundary before displaying it. One latest-good bundle is stored privately
 under `/config/eufy_robomow_maps/`. If acquisition fails, the previous valid map
-remains available. Clear the source URL to remove the map entity; no mower
-setting or geometry is changed.
+remains available. Idle maps refresh every five minutes. During an active mowing
+task, Home Assistant requests changed stream snapshots every two seconds,
+accumulates and deduplicates coverage deltas, and renders the newest mower pose.
+Clear the source URL to remove the map entity; no mower setting or geometry is
+changed.
 
 Map bundles contain private lawn geometry. Never commit them, attach them to an
 issue or include them in diagnostics.
@@ -111,7 +115,9 @@ issue or include them in diagnostics.
 - **Local polling** (every 10 s) via the [Tuya local protocol](https://github.com/jasonacox/tinytuya) for real-time status (battery, activity state, etc.).
 - **Cloud polling** (every 5 min) via the Tuya mobile API for settings stored as protobuf blobs in DP155.
 - **Writes**, when control is explicitly enabled, go to either the local mower or the cloud API depending on the setting.
-- **Optional map polling** (every 5 min) consumes one authenticated, validated HTTPS bundle and renders it locally as a script-free SVG.
+- **Optional map acquisition** uses five-minute idle snapshots and two-second
+  `ETag`-aware live pulls while mowing, then renders the validated geometry
+  locally as a script-free SVG.
 
 ---
 

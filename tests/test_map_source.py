@@ -179,8 +179,10 @@ class _StaticMapSource(MapSource):
     def __init__(self, *args, response: bytes | BaseException, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._response = response
+        self.streaming_requests: list[bool] = []
 
-    async def _async_fetch(self) -> bytes:
+    async def _async_fetch(self, *, streaming: bool) -> bytes:
+        self.streaming_requests.append(streaming)
         if isinstance(self._response, BaseException):
             raise self._response
         return self._response
@@ -212,6 +214,23 @@ def test_map_source_publishes_successful_bundle(tmp_path: Path) -> None:
     assert loaded.snapshot.map_id == 539
     assert source.status.state == "healthy"
     assert read_cached_bundle(cache_file) == encoded
+
+
+def test_map_source_throttles_idle_and_switches_to_streaming(tmp_path: Path) -> None:
+    source = _StaticMapSource(
+        cast(HomeAssistant, _FakeHass()),
+        settings=_settings(),
+        device_id=_DEVICE_ID,
+        cache_file=tmp_path / "latest.mapbundle",
+        response=_bundle(),
+    )
+
+    asyncio.run(source.async_refresh())
+    asyncio.run(source.async_refresh())
+    asyncio.run(source.async_refresh(streaming=True))
+    asyncio.run(source.async_refresh(streaming=True))
+
+    assert source.streaming_requests == [False, True]
 
 
 def test_map_source_retains_cached_map_after_transport_failure(
