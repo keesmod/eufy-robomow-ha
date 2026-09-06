@@ -10,7 +10,8 @@
     "tinytuya==1.20.0"
   ],
   "dependencies": [
-    "frontend"
+    "frontend",
+    "http"
   ],
   "codeowners": [
     "@keesmod"
