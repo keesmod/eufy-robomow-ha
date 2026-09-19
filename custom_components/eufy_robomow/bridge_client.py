@@ -1,9 +1,11 @@
 """Authenticated client for the dedicated mower bridge (bridge/ in this repository).
 
-The bridge serves contract 1 of ``GET /v1/state``, ``GET /v1/mowers`` and
-``GET /v1/mowers/{id}/state``. This client validates the connection settings,
-bounds every request and reduces failures to stable codes without upstream
-detail. It never logs the token or a document.
+The bridge serves contract 1 of ``GET /v1/state``, ``GET /v1/mowers``,
+``GET /v1/mowers/{id}/state`` and, in its ``control`` mode, one opt-in
+``POST /v1/mowers/{id}/commands/{start|pause|resume}``. This client validates the
+connection settings, bounds every request and reduces failures to stable codes
+without upstream detail. It never logs the token or a document, and it never
+retries: a command request is sent exactly once.
 """
 
 from __future__ import annotations
@@ -33,6 +35,38 @@ _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _ERROR_CODE_PATTERN = re.compile(r"^[a-z0-9_]{1,64}$")
 _MAX_BODY_SIZE = 256 * 1024
 _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15, connect=5)
+# A command answers after the bridge's connect time plus its read-back bound, at
+# most 60 seconds, so its request may take far longer than a state query.
+_COMMAND_TIMEOUT = aiohttp.ClientTimeout(total=75, connect=5)
+# The command classes bridge 0.5.0 routes. ``return`` is refused by the bridge
+# with ``command_unsupported`` because the owned E15 firmware ignores its write.
+COMMAND_CLASSES = frozenset({"start", "pause", "resume"})
+_COMMAND_RESULTS = frozenset({"confirmed", "failed", "uncertain"})
+# Codes the bridge, the library or this client raise before any frame is written.
+# Every other failure of a command request leaves the write uncertain.
+_REFUSED_BEFORE_WRITE = frozenset(
+    {
+        "control_disabled",
+        "not_found",
+        "invalid_mower_id",
+        "unknown_mower",
+        "command_unsupported",
+        "command_in_progress",
+        "telemetry_stale",
+        "mower_host_unconfigured",
+        "bridge_not_running",
+        "authentication_required",
+        "mower_request_failed",
+        "mower_local_unreachable",
+        "mower_local_authentication_failed",
+        "mower_local_key_invalid",
+        "mower_local_busy",
+        "unauthorized",
+        "cannot_connect",
+        "certificate_mismatch",
+        "certificate_invalid",
+    }
+)
 _NETWORK_KINDS = {
     "wifi": "Wifi",
     "cellular": "Cellular",
@@ -54,6 +88,17 @@ class BridgeClientError(Exception):
         super().__init__(code)
         self.code = code
         self.status = status
+
+
+def refused_before_write(code: str) -> bool:
+    """Whether a failed command request is known to have written nothing.
+
+    The bridge checks mode, class, id, ownership, discovery, host and telemetry
+    age before it touches the library, and the library's ``mower_command_*``
+    refusals happen before any frame. A timeout, a lost transport or an invalid
+    answer says nothing about the write, so those are not listed here.
+    """
+    return code in _REFUSED_BEFORE_WRITE or code.startswith("mower_command_")
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +259,53 @@ def parse_state_document(document: Any, mower_id: str) -> BridgeTelemetry:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class BridgeCommandOutcome:
+    """The parts of one bridge command answer that the integration consumes."""
+
+    # ``confirmed``, ``failed`` or ``uncertain``, the library's outcome unchanged.
+    result: str
+    # The furthest stage evidenced by fresh reports: sent, acknowledged or reflected.
+    stage: str
+    # Why the command ended, for example ``reflected``, ``rejected`` or ``timed_out``.
+    end: str
+    # The activity a fresh report reflected, only when one did.
+    activity: str | None
+    sent_at: str
+
+
+def parse_command_outcome(document: Any, mower_id: str, kind: str) -> BridgeCommandOutcome:
+    """Validate a contract 1 command answer for exactly the command that was sent."""
+    if not isinstance(document, dict):
+        raise BridgeClientError("invalid_document")
+    if (
+        document.get("contract") != STATE_CONTRACT
+        or document.get("id") != mower_id
+        or document.get("command") != kind
+    ):
+        raise BridgeClientError("invalid_document")
+    result = document.get("result")
+    stage = document.get("stage")
+    end = document.get("end")
+    sent_at = document.get("sent_at")
+    if result not in _COMMAND_RESULTS:
+        raise BridgeClientError("invalid_document")
+    if not (isinstance(stage, str) and isinstance(end, str) and isinstance(sent_at, str)):
+        raise BridgeClientError("invalid_document")
+    activity_field = document.get("activity")
+    activity: str | None = None
+    if activity_field is not None:
+        if not isinstance(activity_field, dict) or not isinstance(activity_field.get("value"), str):
+            raise BridgeClientError("invalid_document")
+        activity = activity_field["value"]
+    if result == "confirmed" and activity is None:
+        # Confirmed means a fresh report reflected the expected activity.
+        raise BridgeClientError("invalid_document")
+    return BridgeCommandOutcome(
+        result=result, stage=stage, end=end, activity=activity, sent_at=sent_at
+    )
+
+
 def resolve_mower_id(discovery: Any, configured: str | None) -> str:
     """Pick the mower this entry owns from a contract 1 discovery document."""
     if not isinstance(discovery, dict) or not isinstance(discovery.get("mowers"), list):
@@ -235,7 +327,7 @@ def resolve_mower_id(discovery: Any, configured: str | None) -> str:
 
 
 class BridgeClient:
-    """Read-only bridge access over Home Assistant's shared aiohttp session."""
+    """Bridge access over Home Assistant's shared aiohttp session, one request per call."""
 
     def __init__(self, hass: HomeAssistant, settings: BridgeSettings) -> None:
         self._hass = hass
@@ -262,7 +354,28 @@ class BridgeClient:
             raise BridgeClientError("invalid_mower_id")
         return await self._async_get(f"/v1/mowers/{mower_id}/state")
 
+    async def async_send_command(self, mower_id: str, kind: str) -> BridgeCommandOutcome:
+        """Send one opt-in command exactly once and return the library's outcome.
+
+        The request carries no body. A ``BridgeClientError`` whose code passes
+        :func:`refused_before_write` wrote nothing, any other failure leaves the
+        write uncertain and the caller must never repeat it blindly.
+        """
+        if not _MOWER_ID_PATTERN.fullmatch(mower_id):
+            raise BridgeClientError("invalid_mower_id")
+        if kind not in COMMAND_CLASSES:
+            raise BridgeClientError("command_unsupported")
+        document = await self._async_request(
+            "POST", f"/v1/mowers/{mower_id}/commands/{kind}", _COMMAND_TIMEOUT
+        )
+        return parse_command_outcome(document, mower_id, kind)
+
     async def _async_get(self, path: str) -> dict[str, Any]:
+        return await self._async_request("GET", path, _REQUEST_TIMEOUT)
+
+    async def _async_request(
+        self, method: str, path: str, timeout: aiohttp.ClientTimeout
+    ) -> dict[str, Any]:
         session = async_get_clientsession(self._hass)
         ssl: bool | aiohttp.Fingerprint = True
         if self._settings.certificate_fingerprint is not None:
@@ -272,11 +385,12 @@ class BridgeClient:
             "Accept": "application/json",
         }
         try:
-            async with session.get(
+            async with session.request(
+                method,
                 f"{self._settings.base_url}{path}",
                 headers=headers,
                 ssl=ssl,
-                timeout=_REQUEST_TIMEOUT,
+                timeout=timeout,
             ) as response:
                 if (
                     response.content_length is not None
