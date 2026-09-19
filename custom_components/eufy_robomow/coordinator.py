@@ -61,6 +61,9 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
     backend: str = BACKEND_LOCAL
     bridge: BridgeClient | None = None
     bridge_mower_id: str | None = None
+    # The library's status field state from the last successful bridge poll
+    # (reported, missing, invalid or unconfirmed) and the reported activity.
+    bridge_status: str | None = None
     bridge_activity: str | None = None
     bridge_error: str | None = None
 
@@ -92,6 +95,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self.backend = backend
         self.bridge = bridge
         self.bridge_mower_id = bridge_mower_id
+        self.bridge_status = None
         self.bridge_activity = None
         self.bridge_error = None
         if backend == BACKEND_BRIDGE and (bridge is None or not bridge_mower_id):
@@ -354,6 +358,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             self.bridge_error = telemetry.error or "stale"
             raise UpdateFailed(f"Mower bridge lost mower data: {self.bridge_error}")
         self.bridge_error = None
+        self.bridge_status = telemetry.status
         self.bridge_activity = telemetry.activity
         self.local_generation += 1
         self.last_local_update = telemetry.observed_at
