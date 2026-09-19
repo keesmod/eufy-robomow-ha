@@ -7,9 +7,11 @@ own configuration, credentials, session file, private HTTP endpoint and
 lifecycle. It works with no camera bridge, camera credentials or camera
 repository present, and the camera bridge in `ha-eufy-cam` works without it.
 
-Version 0.2.0 adds the first read-only routes from issue #17 on the lifecycle
+Version 0.2.0 added the first read-only routes from issue #17 on the lifecycle
 foundation from issue #12: discovery of the account's E15 mowers and one typed
-state query per mower over the LAN. It issues no mower command.
+state query per mower over the LAN. Version 0.3.0 adds the container image,
+the local Home Assistant app candidate and the health check from issue #23.
+It issues no mower command.
 
 ## What it does
 
@@ -47,8 +49,9 @@ state query per mower over the LAN. It issues no mower command.
   confirms them. Nothing is inferred from age or absence.
 - No captcha or verification flow. Those authentication states are reported
   but cannot be answered through this version.
-- No container image or Home Assistant app packaging. No connection from the
-  Python integration, which still uses its own local backend.
+- No published image and no app repository listing. The image and the app
+  candidate are built locally, see the
+  [deployment guide](../docs/bridge-deployment.md).
 
 The follow-up order is recorded in issue #12.
 
@@ -191,6 +194,13 @@ npm ci --ignore-scripts
 npm run build
 EUFY_MOWER_BRIDGE_TOKEN=… EUFY_MOWER_EMAIL=… EUFY_MOWER_PASSWORD=… EUFY_MOWER_COUNTRY=NL EUFY_MOWER_DATA_DIR=/private/eufy-mower npm start
 ```
+
+As a container, `docker build -t eufy-mower-bridge ./bridge` produces the
+pinned Node 24 image with a health check. `node dist/healthcheck.js` loads the
+same configuration, calls the state route on loopback and exits 0 only while
+the bridge reports `running`. The [deployment guide](../docs/bridge-deployment.md)
+covers Docker, the local Home Assistant app candidate under `ha_app/`, upgrade,
+backup and rollback.
 
 Exit codes: `78` for an invalid configuration, `1` for a failed startup or an
 incomplete shutdown, `0` after a clean stop. Shutdown waits at most 15 seconds
