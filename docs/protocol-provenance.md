@@ -48,7 +48,7 @@ version 0.8.1.
 The mower declares DP 107 `robot_status` as a raw data point. Library
 `@keesmod/eufy-mega-client` 0.16.0, pinned by the mower bridge to the release
 tarball with SHA-256
-`RELEASE_SHA256_0_16_0` from source commit
+`021186b38ff4d4c058e7e0f8406214737a61e5b9248235556bf6affd3180d184` from source commit
 `f29df02eabba4376a9f7c9ba031a013fef7686cb`, confirms three payloads on the
 owned E15 (product code T2880, firmware 6.9.28, Anker eufy app 6.1.00): fields
 1 = 2 and 3 = 1 `mowing`, fields 1 = 2 and 3 = 2 `paused`, and fields 1 = 1 and

@@ -203,7 +203,7 @@ DP 107 payload itself is never served.
 #### E15 activity
 
 `status` is whatever library 0.16.0 reports, unchanged. The library is pinned
-to the release tarball with SHA-256 `RELEASE_SHA256_0_16_0`
+to the release tarball with SHA-256 `021186b38ff4d4c058e7e0f8406214737a61e5b9248235556bf6affd3180d184`
 (source commit `f29df02e`). Its E15 registry confirms three DP 107
 `robot_status` payloads on the owned E15 (T2880, firmware 6.9.28, Anker eufy
 app 6.1.00): fields 1 = 2 and 3 = 1 `mowing`, fields 1 = 2 and 3 = 2 `paused`
