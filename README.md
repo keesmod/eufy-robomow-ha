@@ -9,6 +9,7 @@ adds a dedicated dashboard card, observed session history, confirmed commands
 and an optional Home Assistant planning package. Version 0.8.0 adds an optional
 mower backend that reads state from the dedicated mower bridge. Version 0.8.1
 corrects the Signal Strength sensor to the percentage the mower declares.
+Version 0.8.2 reports the confirmed E15 activity in bridge mode.
 
 ---
 
@@ -120,9 +121,16 @@ failed local poll. Nothing is carried forward.
 Bridge mode is state only today. It exposes no mower controls and creates no
 settings entities, whatever the operating mode, and a write raises a clear
 error. Session history does not grow in bridge mode. Activity comes from the
-library's typed status and stays unknown until the library confirms the E15
-activity contract, so battery, network and signal are the useful values for
-now. Entity unique IDs are unchanged, so switching back and forth never
+library's typed status. With bridge 0.4.0 on library 0.15.0 the mower entity
+reports mowing, paused and returning from the confirmed DP 107 payloads, with
+`telemetry_updated_at` as the observation time. The `bridge_status` attribute
+shows the library's status state: `reported`, `missing` when the query carried
+no DP 107, `invalid` for a withheld payload, or `unconfirmed`. A missing or
+invalid status leaves the activity unknown. No E15 payload identifies docked,
+charging, idle or error yet, so the entity never shows docked in bridge mode
+and nothing is inferred from age, absence or inactivity. Mowing progress stays
+unconfirmed. See [DP 107 activity](docs/protocol-provenance.md#dp-107-activity).
+Entity unique IDs are unchanged, so switching back and forth never
 duplicates or renames entities and no command is replayed on a switch.
 
 ### Mower dashboard and session history
@@ -211,16 +219,19 @@ issue or include them in diagnostics.
 [`bridge/`](bridge/README.md) contains the dedicated Node 24 mower bridge that
 later steps connect to this integration. It consumes
 [`@keesmod/eufy-mega-client`](https://github.com/keesmod/eufy-mega-client)
-0.13.0 as a library, pinned to the exact release tarball, and instantiates only
+0.15.0 as a library, pinned to the exact release tarball, and instantiates only
 the library's mower module. It has its own token, credentials, session file,
 data directory, port and lifecycle, and runs with no camera bridge present.
 
-Version 0.3.0 validates its configuration, keeps one private session, makes one
+Version 0.4.0 validates its configuration, keeps one private session, makes one
 explicit authentication attempt without retries and stops cleanly on `SIGTERM`.
 Its read-only routes are `GET /v1/state`, `GET /v1/mowers` for the discovered
 E15 mowers and `GET /v1/mowers/{id}/state` for one typed local query over the
-LAN with explicit freshness and stale last-good results. Only battery and
-network fields are confirmed in the library today. It starts only in
+LAN with explicit freshness and stale last-good results. Battery, network,
+signal and the E15 activities mowing, paused and returning are confirmed in
+the library today, see [DP 107 activity](docs/protocol-provenance.md#dp-107-activity).
+No E15 payload identifies docked, charging, idle or error and mowing progress
+stays unconfirmed. It starts only in
 `observe_only` and exposes no control, settings or map routes. The Python
 integration consumes it through the optional **bridge** mower backend described
 above, for state only. It ships as a reproducible container image and as a
@@ -249,6 +260,11 @@ protocol tests.
 
 ## Upgrade notes
 
+- **0.8.2, bridge activity.** With mower bridge 0.4.0 on library 0.15.0 the
+  bridge backend reports mowing, paused and returning from the confirmed E15
+  payloads and adds the `bridge_status` attribute. Docked, charging, idle and
+  error have no confirmed payload, so the entity stays unknown between tasks
+  in bridge mode. The local backend is unchanged.
 - **0.8.1, Signal Strength unit.** DP 109 is declared by the mower as a
   percentage from 0 to 100. Earlier versions negated the value and labelled it
   dBm without evidence. The sensor keeps its entity id and now reports the
