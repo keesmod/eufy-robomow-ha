@@ -44,3 +44,7 @@ secrets.yaml
 bridge/node_modules/
 bridge/dist/
 bridge/npm-audit.json
+
+# Home Assistant app candidate build output
+ha_app/node_modules/
+ha_app/dist/
