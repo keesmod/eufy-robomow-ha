@@ -32,5 +32,8 @@ Back up the app and keep the same token when updating. Restarting the app makes
 one new authentication attempt. Details, upgrade and rollback steps are in the
 [deployment guide](https://github.com/keesmod/eufy-robomow-ha/blob/main/docs/bridge-deployment.md).
 
-This version serves state only. It issues no mower command and stays in
-`observe_only`.
+By default this version serves state only and stays in `observe_only`, where
+every command route answers `403`. Setting `operating_mode` to `control` with
+a `control_stop_route` enables the bridge's opt-in start, pause and resume
+routes. The integration does not use them yet. Leave the default unless a
+supervised test with the eufy app at hand is planned.

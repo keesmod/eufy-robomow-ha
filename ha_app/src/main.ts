@@ -48,7 +48,12 @@ async function main(): Promise<number> {
   }
   const address = bridge.address;
   log('info', `${BRIDGE_VERSION} listening on ${address?.address}:${address?.port} ${JSON.stringify(describeConfig(config))}`);
-  log('info', `operating mode ${config.operatingMode}: no mower command is available in this version`);
+  log(
+    'info',
+    config.control
+      ? `operating mode ${config.operatingMode}: start, pause and resume routes enabled, read-back ${config.control.readBackMs} ms, state older than ${config.control.maxStateAgeMs} ms refuses a command`
+      : `operating mode ${config.operatingMode}: every command route answers 403`,
+  );
   const auth = await bridge.connect();
   if (auth.state === 'connected') {
     log('info', 'mower cloud session connected');

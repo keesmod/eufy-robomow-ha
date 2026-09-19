@@ -12,8 +12,12 @@ foundation from issue #12: discovery of the account's E15 mowers and one typed
 state query per mower over the LAN. Version 0.3.0 added the container image,
 the local Home Assistant app candidate and the health check from issue #23.
 Version 0.4.0 pins library 0.15.0, whose E15 registry confirms the DP 107
-activities `mowing`, `paused` and `returning`, so the state route now reports
-`status` for those payloads. It still issues no mower command.
+activities `mowing`, `paused` and `returning`, so the state route reports
+`status` for those payloads. Version 0.5.0 pins library 0.16.0 and adds the
+opt-in control routes from issue #19: `operating_mode: control` with a
+required stop route, and `POST /v1/mowers/{id}/commands/{class}` for `start`,
+`pause` and `resume`. In the default `observe_only` mode nothing changed and
+every command route answers `403`.
 
 ## What it does
 
@@ -23,7 +27,8 @@ activities `mowing`, `paused` and `returning`, so the state route now reports
 - Constructs one library client with only the mower module. Construction makes
   no network request.
 - Listens on a private HTTP port. Every request needs the bearer token, checked
-  in constant time. All routes are `GET` and read-only.
+  in constant time. The read routes are `GET`. The single write route is
+  `POST` and works only in `control` mode.
 - Performs exactly one explicit authentication attempt after listening, then
   one discovery when that succeeded. Results are recorded in the state
   document. Nothing is retried.
@@ -33,17 +38,31 @@ activities `mowing`, `paused` and `returning`, so the state route now reports
 - Answers a state request with one bounded LAN session: open, one typed query,
   close. Concurrent requests for the same mower share that session. After a
   failure the last good result is served as stale with the failure code.
+- In `control` mode, answers a command request with one bounded LAN session
+  after checking on the bridge that the class is routed, the mower is
+  discovered with a configured host, no other command owns it and the last
+  successful state observation is younger than the documented maximum age.
+  The library runs one fresh status query, writes one declared boolean point
+  and reads the lifecycle back from fresh reports. The outcome is served as
+  `confirmed`, `failed` or `uncertain` and is never retried or replayed.
 - Stops on `SIGTERM` or `SIGINT`: cancels an in-flight authentication, closes
   the server and all connections, shuts the library client down and flushes
   files. Startup, authentication and shutdown each have a deadline.
 
 ## What it does not do yet
 
-- No control, settings or map routes. The state document reports
-  `routes.control` and `routes.maps` as `false`.
-- No physical mower control. `operating_mode` accepts only `observe_only` and
-  the bridge refuses to start with any other value. No route can write to the
-  mower.
+- No settings or map routes. The state document reports `routes.maps` as
+  `false`.
+- No physical mower control in the default `observe_only` mode. Every command
+  route answers `403 control_disabled` there and never reaches the library.
+  `control` mode needs the explicit stop route opt-in at startup.
+- No `return` route. The library declares `return` over DP 3 `switch_charge`,
+  but the owned E15 on firmware 6.9.28 ignored that write in the library's
+  [command window receipt](https://github.com/keesmod/eufy-mega-client/blob/main/docs/research/E15_COMMAND_WINDOW_2026-09-19.md),
+  so `POST …/commands/return` answers `409 command_unsupported` until the
+  library has a working return route (keesmod/eufy-mega-client#173). The
+  official app remains the return route.
+- No stop, settings, zone or scheduling command.
 - No polling, reconnect or spontaneous report stream. Every LAN session is
   opened by a request and closed after its query.
 - `status` reports only the three confirmed E15 activities. No E15 payload
@@ -75,11 +94,14 @@ may contain only the keys below, as strings or integers, and must stay under
 | `EUFY_MOWER_PORT`             | `port`            | no       | `8090`             | 1 to 65535                                            |
 | `EUFY_MOWER_BIND_ADDRESS`     | `bind_address`    | no       | `127.0.0.1`        | IP address or `localhost`                             |
 | `EUFY_MOWER_DATA_DIR`         | `data_dir`        | no       | `/data/eufy-mower` | Absolute path, private to this bridge                 |
-| `EUFY_MOWER_OPERATING_MODE`   | `operating_mode`  | no       | `observe_only`     | Only `observe_only` is accepted in this version       |
+| `EUFY_MOWER_OPERATING_MODE`   | `operating_mode`  | no       | `observe_only`     | `observe_only` or `control`                            |
 | `EUFY_MOWER_CLOUD_TIMEOUT_MS` | `cloud_timeout_ms`| no       | `15000`            | 1000 to 60000, deadline per Eufy Home or Tuya request |
 | `EUFY_MOWER_LOCAL_TIMEOUT_MS` | `local_timeout_ms`| no       | `5000`             | 1000 to 60000, deadline for connecting and for each LAN query |
 | `EUFY_MOWER_HOST`             | `host`            | no       |                    | LAN address of the mower, used only when exactly one mower is discovered |
 | `EUFY_MOWER_HOSTS`            | `hosts`           | no       |                    | `id=host` pairs separated by commas, or an object of id to host in the file |
+| `EUFY_MOWER_CONTROL_STOP_ROUTE` | `control_stop_route` | in `control` mode | | 1 to 200 printable ASCII characters. The operator's own words for how the mower is stopped when a command misbehaves, for example `pause here, then Stop and Charge in the eufy app`. Passed to the library opt-in, never logged or served |
+| `EUFY_MOWER_CONTROL_MAX_STATE_AGE_MS` | `control_max_state_age_ms` | no | `30000` | 1000 to 300000. A command is refused when the last successful state observation of that mower is older |
+| `EUFY_MOWER_CONTROL_READ_BACK_MS` | `control_read_back_ms` | no | `20000` | 1000 to 60000. How long the library waits for fresh reports after every write |
 
 Mower ids are the opaque 64-character identifiers from `GET /v1/mowers`. They
 are account-scoped and stable while the private session identity is kept. A
@@ -96,8 +118,10 @@ token, the credentials or the session.
 ## Private API
 
 Every request carries `Authorization: Bearer <token>`. A missing or wrong token
-gets `401`, an unknown path `404`, another method `405` and a route failure
-`503` with only a stable code in `{ "error": "…" }`. Responses are never cached.
+gets `401`, an unknown path `404`, another method `405`, a command outside
+`control` mode `403`, a command the bridge refuses before any write `409` and a
+route failure `503`, each with only a stable code in `{ "error": "…" }`.
+Responses are never cached.
 
 ### `GET /v1/state`
 
@@ -107,20 +131,24 @@ Bridge state, for example:
 {
   "protocol": 1,
   "bridge": "eufy-robomow-bridge",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "bridge_id": "00000000-0000-4000-8000-000000000000",
   "lifecycle": "running",
   "operating_mode": "observe_only",
   "auth": { "state": "disconnected", "last_error": "authentication_failed", "attempted_at": "2026-09-19T10:00:00.000Z" },
-  "client": { "package": "@keesmod/eufy-mega-client", "version": "0.15.0", "module": "mowers", "lifecycle": "open", "connected": false },
+  "client": { "package": "@keesmod/eufy-mega-client", "version": "0.16.0", "module": "mowers", "lifecycle": "open", "connected": false },
   "mowers": { "count": null, "discovered_at": null, "error": "authentication_required" },
-  "routes": { "discovery": true, "state": true, "control": false, "maps": false }
+  "routes": { "discovery": true, "state": true, "control": false, "maps": false },
+  "control": null
 }
 ```
 
 `auth.state` is the library's authentication state. `auth.last_error` is the
 stable library or bridge error code of the last explicit attempt, or `null`
-after success. `mowers` summarises the discovery cache.
+after success. `mowers` summarises the discovery cache. In `control` mode
+`routes.control` is `true` and `control` carries the opt-in in effect, for
+example `{ "classes": ["start", "pause", "resume"], "max_state_age_ms": 30000, "read_back_ms": 20000 }`.
+The stop route text is never served.
 
 ### `GET /v1/mowers`
 
@@ -174,9 +202,9 @@ DP 107 payload itself is never served.
 
 #### E15 activity
 
-`status` is whatever library 0.15.0 reports, unchanged. The library is pinned
-to the release tarball with SHA-256 `6037dea4c1cda1f91411e5b888297d9accb33cb8c7cc5b02db6021a1e7c89eeb`
-(source commit `ee1ac36b`). Its E15 registry confirms three DP 107
+`status` is whatever library 0.16.0 reports, unchanged. The library is pinned
+to the release tarball with SHA-256 `RELEASE_SHA256_0_16_0`
+(source commit `f29df02e`). Its E15 registry confirms three DP 107
 `robot_status` payloads on the owned E15 (T2880, firmware 6.9.28, Anker eufy
 app 6.1.00): fields 1 = 2 and 3 = 1 `mowing`, fields 1 = 2 and 3 = 2 `paused`
 and fields 1 = 1 and 3 = 1 `returning`, each reproduced through owner-operated
@@ -208,6 +236,66 @@ response is `503` with the code. Other outcomes: `400 invalid_mower_id`,
 Library codes include `authentication_required`, `mower_protocol_unavailable`,
 `mower_local_unreachable`, `mower_local_authentication_failed`,
 `mower_local_protocol_error`, `request_timeout` and `request_aborted`.
+
+### `POST /v1/mowers/{id}/commands/{class}`
+
+Contract 1. One opt-in command, `control` mode only. The class is `start`,
+`pause` or `resume` in the path. Request bodies are ignored. Every check below
+runs on the bridge before the library is touched, in this order:
+
+| Status | Code                       | Reason                                                                                              |
+| ------ | -------------------------- | --------------------------------------------------------------------------------------------------- |
+| `403`  | `control_disabled`         | The bridge runs in `observe_only`. Nothing else is checked                                          |
+| `404`  | `not_found`                | The class is not one the library declares                                                           |
+| `409`  | `command_unsupported`      | `return`, which the owned firmware does not honour, or a mower that is not an E15                   |
+| `400`  | `invalid_mower_id`         | Not a 64-character id                                                                               |
+| `409`  | `command_in_progress`      | Another command owns this mower. One command per mower at a time                                    |
+| `404`  | `unknown_mower`            | Discovery did not return the id                                                                     |
+| `503`  | `mower_host_unconfigured`  | No LAN host for the id                                                                              |
+| `409`  | `telemetry_stale`          | No successful state query yet, the last one failed, or its observation is older than `control_max_state_age_ms` |
+| `409`  | library `mower_command_*`  | The library refused before any frame was written: `mower_command_undeclared`, `mower_command_evidence_missing`, `mower_command_map_saving` or `mower_command_already_set` |
+| `503`  | library or bridge code     | The session could not be opened or was lost, for example `mower_local_unreachable`, `mower_local_disconnected` or `request_aborted` |
+
+Poll `GET /v1/mowers/{id}/state` first. The freshness check is the age of that
+observation against the bridge clock, the same clock as `age_ms`. The library
+then runs its own fresh status query on the command session before the write.
+A `200` carries the library's outcome:
+
+```json
+{
+  "contract": 1,
+  "id": "<64 hex characters>",
+  "command": "start",
+  "result": "confirmed",
+  "write": { "dp": "1", "code": "switch_go", "value": true },
+  "sent_at": "2026-09-19T16:42:38.199Z",
+  "stage": "reflected",
+  "end": "reflected",
+  "before_observed_at": "2026-09-19T16:42:38.198Z",
+  "reply": { "observed_at": "2026-09-19T16:42:38.202Z", "return_code_zero": true, "rejected": false },
+  "acknowledgement": { "observed_at": "2026-09-19T16:42:39.150Z", "sequence": 63859, "dp": "1" },
+  "activity": { "observed_at": "2026-09-19T16:42:39.351Z", "sequence": 63860, "value": "mowing" },
+  "reports": 3
+}
+```
+
+`result` is `confirmed` when a fresh DP 107 report reflected the expected
+activity (`mowing` for start and resume, `paused` for pause) within the
+read-back bound, `failed` when the device rejected the control frame, and
+`uncertain` when the bound passed (`end: "timed_out"`) or the report limit was
+reached. An uncertain command was written and must never be repeated
+automatically. `stage` is the furthest stage evidenced by fresh reports,
+`sent`, `acknowledged` or `reflected`, and the frame `reply` is not an
+acknowledgement. Raw data points and the reports themselves are never served,
+only their count. The bridge never retries, replays or reconnects, and never
+touches rain or child protection. Dock arrival is not part of any command.
+
+Evidence: the library's
+[command window receipt](https://github.com/keesmod/eufy-mega-client/blob/main/docs/research/E15_COMMAND_WINDOW_2026-09-19.md)
+recorded `start`, `pause` and `resume` reflected within 1.2 seconds on the
+owned E15 (firmware 6.9.28, app 6.1.00). The bridge itself has not been run
+against the mower in `control` mode, that is the hardware acceptance in
+keesmod/eufy-robomow-ha#8.
 
 ## Data directory
 
@@ -253,10 +341,13 @@ permissions, the bearer check, the idle lifecycle, a failed and a successful
 synthetic authentication, bounded and cancelled authentication, a port in use,
 incomplete or overdue shutdown, discovery caching and spacing, and the state
 route's contract, error mapping, single LAN session per mower, stale
-last-good results and cancellation at shutdown. Route tests use the
-`openLocalSession` seam with a synthetic session, while the library's own
-refusals (`authentication_required`, `mower_protocol_unavailable`) run through
-the real module. Every lifecycle test asserts that no socket, listener or
+last-good results and cancellation at shutdown, and the command route's 403 in
+`observe_only`, its class, id, host, freshness and ownership checks, the
+confirmed, failed and uncertain outcomes, the library's typed refusals, session
+failures and cancellation at shutdown. Route tests use the `openLocalSession`
+seam with a synthetic session, while the library's own refusals
+(`authentication_required`, `mower_protocol_unavailable`) run through the real
+module. No test sends anything to a mower. Every lifecycle test asserts that no socket, listener or
 referenced timer remains afterwards.
 
 The library is pinned to the exact release tarball and its `sha512` integrity

@@ -3,8 +3,10 @@
 How to run the dedicated mower bridge from `bridge/` as a container or as a
 local Home Assistant app, and how to upgrade, restart, back up and roll it
 back. Everything here is local: no image is published and no app repository is
-listed. Version 0.4.0 serves state only and issues no mower command. It pins
-library 0.15.0, which confirms the E15 activities mowing, paused and returning.
+listed. Version 0.5.0 serves state routes and, only behind the explicit
+`operating_mode: control` opt-in with a stop route, the start, pause and resume
+routes. It pins library 0.16.0, which confirms the E15 activities mowing,
+paused and returning and the start, pause and resume commands.
 
 ## What is separate from a camera installation
 
@@ -44,7 +46,7 @@ in `ha_app/` (run `python3 scripts/prepare_ha_app.py`).
 ## Install with Docker
 
 ```bash
-docker build -t eufy-mower-bridge:0.4.0 ./bridge
+docker build -t eufy-mower-bridge:0.5.0 ./bridge
 ```
 
 ```bash
@@ -56,7 +58,7 @@ docker run -d --name eufy-mower-bridge --restart unless-stopped \
   -e EUFY_MOWER_PASSWORD=<eufy account password> \
   -e EUFY_MOWER_COUNTRY=NL \
   -e EUFY_MOWER_HOST=<mower LAN address> \
-  eufy-mower-bridge:0.4.0
+  eufy-mower-bridge:0.5.0
 ```
 
 Bind the published port to an address that only Home Assistant can reach, or
@@ -166,5 +168,9 @@ Bridge mode in the integration is state only. Activity reports mowing, paused
 and returning from the E15 payloads confirmed in library 0.15.0, see
 [DP 107 activity](protocol-provenance.md#dp-107-activity). Docked, charging,
 idle and error have no confirmed payload and are never inferred, and mowing
-progress stays unconfirmed. Control, settings and map routes follow in later
-steps. Physical control keeps its explicit opt-in and supervised validation.
+progress stays unconfirmed. Bridge 0.5.0 adds opt-in start, pause and resume
+routes behind `operating_mode: control` and a required `control_stop_route`,
+which the integration does not use yet. Leave the mode at `observe_only`
+unless a supervised test with the app at hand is planned. `return`, settings
+and map routes follow in later steps. Physical control keeps its explicit
+opt-in and supervised validation.
