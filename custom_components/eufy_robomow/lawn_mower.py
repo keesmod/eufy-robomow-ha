@@ -65,6 +65,10 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
         | LawnMowerEntityFeature.PAUSE
         | LawnMowerEntityFeature.DOCK
     )
+    # The bridge routes start, pause and resume. It has no return route because
+    # the owned E15 firmware ignores the library's return write, so dock stays
+    # unavailable in bridge mode.
+    _BRIDGE_FEATURES = LawnMowerEntityFeature.START_MOWING | LawnMowerEntityFeature.PAUSE
 
     def __init__(
         self,
@@ -85,11 +89,13 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
     def supported_features(self) -> LawnMowerEntityFeature:
         """Expose controls only after the user explicitly opts in.
 
-        The bridge backend routes no command yet, so it never exposes controls,
-        whatever the operating mode.
+        The bridge backend exposes start and pause only while the bridge itself
+        reports its control opt-in, and never exposes dock.
         """
-        if not self.coordinator.writes_available:
+        if not self.coordinator.commands_available:
             return LawnMowerEntityFeature(0)
+        if self.coordinator.backend == BACKEND_BRIDGE:
+            return self._BRIDGE_FEATURES
         return self._CONTROL_FEATURES
 
     # ── activity ──────────────────────────────────────────────────────────────
@@ -136,6 +142,7 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
             attributes["bridge_status"] = self.coordinator.bridge_status
             attributes["bridge_activity"] = self.coordinator.bridge_activity
             attributes["bridge_error"] = self.coordinator.bridge_error
+            attributes["bridge_control"] = self.coordinator.bridge_control
         return attributes
 
     async def async_start_mowing(self) -> None:

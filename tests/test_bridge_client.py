@@ -16,9 +16,12 @@ from homeassistant.core import HomeAssistant
 from custom_components.eufy_robomow.bridge_client import (
     BridgeClient,
     BridgeClientError,
+    BridgeCommandOutcome,
     BridgeSettings,
     BridgeSettingsError,
+    parse_command_outcome,
     parse_state_document,
+    refused_before_write,
     resolve_mower_id,
 )
 
@@ -49,6 +52,27 @@ def _settings(**overrides: str) -> BridgeSettings:
     }
     values.update(overrides)
     return BridgeSettings.from_values(**values)
+
+
+def _outcome(**overrides: Any) -> dict[str, Any]:
+    """A contract 1 command answer as bridge 0.5.0 serves it, without raw data points."""
+    document: dict[str, Any] = {
+        "contract": 1,
+        "id": MOWER_ID,
+        "command": "start",
+        "result": "confirmed",
+        "write": {"dp": "1", "code": "switch_go", "value": True},
+        "sent_at": "2026-09-19T16:42:38.199Z",
+        "stage": "reflected",
+        "end": "reflected",
+        "before_observed_at": "2026-09-19T16:42:38.198Z",
+        "reply": {"observed_at": "2026-09-19T16:42:38.202Z", "return_code_zero": True, "rejected": False},
+        "acknowledgement": {"observed_at": "2026-09-19T16:42:39.150Z", "sequence": 63859, "dp": "1"},
+        "activity": {"observed_at": "2026-09-19T16:42:39.351Z", "sequence": 63860, "value": "mowing"},
+        "reports": 3,
+    }
+    document.update(overrides)
+    return document
 
 
 def _document(**overrides: Any) -> dict[str, Any]:
@@ -232,10 +256,10 @@ class _FakeResponse:
 class _FakeSession:
     def __init__(self, responses: list[_FakeResponse]) -> None:
         self._responses = responses
-        self.requests: list[tuple[str, dict[str, Any]]] = []
+        self.requests: list[tuple[str, str, dict[str, Any]]] = []
 
-    def get(self, url: str, **kwargs: Any) -> _FakeResponse:
-        self.requests.append((url, kwargs))
+    def request(self, method: str, url: str, **kwargs: Any) -> _FakeResponse:
+        self.requests.append((method, url, kwargs))
         return self._responses.pop(0)
 
 
@@ -266,13 +290,12 @@ def test_client_sends_the_bearer_token_and_returns_documents() -> None:
         assert asyncio.run(client.async_state()) == state
         assert asyncio.run(client.async_mowers()) == {"contract": 1, "mowers": []}
         assert asyncio.run(client.async_mower_state(MOWER_ID))["id"] == MOWER_ID
-    urls = [url for url, _ in session.requests]
-    assert urls == [
-        "http://127.0.0.1:8090/v1/state",
-        "http://127.0.0.1:8090/v1/mowers",
-        f"http://127.0.0.1:8090/v1/mowers/{MOWER_ID}/state",
+    assert [(method, url) for method, url, _ in session.requests] == [
+        ("GET", "http://127.0.0.1:8090/v1/state"),
+        ("GET", "http://127.0.0.1:8090/v1/mowers"),
+        ("GET", f"http://127.0.0.1:8090/v1/mowers/{MOWER_ID}/state"),
     ]
-    for _, kwargs in session.requests:
+    for _, _, kwargs in session.requests:
         assert kwargs["headers"] == {"Authorization": f"Bearer {TOKEN}", "Accept": "application/json"}
         assert kwargs["ssl"] is True
         assert kwargs["timeout"].total == 15
@@ -288,7 +311,7 @@ def test_client_pins_the_certificate_when_configured_and_refuses_bad_ids() -> No
         asyncio.run(client.async_mowers())
         with pytest.raises(BridgeClientError, match="invalid_mower_id"):
             asyncio.run(client.async_mower_state("../state"))
-    assert isinstance(session.requests[0][1]["ssl"], aiohttp.Fingerprint)
+    assert isinstance(session.requests[0][2]["ssl"], aiohttp.Fingerprint)
     assert len(session.requests) == 1, "an invalid id never becomes a request"
 
 
@@ -321,3 +344,148 @@ def test_client_state_requires_the_bridge_identity() -> None:
     client, patcher = _client(_FakeSession([_FakeResponse(200, _json({"protocol": 1, "bridge": "other"}))]))
     with patcher, pytest.raises(BridgeClientError, match="invalid_document"):
         asyncio.run(client.async_state())
+
+
+def test_client_posts_a_command_once_without_a_body_and_returns_the_outcome() -> None:
+    session = _FakeSession([_FakeResponse(200, _json(_outcome()))])
+    client, patcher = _client(session)
+    with patcher:
+        outcome = asyncio.run(client.async_send_command(MOWER_ID, "start"))
+    assert outcome == BridgeCommandOutcome(
+        result="confirmed",
+        stage="reflected",
+        end="reflected",
+        activity="mowing",
+        sent_at="2026-09-19T16:42:38.199Z",
+    )
+    assert len(session.requests) == 1, "a command is sent exactly once"
+    method, url, kwargs = session.requests[0]
+    assert method == "POST"
+    assert url == f"http://127.0.0.1:8090/v1/mowers/{MOWER_ID}/commands/start"
+    assert kwargs["headers"] == {"Authorization": f"Bearer {TOKEN}", "Accept": "application/json"}
+    assert kwargs["ssl"] is True
+    assert "data" not in kwargs and "json" not in kwargs, "the bridge ignores request bodies"
+    assert kwargs["timeout"].total == 75, "connect time plus the bridge's 60 second read-back bound"
+    assert kwargs["timeout"].connect == 5
+
+
+def test_client_pins_the_certificate_on_commands_too() -> None:
+    session = _FakeSession([_FakeResponse(200, _json(_outcome(command="pause", activity={"observed_at": "2026-09-19T16:42:39.351Z", "sequence": 1, "value": "paused"})))])
+    client, patcher = _client(
+        session,
+        _settings(base_url="https://bridge.example.test", certificate_fingerprint="ab" * 32),
+    )
+    with patcher:
+        outcome = asyncio.run(client.async_send_command(MOWER_ID, "pause"))
+    assert outcome.activity == "paused"
+    assert isinstance(session.requests[0][2]["ssl"], aiohttp.Fingerprint)
+
+
+@pytest.mark.parametrize(("mower_id", "kind", "code"), [
+    (MOWER_ID, "dock", "command_unsupported"),
+    (MOWER_ID, "return", "command_unsupported"),
+    (MOWER_ID, "stop", "command_unsupported"),
+    ("../commands", "start", "invalid_mower_id"),
+    (MOWER_ID.upper(), "start", "invalid_mower_id"),
+])
+def test_client_refuses_unknown_classes_and_bad_ids_before_any_request(mower_id: str, kind: str, code: str) -> None:
+    session = _FakeSession([])
+    client, patcher = _client(session)
+    with patcher, pytest.raises(BridgeClientError) as failure:
+        asyncio.run(client.async_send_command(mower_id, kind))
+    assert failure.value.code == code
+    assert session.requests == []
+
+
+@pytest.mark.parametrize(
+    ("response", "code", "status"),
+    [
+        (_FakeResponse(403, _json({"error": "control_disabled"})), "control_disabled", 403),
+        (_FakeResponse(404, _json({"error": "not_found"})), "not_found", 404),
+        (_FakeResponse(409, _json({"error": "command_unsupported"})), "command_unsupported", 409),
+        (_FakeResponse(409, _json({"error": "command_in_progress"})), "command_in_progress", 409),
+        (_FakeResponse(409, _json({"error": "telemetry_stale"})), "telemetry_stale", 409),
+        (_FakeResponse(409, _json({"error": "mower_command_map_saving"})), "mower_command_map_saving", 409),
+        (_FakeResponse(503, _json({"error": "mower_local_disconnected"})), "mower_local_disconnected", 503),
+        (_FakeResponse(503, _json({"error": "request_aborted"})), "request_aborted", 503),
+        (_FakeResponse(401, _json({"error": "unauthorized"})), "unauthorized", 401),
+        (_FakeResponse(500, b"<html>oops</html>"), "http_500", 500),
+        (_FakeResponse(200, b"not json"), "invalid_response", 200),
+        (_FakeResponse(200, b"{}", content_length=10_000_000), "response_too_large", 200),
+        (_FakeResponse(200, aiohttp.ClientConnectorError(cast(Any, None), OSError("refused"))), "cannot_connect", None),
+        (_FakeResponse(200, asyncio.TimeoutError()), "timeout", None),
+        (_FakeResponse(200, aiohttp.ClientPayloadError("broken")), "transport_failed", None),
+    ],
+)
+def test_client_reduces_command_failures_to_the_same_stable_codes(response: _FakeResponse, code: str, status: int | None) -> None:
+    session = _FakeSession([response])
+    client, patcher = _client(session)
+    with patcher, pytest.raises(BridgeClientError) as failure:
+        asyncio.run(client.async_send_command(MOWER_ID, "resume"))
+    assert failure.value.code == code
+    assert failure.value.status == status
+    assert "oops" not in str(failure.value)
+    assert len(session.requests) == 1, "a failed command is never retried"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({"result": "failed", "stage": "sent", "end": "rejected", "activity": None}, ("failed", "sent", "rejected", None)),
+        ({"result": "uncertain", "stage": "acknowledged", "end": "timed_out", "activity": None}, ("uncertain", "acknowledged", "timed_out", None)),
+        ({"result": "uncertain", "stage": "acknowledged", "end": "report_limit", "activity": {"observed_at": "x", "sequence": 2, "value": "returning"}}, ("uncertain", "acknowledged", "report_limit", "returning")),
+    ],
+)
+def test_command_outcome_keeps_failed_and_uncertain_explicit(overrides: dict[str, Any], expected: tuple[Any, ...]) -> None:
+    outcome = parse_command_outcome(_outcome(**overrides), MOWER_ID, "start")
+    assert (outcome.result, outcome.stage, outcome.end, outcome.activity) == expected
+    assert outcome.sent_at == "2026-09-19T16:42:38.199Z"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"contract": 2},
+        {"id": OTHER_ID},
+        {"command": "pause"},
+        {"result": "maybe"},
+        {"result": None},
+        {"stage": None},
+        {"end": 3},
+        {"sent_at": None},
+        {"activity": "mowing"},
+        {"activity": {"observed_at": "x", "sequence": 1}},
+        {"activity": {"value": 1}},
+        {"result": "confirmed", "activity": None},
+    ],
+)
+def test_command_outcome_rejects_invalid_shapes(overrides: dict[str, Any]) -> None:
+    with pytest.raises(BridgeClientError, match="invalid_document"):
+        parse_command_outcome(_outcome(**overrides), MOWER_ID, "start")
+    with pytest.raises(BridgeClientError, match="invalid_document"):
+        parse_command_outcome(["not", "a", "document"], MOWER_ID, "start")
+
+
+def test_client_validates_the_command_answer_against_the_sent_command() -> None:
+    session = _FakeSession([_FakeResponse(200, _json(_outcome(command="start")))])
+    client, patcher = _client(session)
+    with patcher, pytest.raises(BridgeClientError, match="invalid_document"):
+        asyncio.run(client.async_send_command(MOWER_ID, "resume"))
+
+
+def test_refusals_before_any_write_are_distinguished_from_uncertain_failures() -> None:
+    for code in (
+        "control_disabled", "not_found", "invalid_mower_id", "unknown_mower", "command_unsupported",
+        "command_in_progress", "telemetry_stale", "mower_host_unconfigured", "bridge_not_running",
+        "authentication_required", "mower_request_failed", "mower_local_unreachable",
+        "mower_local_authentication_failed", "mower_local_key_invalid", "mower_local_busy",
+        "unauthorized", "cannot_connect", "certificate_mismatch", "certificate_invalid",
+        "mower_command_undeclared", "mower_command_evidence_missing", "mower_command_map_saving",
+        "mower_command_already_set",
+    ):
+        assert refused_before_write(code) is True, code
+    for code in (
+        "timeout", "transport_failed", "mower_local_disconnected", "request_aborted",
+        "internal_error", "invalid_response", "invalid_document", "response_too_large", "http_500",
+    ):
+        assert refused_before_write(code) is False, code

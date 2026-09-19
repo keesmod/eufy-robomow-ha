@@ -14,6 +14,12 @@ from .telemetry import task_active
 
 MAX_SESSIONS = 50
 MAX_OBSERVATION_GAP = 45
+# The bridge's typed activities and what each one observes about the task. Only
+# these are evidence. Library 0.16.0 confirms mowing, paused and returning on
+# the E15, the inactive rows wait for a confirmed payload, so a bridge-mode
+# session cannot observe its end today. Anything else is ignored.
+_ACTIVE_ACTIVITIES = frozenset({"mowing", "paused", "returning"})
+_INACTIVE_ACTIVITIES = frozenset({"docked", "charging", "idle"})
 
 
 class SessionHistory:
@@ -39,15 +45,43 @@ class SessionHistory:
         return {"current": self.current, "recent": self.recent}
 
     def observe(self, dps: dict[str, Any], now: datetime) -> bool:
-        from .sensor import _decode_dp113
-
+        """Observe one complete local status: raw task flags decide the phase."""
         active = task_active(dps)
         if type(active) is not bool:
             if self.current:
                 self.current["observation_gap"] = True
             self._previous_at = None
             return self.current is not None
-        blob = dps.get("113")
+        phase = "unknown"
+        if active:
+            progress = dps.get(DP_PROGRESS)
+            if dps.get(DP_PAUSED) is True:
+                phase = "paused"
+            elif dps.get(DP_PAUSED) is False:
+                if progress == 100:
+                    phase = "charging"
+                elif isinstance(progress, int) and RETURNING_THRESHOLD <= progress < 100:
+                    phase = "returning"
+                elif progress == 0:
+                    phase = "mowing"
+        return self._account(active, phase, now, dps.get("113"))
+
+    def observe_activity(self, activity: str, now: datetime) -> bool:
+        """Observe one reported bridge activity with the same phase accounting.
+
+        Mowing, paused and returning are an active task in that phase. Docked,
+        charging and idle are an inactive task. No raw data point is invented,
+        so area, distance and progress stay unknown, and any other value changes
+        nothing. The caller passes only a reported status, never age or absence.
+        """
+        if activity in _ACTIVE_ACTIVITIES:
+            return self._account(True, activity, now, None)
+        if activity in _INACTIVE_ACTIVITIES:
+            return self._account(False, "unknown", now, None)
+        return False
+
+    def _account(self, active: bool, phase: str, now: datetime, blob: str | None) -> bool:
+        """Attribute the time since the previous observation and record the phase."""
         if active and self.current is None:
             self.current = {
                 "id": uuid4().hex,
@@ -79,18 +113,7 @@ class SessionHistory:
                     current["unknown_seconds"] += delta
                 else:
                     current[f"{self._previous_phase}_seconds"] += delta
-            phase = "unknown"
-            progress = dps.get(DP_PROGRESS)
             if active:
-                if dps.get(DP_PAUSED) is True:
-                    phase = "paused"
-                elif dps.get(DP_PAUSED) is False:
-                    if progress == 100:
-                        phase = "charging"
-                    elif isinstance(progress, int) and RETURNING_THRESHOLD <= progress < 100:
-                        phase = "returning"
-                    elif progress == 0:
-                        phase = "mowing"
                 if phase == "paused" and self._previous_phase != "paused":
                     current["pause_count"] += 1
                 # A blob left over from a previous task is not current progress.
@@ -101,6 +124,8 @@ class SessionHistory:
                 ):
                     self._accept_blob = True
                 if self._accept_blob and blob is not None:
+                    from .sensor import _decode_dp113
+
                     total, covered, distance = _decode_dp113(blob)
                     if total is not None and covered is not None:
                         current["area_raw"] = covered
@@ -140,6 +165,10 @@ class SessionStore:
 
     def observe(self, dps: dict[str, Any], now: datetime) -> None:
         if self.history.observe(dps, now):
+            self.store.async_delay_save(self.history.dump, 5)
+
+    def observe_activity(self, activity: str, now: datetime) -> None:
+        if self.history.observe_activity(activity, now):
             self.store.async_delay_save(self.history.dump, 5)
 
     async def async_save(self) -> None:
