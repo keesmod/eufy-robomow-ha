@@ -9,9 +9,11 @@ repository present, and the camera bridge in `ha-eufy-cam` works without it.
 
 Version 0.2.0 added the first read-only routes from issue #17 on the lifecycle
 foundation from issue #12: discovery of the account's E15 mowers and one typed
-state query per mower over the LAN. Version 0.3.0 adds the container image,
+state query per mower over the LAN. Version 0.3.0 added the container image,
 the local Home Assistant app candidate and the health check from issue #23.
-It issues no mower command.
+Version 0.4.0 pins library 0.15.0, whose E15 registry confirms the DP 107
+activities `mowing`, `paused` and `returning`, so the state route now reports
+`status` for those payloads. It still issues no mower command.
 
 ## What it does
 
@@ -44,9 +46,11 @@ It issues no mower command.
   mower.
 - No polling, reconnect or spontaneous report stream. Every LAN session is
   opened by a request and closed after its query.
-- Activity and mowing progress are `unconfirmed` in the library's E15
-  registry, so `status` and `progress` carry no value until the library
-  confirms them. Nothing is inferred from age or absence.
+- `status` reports only the three confirmed E15 activities. No E15 payload
+  identifies `docked`, `charging`, `idle` or `error`, so those values are
+  never served and never inferred from age, absence or inactivity. Mowing
+  progress is `unconfirmed` in the library's E15 registry, so `progress`
+  carries no value. See [E15 activity](#e15-activity).
 - No captcha or verification flow. Those authentication states are reported
   but cannot be answered through this version.
 - No published image and no app repository listing. The image and the app
@@ -103,12 +107,12 @@ Bridge state, for example:
 {
   "protocol": 1,
   "bridge": "eufy-robomow-bridge",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "bridge_id": "00000000-0000-4000-8000-000000000000",
   "lifecycle": "running",
   "operating_mode": "observe_only",
   "auth": { "state": "disconnected", "last_error": "authentication_failed", "attempted_at": "2026-09-19T10:00:00.000Z" },
-  "client": { "package": "@keesmod/eufy-mega-client", "version": "0.13.0", "module": "mowers", "lifecycle": "open", "connected": false },
+  "client": { "package": "@keesmod/eufy-mega-client", "version": "0.15.0", "module": "mowers", "lifecycle": "open", "connected": false },
   "mowers": { "count": null, "discovered_at": null, "error": "authentication_required" },
   "routes": { "discovery": true, "state": true, "control": false, "maps": false }
 }
@@ -155,7 +159,7 @@ Contract 1. One read-only local query, for example:
   "age_ms": 12,
   "stale": false,
   "error": null,
-  "status": { "state": "unconfirmed", "level": "observed" },
+  "status": { "state": "reported", "value": "mowing", "dp": ["107", "107", "107"], "source": "local-tuya-3.5", "observedAt": "2026-09-19T10:00:01.250Z" },
   "battery": { "state": "reported", "value": { "percent": 85 }, "dp": ["8"], "source": "local-tuya-3.5", "observedAt": "2026-09-19T10:00:01.250Z" },
   "progress": { "state": "unconfirmed" },
   "network": { "state": "reported", "value": { "kind": "wifi", "signalPercent": 70 }, "dp": ["134", "109"], "source": "local-tuya-3.5", "observedAt": "2026-09-19T10:00:01.250Z" }
@@ -165,7 +169,35 @@ Contract 1. One read-only local query, for example:
 The four typed fields are the library's `MowerTelemetry` fields, each in the
 state `reported`, `missing`, `invalid` or `unconfirmed`. `observed_at` is the
 local receipt time of the query reply and `age_ms` its age against the bridge
-clock when the response was built. Raw data points are never included.
+clock when the response was built. Raw data points are never included, so the
+DP 107 payload itself is never served.
+
+#### E15 activity
+
+`status` is whatever library 0.15.0 reports, unchanged. The library is pinned
+to the release tarball with SHA-256 `6037dea4c1cda1f91411e5b888297d9accb33cb8c7cc5b02db6021a1e7c89eeb`
+(source commit `ee1ac36b`). Its E15 registry confirms three DP 107
+`robot_status` payloads on the owned E15 (T2880, firmware 6.9.28, Anker eufy
+app 6.1.00): fields 1 = 2 and 3 = 1 `mowing`, fields 1 = 2 and 3 = 2 `paused`
+and fields 1 = 1 and 3 = 1 `returning`, each reproduced through owner-operated
+start, pause and return cycles in the library's
+[reproduction receipt](https://github.com/keesmod/eufy-mega-client/blob/ee1ac36bead945445aee63fe049b295e81b9eafc/docs/research/E15_ROBOT_STATUS_REPRODUCTION_2026-09-19.md)
+on top of its [contract receipt](https://github.com/keesmod/eufy-mega-client/blob/ee1ac36bead945445aee63fe049b295e81b9eafc/docs/research/E15_ROBOT_STATUS_CONTRACT_2026-09-16.md).
+`dp` lists the data point once per confirmed definition.
+
+- `reported` carries the activity and the observation time of the query that
+  contained the payload. The app's Defogging phase shares the `mowing` payload
+  and is reported as `mowing`.
+- `missing` means the query carried no DP 107.
+- `invalid` means the query carried a DP 107 payload the library withholds: a
+  transitional first frame, the map-saving payload, field 6 = 1 or the default
+  payload.
+
+Exact limits: no payload identifies `docked`, `charging`, `idle` or `error`,
+so the bridge never reports them and dock arrival is never inferred from
+inactivity. Mowing progress has no identified source and stays `unconfirmed`.
+A stale document keeps the earlier `status` with `stale: true` and the failure
+code, its age changes nothing.
 
 When the query fails and an earlier query for the same id succeeded, the
 earlier result is served with `stale: true`, its original `observed_at`, the

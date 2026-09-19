@@ -42,6 +42,11 @@ from custom_components.eufy_robomow.sensor import SENSORS, EufySensor
 TOKEN = "synthetic-bridge-token-0123456789abcdef"
 MOWER_ID = "c" * 64
 OBSERVED_AT = "2026-09-19T10:00:01.250Z"
+STATUS_DP = ["107", "107", "107"]
+
+
+def _reported_status(activity: str, observed_at: str = OBSERVED_AT) -> dict[str, Any]:
+    return {"state": "reported", "value": activity, "dp": STATUS_DP, "source": "local-tuya-3.5", "observedAt": observed_at}
 
 
 def _document(**overrides: Any) -> dict[str, Any]:
@@ -53,7 +58,7 @@ def _document(**overrides: Any) -> dict[str, Any]:
         "age_ms": 12,
         "stale": False,
         "error": None,
-        "status": {"state": "unconfirmed", "level": "observed"},
+        "status": {"state": "missing", "dp": STATUS_DP},
         "battery": {"state": "reported", "value": {"percent": 85}, "dp": ["8"], "source": "local-tuya-3.5", "observedAt": OBSERVED_AT},
         "progress": {"state": "unconfirmed"},
         "network": {"state": "reported", "value": {"kind": "wifi", "signalPercent": 70}, "dp": ["134", "109"], "source": "local-tuya-3.5", "observedAt": OBSERVED_AT},
@@ -127,6 +132,7 @@ def test_bridge_backend_owns_the_mower_without_a_local_device(tmp_path: Path) ->
         assert data == {"8": 85, "134": "Wifi", "109": 70}
         assert bridge.requested == [MOWER_ID]
         assert coordinator.last_local_update == datetime(2026, 9, 19, 10, 0, 1, 250000, tzinfo=UTC)
+        assert coordinator.bridge_status == "missing"
         assert coordinator.bridge_activity is None
         assert coordinator.bridge_error is None
         assert coordinator.local_dps == {}, "no raw local data points exist in bridge mode"
@@ -189,6 +195,65 @@ def test_bridge_backend_fails_the_update_on_stale_data_errors_or_bad_documents(t
     _run(scenario, tmp_path)
 
 
+def test_bridge_backend_reports_the_confirmed_activity_and_keeps_missing_and_invalid_explicit(tmp_path: Path) -> None:
+    async def scenario(hass: HomeAssistant) -> None:
+        later = "2026-09-19T10:00:11.250Z"
+        bridge = _FakeBridge(
+            [
+                _document(status=_reported_status("mowing")),
+                _document(status=_reported_status("paused"), observed_at=later),
+                _document(status=_reported_status("returning")),
+                _document(status={"state": "invalid", "dp": STATUS_DP}),
+                _document(status={"state": "missing", "dp": STATUS_DP}),
+                _document(status=_reported_status("mowing"), stale=True, error="mower_local_unreachable", age_ms=30_000),
+            ]
+        )
+        coordinator = EufyMowerCoordinator(
+            hass,
+            host="192.0.2.1",
+            device_id="synthetic-device",
+            local_key="not-a-real-local-key",
+            backend=BACKEND_BRIDGE,
+            bridge=cast(BridgeClient, bridge),
+            bridge_mower_id=MOWER_ID,
+        )
+        entity = EufyRobomowEntity(coordinator, cast(Any, _entry(**{CONF_BACKEND: BACKEND_BRIDGE})))
+
+        for expected, observed in (
+            (LawnMowerActivity.MOWING, datetime(2026, 9, 19, 10, 0, 1, 250000, tzinfo=UTC)),
+            (LawnMowerActivity.PAUSED, datetime(2026, 9, 19, 10, 0, 11, 250000, tzinfo=UTC)),
+            (LawnMowerActivity.RETURNING, datetime(2026, 9, 19, 10, 0, 1, 250000, tzinfo=UTC)),
+        ):
+            data = await coordinator._async_update_data()
+            assert data == {"8": 85, "134": "Wifi", "109": 70}, "the activity is typed state, never a raw data point"
+            assert coordinator.bridge_status == "reported"
+            assert entity.activity == expected
+            assert coordinator.last_local_update == observed, "freshness is the library's observation time"
+            attributes = entity.extra_state_attributes
+            assert attributes["bridge_status"] == "reported"
+            assert attributes["bridge_activity"] == expected.value
+            assert attributes["bridge_error"] is None
+
+        await coordinator._async_update_data()
+        assert coordinator.bridge_status == "invalid"
+        assert coordinator.bridge_activity is None
+        assert entity.activity is None, "an invalid report never keeps the earlier activity"
+        assert entity.extra_state_attributes["bridge_status"] == "invalid"
+
+        await coordinator._async_update_data()
+        assert coordinator.bridge_status == "missing"
+        assert entity.activity is None, "an absent DP 107 is never an activity"
+        assert entity.extra_state_attributes["bridge_status"] == "missing"
+
+        with pytest.raises(UpdateFailed, match="mower_local_unreachable"):
+            await coordinator._async_update_data()
+        assert coordinator.bridge_status == "missing", "a stale document changes nothing"
+        assert coordinator.bridge_activity is None
+        assert bridge.requested == [MOWER_ID] * 6
+
+    _run(scenario, tmp_path)
+
+
 def test_bridge_backend_requires_a_client_and_a_mower_id(tmp_path: Path) -> None:
     async def scenario(hass: HomeAssistant) -> None:
         with pytest.raises(ValueError):
@@ -218,14 +283,15 @@ def _bridge_coordinator(**attributes: Any) -> EufyMowerCoordinator:
 
 def test_mower_entity_keeps_its_identity_and_exposes_no_control_in_bridge_mode() -> None:
     entry = _entry(**{CONF_BACKEND: BACKEND_BRIDGE})
-    coordinator = _bridge_coordinator(bridge_activity=None, bridge_error=None)
+    coordinator = _bridge_coordinator(bridge_status="missing", bridge_activity=None, bridge_error=None)
     entity = EufyRobomowEntity(coordinator, cast(Any, entry))
     assert entity.unique_id == "synthetic-device_mower"
     assert entity.supported_features == LawnMowerEntityFeature(0)
-    assert entity.activity is None, "an unconfirmed status stays unknown"
+    assert entity.activity is None, "a missing status stays unknown"
     attributes = entity.extra_state_attributes
     assert attributes["backend"] == BACKEND_BRIDGE
     assert attributes["telemetry_updated_at"] == datetime(2026, 9, 19, 10, 0, 1, tzinfo=UTC)
+    assert attributes["bridge_status"] == "missing"
     assert attributes["bridge_activity"] is None
     assert attributes["bridge_error"] is None
 
