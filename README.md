@@ -6,7 +6,8 @@ Control and monitor your Eufy mower directly from Home Assistant over your local
 
 GitHub is the development source and issue tracker for this fork. Version 0.7.0
 adds a dedicated dashboard card, observed session history, confirmed commands
-and an optional Home Assistant planning package.
+and an optional Home Assistant planning package. Version 0.8.0 adds an optional
+mower backend that reads state from the dedicated mower bridge.
 
 ---
 
@@ -92,6 +93,36 @@ validation, use **Settings → Devices & Services → Eufy Robomow → Configure
 opt in to control.
 
 > **Alpha credential notice:** the current cloud client still stores the Eufy account password in the Home Assistant config entry so it can renew sessions. Restrict access to Home Assistant backups and `.storage`; replacing this with renewable session material is tracked as a separate hardening change.
+
+### Mower backend
+
+**Settings → Devices & Services → Eufy Robomow → Configure** offers a
+**Mower backend** choice. Exactly one backend owns the mower.
+
+- **local** (default, unchanged): this integration polls the mower over the
+  Tuya local protocol and, with account credentials, polls cloud settings.
+  Existing entries keep this backend until you change it.
+- **bridge**: the integration reads state from the dedicated mower bridge
+  described below and creates no local connection and no cloud client of its
+  own. Enter the bridge URL (`http` or `https`, for example
+  `http://127.0.0.1:8090`), its bearer token, and optionally the mower id and
+  a certificate fingerprint for a private TLS certificate. Saving validates the
+  token against the bridge and fills in the mower id when the bridge discovers
+  exactly one mower.
+
+In bridge mode the mower entity, battery, network and signal sensors read the
+bridge's typed state every ten seconds. `telemetry_updated_at` is the bridge's
+observation time, not the poll time. When the bridge reports stale data, an
+error or is unreachable, the entities become unavailable, exactly as after a
+failed local poll. Nothing is carried forward.
+
+Bridge mode is state only today. It exposes no mower controls and creates no
+settings entities, whatever the operating mode, and a write raises a clear
+error. Session history does not grow in bridge mode. Activity comes from the
+library's typed status and stays unknown until the library confirms the E15
+activity contract, so battery, network and signal are the useful values for
+now. Entity unique IDs are unchanged, so switching back and forth never
+duplicates or renames entities and no command is replayed on a switch.
 
 ### Mower dashboard and session history
 
@@ -190,8 +221,8 @@ E15 mowers and `GET /v1/mowers/{id}/state` for one typed local query over the
 LAN with explicit freshness and stale last-good results. Only battery and
 network fields are confirmed in the library today. It starts only in
 `observe_only` and exposes no control, settings or map routes. The Python
-integration does not use it yet and keeps its own local backend. The follow-up
-order is recorded in
+integration consumes it through the optional **bridge** mower backend described
+above, for state only. The follow-up order is recorded in
 [issue #12](https://github.com/keesmod/eufy-robomow-ha/issues/12). See
 [ADR 0003](docs/architecture/0003-dedicated-mower-bridge.md).
 
@@ -199,7 +230,7 @@ order is recorded in
 
 ## How it works
 
-- **Local polling** (every 10 s) via the [Tuya local protocol](https://github.com/jasonacox/tinytuya) for real-time status (battery, activity state, etc.).
+- **Local polling** (every 10 s) via the [Tuya local protocol](https://github.com/jasonacox/tinytuya) for real-time status (battery, activity state, etc.). With the **bridge** backend the mower bridge polls the mower instead and Home Assistant reads its typed state every 10 s over an authenticated private HTTP connection.
 - **Cloud polling** (every 5 min) via the Tuya mobile API for settings stored as protobuf blobs in DP155.
 - **Writes**, when control is explicitly enabled, go to either the local mower or the cloud API depending on the setting.
 - **Optional map acquisition** uses five-minute idle snapshots and two-second
