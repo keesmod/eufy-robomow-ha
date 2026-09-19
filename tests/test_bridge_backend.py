@@ -259,7 +259,7 @@ def test_sensors_keep_their_unique_ids_and_read_bridge_values() -> None:
         "synthetic-device_network",
     )
     assert battery.native_value == 85
-    assert signal.native_value == -70, "the same raw device value the local backend reads"
+    assert signal.native_value == 70, "the device-declared percentage, never negated"
     assert network.native_value == "Wifi"
 
 
