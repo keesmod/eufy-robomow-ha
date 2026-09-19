@@ -1,6 +1,6 @@
 /** Identity of this bridge and its pinned library release. Tests keep these in step with package metadata. */
 export const BRIDGE_NAME = 'eufy-robomow-bridge';
-export const BRIDGE_VERSION = '0.2.0';
+export const BRIDGE_VERSION = '0.3.0';
 export const PROTOCOL_VERSION = 1;
 
 export const CLIENT_PACKAGE = '@keesmod/eufy-mega-client';
