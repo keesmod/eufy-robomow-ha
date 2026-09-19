@@ -1,6 +1,6 @@
 {
   "name": "eufy-robomow-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Dedicated Node 24 mower bridge foundation for the Eufy Robomow Home Assistant integration",
   "type": "module",

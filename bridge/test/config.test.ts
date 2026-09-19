@@ -5,6 +5,7 @@ import {
   DEFAULT_BIND_ADDRESS,
   DEFAULT_CLOUD_TIMEOUT_MS,
   DEFAULT_DATA_DIR,
+  DEFAULT_LOCAL_TIMEOUT_MS,
   DEFAULT_PORT,
   ENV,
   describeConfig,
@@ -28,6 +29,9 @@ test('minimal values resolve to observe-only defaults with a separate mower data
     dataDir: DEFAULT_DATA_DIR,
     operatingMode: 'observe_only',
     cloudTimeoutMs: DEFAULT_CLOUD_TIMEOUT_MS,
+    localTimeoutMs: DEFAULT_LOCAL_TIMEOUT_MS,
+    hosts: {},
+    host: null,
   });
   assert.equal(config.bindAddress, '127.0.0.1', 'the private API binds to loopback unless configured otherwise');
   assert.notEqual(config.dataDir, '/data', 'the mower keeps its own data path');
@@ -98,5 +102,27 @@ test('options file rejects unknown keys, nested values, non-objects and oversize
 test('the startup description never contains the token or credentials', () => {
   const description = describeConfig(resolveConfig(syntheticValues()));
   assertNoSecrets(JSON.stringify(description));
-  assert.deepEqual(Object.keys(description).sort(), ['bind_address', 'cloud_timeout_ms', 'country', 'data_dir', 'operating_mode', 'port']);
+  assert.deepEqual(Object.keys(description).sort(), ['bind_address', 'cloud_timeout_ms', 'configured_hosts', 'country', 'data_dir', 'local_timeout_ms', 'operating_mode', 'port']);
+  const withHosts = describeConfig(resolveConfig(syntheticValues({ host: '192.0.2.10', hosts: `${'a'.repeat(64)}=192.0.2.11` })));
+  assert.equal(withHosts.configured_hosts, 2);
+  assert.ok(!JSON.stringify(withHosts).includes('192.0.2.1'), 'hosts are counted, never listed');
+});
+
+test('LAN hosts are validated per 64-character mower id and the single host stays optional', () => {
+  const idA = 'a'.repeat(64);
+  const idB = 'b'.repeat(64);
+  assert.deepEqual(resolveConfig(syntheticValues({ hosts: `${idA}=192.0.2.10, ${idB}=mower.lan` })).hosts, { [idA]: '192.0.2.10', [idB]: 'mower.lan' });
+  assert.deepEqual(resolveConfig(syntheticValues({ hosts: { [idA]: '2001:db8::10' } })).hosts, { [idA]: '2001:db8::10' });
+  assert.deepEqual(resolveConfig(syntheticValues({ hosts: '' })).hosts, {});
+  assert.equal(resolveConfig(syntheticValues({ host: '192.0.2.10' })).host, '192.0.2.10');
+  assert.equal(resolveConfig(syntheticValues({ local_timeout_ms: 8000 })).localTimeoutMs, 8000);
+  rejects(syntheticValues({ hosts: 'x=192.0.2.10' }), 'hosts');
+  rejects(syntheticValues({ hosts: `${idA}=not a host` }), 'hosts');
+  rejects(syntheticValues({ hosts: `${idA}=192.0.2.10,${idA}=192.0.2.11` }), 'hosts');
+  rejects(syntheticValues({ hosts: idA }), 'hosts');
+  rejects(syntheticValues({ host: 'bad host' }), 'host');
+  rejects(syntheticValues({ local_timeout_ms: 500 }), 'local_timeout_ms');
+  assert.deepEqual(parseOptions(`{"hosts":{"${idA}":"192.0.2.10"}}`), { hosts: { [idA]: '192.0.2.10' } });
+  assert.throws(() => parseOptions('{"hosts":"x"}'), (error: unknown) => error instanceof ConfigError && error.key === 'hosts');
+  assert.throws(() => parseOptions('{"hosts":{"a":1}}'), (error: unknown) => error instanceof ConfigError && error.key === 'hosts');
 });
