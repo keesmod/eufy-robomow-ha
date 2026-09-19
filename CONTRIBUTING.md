@@ -8,6 +8,7 @@ This integration is under private-alpha development even though its working fork
 2. Use conventional commit messages.
 3. Keep protocol parsing separate from Home Assistant framework glue where practical.
 4. Run `python -m ruff check .` and `python -m pytest` with Python 3.14.
+   For changes under `bridge/`, also run `npm run typecheck`, `npm run build` and `npm test` with Node 24.
 5. Describe scope, validation, risk, and rollback in the pull request.
 
 ## Protocol provenance

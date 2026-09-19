@@ -39,3 +39,8 @@ captures/
 .env.*
 secrets.yaml
 *local_key*
+
+# Mower bridge (Node) build output and local reports
+bridge/node_modules/
+bridge/dist/
+bridge/npm-audit.json
