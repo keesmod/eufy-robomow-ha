@@ -6,9 +6,16 @@ import asyncio
 import logging
 import time
 from threading import Lock
+from typing import Any
 from homeassistant.util import dt as dt_util
 
-from .bridge_client import BridgeClient, BridgeClientError, parse_state_document
+from .bridge_client import (
+    BridgeClient,
+    BridgeClientError,
+    BridgeCommandOutcome,
+    parse_state_document,
+    refused_before_write,
+)
 from .commands import MowerCommand
 from .sessions import SessionStore
 from .const import CMD_START, CMD_RESUME, CMD_PAUSE, CMD_DOCK
@@ -55,6 +62,8 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
 
     With ``backend=BACKEND_BRIDGE`` the coordinator instead reads one typed state
     document per poll from the dedicated mower bridge and owns no local socket.
+    Start, pause and resume then go through the bridge's opt-in command routes,
+    each sent exactly once, while settings writes have no bridge route.
     """
 
     # Defaults so a coordinator created without __init__ (as in unit tests) is local.
@@ -66,6 +75,10 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
     bridge_status: str | None = None
     bridge_activity: str | None = None
     bridge_error: str | None = None
+    # Whether the bridge's last state answer reported ``routes.control`` and the
+    # control opt-in it carried (classes, max_state_age_ms, read_back_ms).
+    bridge_routes_control: bool = False
+    bridge_control: dict[str, Any] | None = None
 
     def __init__(
         self,
@@ -98,10 +111,16 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self.bridge_status = None
         self.bridge_activity = None
         self.bridge_error = None
+        self.bridge_routes_control = False
+        self.bridge_control = None
         if backend == BACKEND_BRIDGE and (bridge is None or not bridge_mower_id):
             raise ValueError("The bridge backend needs a bridge client and a mower id")
 
         self._device_lock = Lock()
+        # The bridge serves one command per mower at a time. A later command waits
+        # here for the answer of the one in flight instead of being refused with
+        # ``command_in_progress``. Waiting is not a retry: nothing is sent twice.
+        self._bridge_command_lock = asyncio.Lock()
         self.local_dps: dict = {}
         self.local_generation = 0
         self.last_local_update: datetime | None = None
@@ -130,12 +149,27 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
 
     @property
     def writes_available(self) -> bool:
-        """Writes need explicit control and a backend that routes them.
+        """Settings writes need explicit control and a backend that routes them.
 
-        The bridge backend serves state only until its control routes exist, so
-        no write entity is created and every write is refused in that mode.
+        Only the local backend writes settings. The bridge has no setting route,
+        so no number, select or switch entity is created in bridge mode and every
+        settings write is refused there before touching any transport.
         """
         return self.control_enabled and self.backend != BACKEND_BRIDGE
+
+    @property
+    def commands_available(self) -> bool:
+        """Mower commands need explicit control and a backend that routes them.
+
+        The local backend writes them itself. The bridge backend routes start,
+        pause and resume only while its last state answer reported
+        ``routes.control``, which is the bridge's own control opt-in.
+        """
+        if not self.control_enabled:
+            return False
+        if self.backend == BACKEND_BRIDGE:
+            return self.bridge_routes_control
+        return True
 
     def _require_control_enabled(self) -> None:
         """Reject writes while the integration is in its safe default mode."""
@@ -146,13 +180,22 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             )
 
     def _require_writes_available(self) -> None:
-        """Reject writes that no backend can route, before touching any transport."""
+        """Reject settings writes that no backend can route, before any transport."""
         if self.backend == BACKEND_BRIDGE:
             raise HomeAssistantError(
-                "Eufy Robomow uses the mower bridge backend, which does not route "
-                "commands or settings yet. Select the local backend for writes."
+                "Eufy Robomow uses the mower bridge backend, which has no settings "
+                "routes. Select the local backend for settings writes."
             )
         self._require_control_enabled()
+
+    def _require_commands_available(self) -> None:
+        """Reject mower commands that no backend can route, before any transport."""
+        self._require_control_enabled()
+        if self.backend == BACKEND_BRIDGE and not self.bridge_routes_control:
+            raise HomeAssistantError(
+                "The mower bridge is not in control mode, so it routes no command. "
+                "Enable control on the bridge itself before sending commands through it."
+            )
 
     def async_add_new_dp_listener(self, callback) -> None:
         """Register *callback(dps)* to be called whenever new DPS keys are discovered.
@@ -340,12 +383,16 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         return dps
 
     async def _async_update_from_bridge(self) -> dict:
-        """One typed state query through the mower bridge.
+        """One typed state query through the mower bridge, then its own state.
 
         Freshness comes from the bridge's ``observed_at``, never from the poll
         time. A stale answer, an error code, an unreachable bridge or an invalid
         document fails the update so entities become unavailable, exactly like a
         failed local poll. Nothing is carried forward and nothing is written.
+
+        The bridge's ``GET /v1/state`` is read afterwards for ``routes.control``,
+        which decides whether commands are available. A failure of that query
+        alone leaves the telemetry update intact and makes control unavailable.
         """
         assert self.bridge is not None and self.bridge_mower_id is not None
         try:
@@ -362,10 +409,32 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self.bridge_activity = telemetry.activity
         self.local_generation += 1
         self.last_local_update = telemetry.observed_at
+        if self.session_store and telemetry.status == "reported" and telemetry.activity:
+            # Only a reported activity is an observation. Missing, invalid and
+            # unconfirmed say nothing, and nothing is derived from age or absence.
+            self.session_store.observe_activity(telemetry.activity, telemetry.observed_at)
         dps = dict(telemetry.dps)
         _LOGGER.debug("Bridge state received (%d mapped keys)", len(dps))
         self._known_dps = set(dps.keys())
+        await self._async_read_bridge_control()
         return dps
+
+    async def _async_read_bridge_control(self) -> None:
+        """Read whether the bridge routes commands from its own state document."""
+        assert self.bridge is not None
+        try:
+            state = await self.bridge.async_state()
+        except BridgeClientError as exc:
+            _LOGGER.debug("Bridge state query failed: %s", exc.code)
+            self.bridge_routes_control = False
+            self.bridge_control = None
+            return
+        routes = state.get("routes")
+        control = state.get("control")
+        self.bridge_routes_control = isinstance(routes, dict) and routes.get("control") is True
+        self.bridge_control = (
+            control if self.bridge_routes_control and isinstance(control, dict) else None
+        )
 
     def _carry_forward_cloud_data(self, dps: dict, local_dp_keys: set[str]) -> None:
         """Copy all non-local keys from the previous coordinator.data into dps.
@@ -382,14 +451,18 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
     # ── commands ──────────────────────────────────────────────────────────────
 
     async def async_send_mower_command(self, action: str, timeout: float = 35) -> None:
-        """Send once, then await fresh device telemetry with a bounded timeout."""
+        """Send once, then await fresh device telemetry with a bounded timeout.
+
+        In bridge mode the command goes through the bridge's opt-in route once and
+        its answer is the confirmation, see :meth:`_async_send_bridge_command`.
+        """
+        if self.backend == BACKEND_BRIDGE:
+            await self._async_send_bridge_command(action)
+            return
         self._require_writes_available()
         if action not in ("start", "resume", "pause", "dock"):
             raise HomeAssistantError("Unsupported mower command")
-        if self.command and self.command.state in ("sending", "pending"):
-            if action in ("start", "resume"):
-                raise HomeAssistantError("A mower command is already pending")
-            self.command.finish("superseded")
+        self._supersede_pending(action)
         operation = MowerCommand(action, self.local_generation)
         self.command = operation
         self.async_update_listeners()
@@ -434,6 +507,86 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             raise HomeAssistantError("Could not send the mower command") from exc
         finally:
             self.async_update_listeners()
+
+    def _supersede_pending(self, action: str) -> None:
+        """Apply the pending rules: start and resume wait, pause and dock supersede."""
+        if self.command and self.command.state in ("sending", "pending"):
+            if action in ("start", "resume"):
+                raise HomeAssistantError("A mower command is already pending")
+            self.command.finish("superseded")
+
+    async def _async_send_bridge_command(self, action: str) -> None:
+        """Route start, pause or resume through the bridge exactly once.
+
+        The bridge checks mode, class, mower, ownership and telemetry age before
+        any write and answers the library's confirmed, failed or uncertain
+        outcome. A refusal known to precede the write ends as ``failed`` with its
+        code, every other failure ends as ``uncertain`` because the frame may
+        have been written. Nothing is retried and a superseded command that has
+        not been sent yet is never sent.
+        """
+        self._require_commands_available()
+        if action not in ("start", "resume", "pause", "dock"):
+            raise HomeAssistantError("Unsupported mower command")
+        if action == "dock":
+            raise HomeAssistantError(
+                "The mower bridge has no return route: the owned E15 firmware ignores "
+                "the library's return command. Send the mower home from the app."
+            )
+        self._supersede_pending(action)
+        assert self.bridge is not None and self.bridge_mower_id is not None
+        operation = MowerCommand(action, self.local_generation)
+        self.command = operation
+        self.async_update_listeners()
+        interrupted = False
+        try:
+            async with self._bridge_command_lock:
+                if operation.state == "superseded":
+                    raise HomeAssistantError("Command superseded by a later safety command")
+                operation.sent_monotonic = time.monotonic()
+                operation.state = "pending"
+                self.async_update_listeners()
+                outcome = await self.bridge.async_send_command(self.bridge_mower_id, action)
+            if operation.state == "superseded":
+                raise HomeAssistantError("Command superseded by a later safety command")
+            self._finish_bridge_command(operation, outcome)
+        except BridgeClientError as exc:
+            if operation.state == "superseded":
+                raise HomeAssistantError(
+                    "Command superseded by a later safety command"
+                ) from exc
+            if refused_before_write(exc.code):
+                operation.finish("failed", exc.code)
+                raise HomeAssistantError(
+                    f"The mower bridge refused the command before sending it: {exc.code}"
+                ) from exc
+            operation.finish("uncertain", exc.code)
+            raise HomeAssistantError(
+                f"The mower bridge did not answer the command ({exc.code}). The command "
+                "may have been written. Check the mower before repeating it."
+            ) from exc
+        except asyncio.CancelledError:
+            interrupted = True
+            operation.finish("interrupted")
+            raise
+        finally:
+            if not interrupted:
+                await self.async_request_refresh()
+            self.async_update_listeners()
+
+    def _finish_bridge_command(self, operation: MowerCommand, outcome: BridgeCommandOutcome) -> None:
+        """Map the bridge's outcome onto the command states the entity exposes."""
+        if outcome.result == "confirmed":
+            operation.finish("confirmed", f"bridge:{outcome.activity}")
+            return
+        if outcome.result == "failed":
+            operation.finish("rejected", f"bridge:{outcome.end}")
+            raise HomeAssistantError("The mower rejected the command")
+        operation.finish("uncertain", f"bridge:{outcome.end}")
+        raise HomeAssistantError(
+            "The command was written, but the mower did not confirm it within the "
+            "bridge's read-back window. Check the mower before repeating it."
+        )
 
     async def async_send_command(self, dp: str, value) -> None:
         """Write a single DPS value or raise a visible Home Assistant error."""
