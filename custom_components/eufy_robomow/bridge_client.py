@@ -39,6 +39,8 @@ _NETWORK_KINDS = {
     "ethernet": "Ethernet",
     "none": "None",
 }
+# The library's four states of one typed telemetry field. Only ``reported`` carries a value.
+_FIELD_STATES = frozenset({"reported", "missing", "invalid", "unconfirmed"})
 
 
 class BridgeSettingsError(ValueError):
@@ -125,13 +127,18 @@ class BridgeTelemetry:
     age_ms: int | None
     stale: bool
     error: str | None
+    # The library's state of the typed status field: ``reported``, ``missing``,
+    # ``invalid`` or ``unconfirmed``. Missing and invalid stay distinct from each
+    # other and from an activity, and nothing is derived from age or absence.
+    status: str
+    # The reported activity, only while ``status`` is ``reported``.
     activity: str | None
     dps: dict[str, Any]
 
 
 def _field(document: dict[str, Any], name: str) -> dict[str, Any]:
     value = document.get(name)
-    if not isinstance(value, dict) or not isinstance(value.get("state"), str):
+    if not isinstance(value, dict) or value.get("state") not in _FIELD_STATES:
         raise BridgeClientError("invalid_document")
     return value
 
@@ -201,6 +208,7 @@ def parse_state_document(document: Any, mower_id: str) -> BridgeTelemetry:
         age_ms=age_ms,
         stale=stale,
         error=error,
+        status=status["state"],
         activity=activity,
         dps=dps,
     )
