@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
 import {
+  E15_TELEMETRY_DEFINITIONS,
   EufyError,
+  decodeMowerTelemetry,
   type AuthAnswer,
   type AuthState,
   type MowerAdapter,
@@ -52,20 +54,28 @@ class DiscoveringAdapter implements MowerAdapter {
   }
 }
 
-function telemetry(observedAt: string, battery = 85): MowerTelemetry {
-  return {
-    source: 'local-tuya-3.5',
-    observedAt,
-    status: { state: 'unconfirmed', level: 'observed' },
-    battery: { state: 'reported', value: { percent: battery }, dp: ['8'], source: 'local-tuya-3.5', observedAt },
-    progress: { state: 'unconfirmed' },
-    network: { state: 'reported', value: { kind: 'wifi', signalPercent: 70 }, dp: ['134', '109'], source: 'local-tuya-3.5', observedAt },
-    fields: {
-      '8': { id: '8', value: battery, declared: true, code: 'battery_percentage', type: 'value', valid: true, unit: '%' },
-      '155': { id: '155', value: 'PRIVATE-BLOB', declared: true, code: 'PRIVATE-CODE', type: 'raw' },
-    },
-    dps: { '8': battery, '134': 'Wifi', '109': 70, '155': 'PRIVATE-BLOB' },
-  };
+/** The three confirmed DP 107 definitions name this data point, so the library lists it once per definition. */
+const STATUS_DP = ['107', '107', '107'];
+
+/**
+ * One synthetic DP 107 payload: varint records derived from the library's confirmed field
+ * definitions, not from any capture. Field numbers map to wire type 0 tags.
+ */
+function wirePayload(fields: Record<number, number>): string {
+  const bytes: number[] = [];
+  for (const [number, value] of Object.entries(fields)) bytes.push(Number(number) << 3, value);
+  return Buffer.from(bytes).toString('base64');
+}
+
+/**
+ * Real library decoding of a synthetic snapshot, so the route serves exactly what the pinned
+ * release reports. `robotStatus` is the DP 107 payload, absent by default. DP 155 stands in for
+ * a private raw data point that must never reach a response.
+ */
+function telemetry(observedAt: string, battery = 85, robotStatus?: string | number): MowerTelemetry {
+  const dps: Record<string, string | number> = { '8': battery, '134': 'Wifi', '109': 70, '155': 'PRIVATE-BLOB' };
+  if (robotStatus !== undefined) dps['107'] = robotStatus;
+  return decodeMowerTelemetry({ source: 'local-tuya-3.5', observedAt, dps });
 }
 
 interface SessionLog {
@@ -277,7 +287,7 @@ test('the state route serves the four typed fields with freshness, closes the se
     stale: false,
     error: null,
     observed_at: observedAt,
-    status: { state: 'unconfirmed', level: 'observed' },
+    status: { state: 'missing', dp: STATUS_DP },
     battery: { state: 'reported', value: { percent: 85 }, dp: ['8'], source: 'local-tuya-3.5', observedAt },
     progress: { state: 'unconfirmed' },
     network: { state: 'reported', value: { kind: 'wifi', signalPercent: 70 }, dp: ['134', '109'], source: 'local-tuya-3.5', observedAt },
@@ -289,6 +299,75 @@ test('the state route serves the four typed fields with freshness, closes the se
   assert.equal((third.json as MowerStateDocument).stale, false);
   await f.bridge.stop();
   assert.deepEqual(await settledHandles(handles), handles);
+});
+
+test('the pinned release confirms exactly the three DP 107 activities and no other status definition', () => {
+  const status = E15_TELEMETRY_DEFINITIONS.filter((definition) => definition.field === 'status');
+  assert.deepEqual(
+    status.map((definition) => [definition.dp, definition.level, definition.decode.kind === 'wire' ? definition.decode.match : null, definition.decode.kind === 'wire' ? definition.decode.activity : null]),
+    [
+      ['107', 'confirmed', { 1: 2, 3: 1 }, 'mowing'],
+      ['107', 'confirmed', { 1: 2, 3: 2 }, 'paused'],
+      ['107', 'confirmed', { 1: 1, 3: 1 }, 'returning'],
+    ],
+  );
+  assert.ok(E15_TELEMETRY_DEFINITIONS.every((definition) => definition.field !== 'progress'), 'mowing progress stays unconfirmed');
+});
+
+test('the state route serves the confirmed activity with its observation time and keeps missing and invalid explicit', async (t) => {
+  const log = sessionLog();
+  const observedAt = new Date(T0 - 250).toISOString();
+  let robotStatus: string | number | undefined;
+  const f = await fixture(t, { host: HOST_A }, { openLocalSession: sessions(log, async () => telemetry(observedAt, 85, robotStatus)) });
+  await f.bridge.connect();
+  const status = async () => {
+    const reply = await f.get(`${MOWERS_PATH}/${ID_A}/state`);
+    assert.equal(reply.status, 200);
+    assertNoSecrets(reply.text);
+    assert.ok(!reply.text.includes('"dps"') && !reply.text.includes('"fields"') && !reply.text.includes('PRIVATE-BLOB'), 'raw data points are absent');
+    if (typeof robotStatus === 'string' && robotStatus) assert.ok(!reply.text.includes(robotStatus), 'the raw DP 107 payload is never served');
+    const document = reply.json as MowerStateDocument;
+    assert.equal(document.stale, false);
+    assert.equal(document.error, null);
+    assert.equal(document.observed_at, observedAt);
+    assert.equal(document.age_ms, 250);
+    return document.status;
+  };
+  // Confirmed payloads: fields 1 and 3 as recorded in the library's E15 registry.
+  for (const [fields, activity] of [
+    [{ 1: 2, 3: 1 }, 'mowing'],
+    [{ 1: 2, 3: 2 }, 'paused'],
+    [{ 1: 1, 3: 1 }, 'returning'],
+  ] as const) {
+    robotStatus = wirePayload(fields);
+    assert.deepEqual(await status(), { state: 'reported', value: activity, dp: STATUS_DP, source: 'local-tuya-3.5', observedAt }, activity);
+  }
+  // Absent DP 107 is missing, never an activity.
+  robotStatus = undefined;
+  assert.deepEqual(await status(), { state: 'missing', dp: STATUS_DP });
+  // Withheld shapes are invalid for that report: default, field 6, map-saving, transitional, malformed and wrongly typed.
+  for (const [name, payload] of [
+    ['default empty', ''],
+    ['default zero byte', Buffer.from([0]).toString('base64')],
+    ['field 6', wirePayload({ 6: 1 })],
+    ['map saving', wirePayload({ 2: 5, 3: 1 })],
+    ['transitional', wirePayload({ 1: 2 })],
+    ['malformed', 'not base64!'],
+    ['not a string', 7],
+  ] as const) {
+    robotStatus = payload;
+    assert.deepEqual(await status(), { state: 'invalid', dp: STATUS_DP }, name);
+  }
+  assert.equal(log.opened.length, 11, 'every request ran its own bounded query');
+  // A later failure serves the last activity as stale with its original observation time. Age never changes it.
+  robotStatus = wirePayload({ 1: 2, 3: 1 });
+  await status();
+  robotStatus = 'not base64!';
+  f.clock.now += 3_600_000;
+  const aged = (await f.get(`${MOWERS_PATH}/${ID_A}/state`)).json as MowerStateDocument;
+  assert.deepEqual(aged.status, { state: 'invalid', dp: STATUS_DP }, 'a fresh invalid report replaces the earlier activity');
+  assert.equal(aged.stale, false);
+  assert.equal(aged.age_ms, 3_600_250);
 });
 
 test('a failed query serves the last good result as stale with the failure code, otherwise a 503', async (t) => {
