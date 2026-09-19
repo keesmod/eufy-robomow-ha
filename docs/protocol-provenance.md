@@ -30,6 +30,19 @@ Never commit raw captures. Remove passwords, tokens, local keys, full device and
 
 Unlicensed projects and forks may be used to enumerate features and design experiments. Do not copy or mechanically translate their implementation, constants, schemas, fixtures, or tests. Record independently reproduced facts in this repository's own evidence trail.
 
+## DP 109 signal unit
+
+The mower's own data-point declaration, retrieved through discovery on the
+owned E15 (product code T2880, firmware 6.9.28), names DP 109
+`wifi_signal_strength`: a read-only integer from 0 to 100 with unit `%`. Nine
+raw local queries and three typed queries on 2026-09-16 returned the same
+percentage, recorded in the library's
+[telemetry observation receipt](https://github.com/keesmod/eufy-mega-client/blob/main/docs/research/E15_TELEMETRY_OBSERVATION_2026-09-16.md).
+No dBm value and no conversion formula were observed. The percentage is
+`confirmed`. The earlier negative-dBm reading inherited with the upstream fork
+had no evidence in this repository and was a `hypothesis`; it was removed in
+version 0.8.1.
+
 ## Current map-position interpretation
 
 The E15 map record's field 8 and the latest clean-path position have been
