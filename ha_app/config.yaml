@@ -1,0 +1,31 @@
+name: Eufy Mower Bridge
+version: 0.3.0
+slug: eufy_mower_bridge
+description: Dedicated Eufy E15 mower bridge for the Eufy Robomow integration (state only, local install candidate)
+url: https://github.com/keesmod/eufy-robomow-ha
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: manual
+init: false
+timeout: 25
+ports:
+  8090/tcp: 8090
+ports_description:
+  8090/tcp: Private bridge API, bearer token required
+options:
+  token: ""
+  email: ""
+  password: ""
+  country: ""
+schema:
+  token: password
+  email: email
+  password: password
+  country: str
+  operating_mode: list(observe_only)?
+  cloud_timeout_ms: int(1000,60000)?
+  local_timeout_ms: int(1000,60000)?
+  host: str?
+  hosts: str?

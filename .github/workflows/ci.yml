@@ -78,6 +78,24 @@ jobs:
         run: npm audit --package-lock-only --ignore-scripts --include=dev --include=optional --include=peer
         working-directory: bridge
 
+  bridge-container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Staged app sources and versions match the bridge
+        run: |
+          python3 scripts/prepare_ha_app.py
+          git diff --exit-code -- ha_app
+      - name: Build the standalone image from the pinned base and lockfile
+        run: docker build -t eufy-mower-bridge:test ./bridge
+      - name: Standalone image refuses without configuration, runs healthy without network and stops cleanly
+        run: bridge/scripts/container-smoke.sh eufy-mower-bridge:test
+      - name: Build the Home Assistant app candidate
+        run: docker build -t eufy-mower-bridge-app:test ./ha_app
+      - name: App candidate refuses without options, runs healthy without network and stops cleanly
+        run: bridge/scripts/container-smoke.sh --app eufy-mower-bridge-app:test
+
   hassfest:
     runs-on: ubuntu-latest
     container:
