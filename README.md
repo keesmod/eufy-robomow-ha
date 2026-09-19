@@ -174,6 +174,26 @@ issue or include them in diagnostics.
 
 ---
 
+## Mower bridge (foundation)
+
+[`bridge/`](bridge/README.md) contains the dedicated Node 24 mower bridge that
+later steps connect to this integration. It consumes
+[`@keesmod/eufy-mega-client`](https://github.com/keesmod/eufy-mega-client)
+0.13.0 as a library, pinned to the exact release tarball, and instantiates only
+the library's mower module. It has its own token, credentials, session file,
+data directory, port and lifecycle, and runs with no camera bridge present.
+
+Version 0.1.0 is a lifecycle foundation only. It validates its configuration,
+keeps one private session, serves one authenticated `GET /v1/state` document,
+makes one explicit authentication attempt without retries and stops cleanly on
+`SIGTERM`. It starts only in `observe_only` and exposes no discovery, telemetry,
+control, settings or map routes. The Python integration does not use it yet and
+keeps its own local backend. The follow-up order is recorded in
+[issue #12](https://github.com/keesmod/eufy-robomow-ha/issues/12). See
+[ADR 0003](docs/architecture/0003-dedicated-mower-bridge.md).
+
+---
+
 ## How it works
 
 - **Local polling** (every 10 s) via the [Tuya local protocol](https://github.com/jasonacox/tinytuya) for real-time status (battery, activity state, etc.).
