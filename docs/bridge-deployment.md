@@ -164,13 +164,21 @@ Nothing else needs a backup. Discovery results and telemetry are not stored.
 
 ## Where the limits are
 
-Bridge mode in the integration is state only. Activity reports mowing, paused
-and returning from the E15 payloads confirmed in library 0.15.0, see
-[DP 107 activity](protocol-provenance.md#dp-107-activity). Docked, charging,
-idle and error have no confirmed payload and are never inferred, and mowing
-progress stays unconfirmed. Bridge 0.5.0 adds opt-in start, pause and resume
-routes behind `operating_mode: control` and a required `control_stop_route`,
-which the integration does not use yet. Leave the mode at `observe_only`
-unless a supervised test with the app at hand is planned. `return`, settings
-and map routes follow in later steps. Physical control keeps its explicit
-opt-in and supervised validation.
+Bridge mode in the integration reads state and, since integration 0.9.0,
+routes start, pause and resume through the bridge's opt-in command routes.
+Activity reports mowing, paused and returning from the E15 payloads confirmed
+in library 0.16.0, see [DP 107 activity](protocol-provenance.md#dp-107-activity).
+Docked, charging, idle and error have no confirmed payload and are never
+inferred, mowing progress stays unconfirmed and a bridge-mode session cannot
+observe its end. Commands need two opt-ins: the integration's operating mode
+`control` and the bridge's `operating_mode: control` with its required
+`control_stop_route`. The integration reads `routes.control` from the bridge
+state on every poll and exposes start and pause only while it is true. Each
+command is sent once, the bridge's confirmed, failed or uncertain answer is the
+result, and an uncertain command is never repeated automatically. Leave the
+bridge at `observe_only` unless a supervised test with the app at hand is
+planned, the bridge has not yet run in control mode against the mower, see
+keesmod/eufy-robomow-ha#8. `return` stays unavailable in the integration until
+the library has a route the owned firmware honours. Settings and map routes
+follow in later steps. Physical control keeps its explicit opt-in and
+supervised validation.
