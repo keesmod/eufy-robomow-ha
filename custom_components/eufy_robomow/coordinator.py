@@ -8,6 +8,7 @@ import time
 from threading import Lock
 from homeassistant.util import dt as dt_util
 
+from .bridge_client import BridgeClient, BridgeClientError, parse_state_document
 from .commands import MowerCommand
 from .sessions import SessionStore
 from .const import CMD_START, CMD_RESUME, CMD_PAUSE, CMD_DOCK
@@ -31,6 +32,8 @@ from .const import (
     CLOUD_BLADE_SPEED,
     CLOUD_PAD_DIRECTION,
     OPERATING_MODE_CONTROL,
+    BACKEND_BRIDGE,
+    BACKEND_LOCAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,7 +52,17 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
     ones like DP3, DP4, DP36, DP102-DP185 that the local Tuya protocol never
     returns.  For any DP present in both transports the local (real-time) value
     takes precedence.
+
+    With ``backend=BACKEND_BRIDGE`` the coordinator instead reads one typed state
+    document per poll from the dedicated mower bridge and owns no local socket.
     """
+
+    # Defaults so a coordinator created without __init__ (as in unit tests) is local.
+    backend: str = BACKEND_LOCAL
+    bridge: BridgeClient | None = None
+    bridge_mower_id: str | None = None
+    bridge_activity: str | None = None
+    bridge_error: str | None = None
 
     def __init__(
         self,
@@ -59,6 +72,9 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         local_key: str,
         cloud_client=None,  # EufyCloudClient | None  (avoid circular import)
         operating_mode: str = "observe_only",
+        backend: str = BACKEND_LOCAL,
+        bridge: BridgeClient | None = None,
+        bridge_mower_id: str | None = None,
     ) -> None:
         super().__init__(
             hass,
@@ -71,6 +87,15 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self.local_key = local_key
         self.cloud_client = cloud_client
         self.operating_mode = operating_mode
+        # Exactly one backend owns the mower. In bridge mode no local socket is
+        # ever opened, no cloud client exists and no write reaches the device.
+        self.backend = backend
+        self.bridge = bridge
+        self.bridge_mower_id = bridge_mower_id
+        self.bridge_activity = None
+        self.bridge_error = None
+        if backend == BACKEND_BRIDGE and (bridge is None or not bridge_mower_id):
+            raise ValueError("The bridge backend needs a bridge client and a mower id")
 
         self._device_lock = Lock()
         self.local_dps: dict = {}
@@ -78,7 +103,9 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self.last_local_update: datetime | None = None
         self.command: MowerCommand | None = None
         self.session_store: SessionStore | None = None
-        self._device = self._make_device()
+        self._device: tinytuya.Device | None = (
+            None if backend == BACKEND_BRIDGE else self._make_device()
+        )
         # Use float('-inf') so the first poll always fetches cloud DPS
         self._cloud_last_fetch: float = float("-inf")
         # Consecutive cloud failures — used for exponential backoff
@@ -97,6 +124,15 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         """Return whether physical and settings writes are explicitly enabled."""
         return self.operating_mode == OPERATING_MODE_CONTROL
 
+    @property
+    def writes_available(self) -> bool:
+        """Writes need explicit control and a backend that routes them.
+
+        The bridge backend serves state only until its control routes exist, so
+        no write entity is created and every write is refused in that mode.
+        """
+        return self.control_enabled and self.backend != BACKEND_BRIDGE
+
     def _require_control_enabled(self) -> None:
         """Reject writes while the integration is in its safe default mode."""
         if not self.control_enabled:
@@ -104,6 +140,15 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
                 "Eufy Robomow is in observe-only mode. Enable control in the "
                 "integration options before sending commands."
             )
+
+    def _require_writes_available(self) -> None:
+        """Reject writes that no backend can route, before touching any transport."""
+        if self.backend == BACKEND_BRIDGE:
+            raise HomeAssistantError(
+                "Eufy Robomow uses the mower bridge backend, which does not route "
+                "commands or settings yet. Select the local backend for writes."
+            )
+        self._require_control_enabled()
 
     def async_add_new_dp_listener(self, callback) -> None:
         """Register *callback(dps)* to be called whenever new DPS keys are discovered.
@@ -131,6 +176,8 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
     def _device_call(self, method: str, *args):
         """Serialize worker calls even if an awaiting task is cancelled."""
         with self._device_lock:
+            if self._device is None:
+                raise HomeAssistantError("No local mower connection exists in bridge mode")
             return getattr(self._device, method)(*args)
 
     # ── polling ───────────────────────────────────────────────────────────────
@@ -151,6 +198,9 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
              _new_dp_callbacks with the complete dps dict so sensor.py can
              register generic sensors immediately.
         """
+        if self.backend == BACKEND_BRIDGE:
+            return await self._async_update_from_bridge()
+
         # ── 1. Local DPS (every POLL_INTERVAL seconds) ────────────────────────
         sample_started = time.monotonic()
         try:
@@ -285,6 +335,33 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
 
         return dps
 
+    async def _async_update_from_bridge(self) -> dict:
+        """One typed state query through the mower bridge.
+
+        Freshness comes from the bridge's ``observed_at``, never from the poll
+        time. A stale answer, an error code, an unreachable bridge or an invalid
+        document fails the update so entities become unavailable, exactly like a
+        failed local poll. Nothing is carried forward and nothing is written.
+        """
+        assert self.bridge is not None and self.bridge_mower_id is not None
+        try:
+            document = await self.bridge.async_mower_state(self.bridge_mower_id)
+            telemetry = parse_state_document(document, self.bridge_mower_id)
+        except BridgeClientError as exc:
+            self.bridge_error = exc.code
+            raise UpdateFailed(f"Mower bridge request failed: {exc.code}") from exc
+        if telemetry.stale or telemetry.error is not None:
+            self.bridge_error = telemetry.error or "stale"
+            raise UpdateFailed(f"Mower bridge lost mower data: {self.bridge_error}")
+        self.bridge_error = None
+        self.bridge_activity = telemetry.activity
+        self.local_generation += 1
+        self.last_local_update = telemetry.observed_at
+        dps = dict(telemetry.dps)
+        _LOGGER.debug("Bridge state received (%d mapped keys)", len(dps))
+        self._known_dps = set(dps.keys())
+        return dps
+
     def _carry_forward_cloud_data(self, dps: dict, local_dp_keys: set[str]) -> None:
         """Copy all non-local keys from the previous coordinator.data into dps.
 
@@ -301,7 +378,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
 
     async def async_send_mower_command(self, action: str, timeout: float = 35) -> None:
         """Send once, then await fresh device telemetry with a bounded timeout."""
-        self._require_control_enabled()
+        self._require_writes_available()
         if action not in ("start", "resume", "pause", "dock"):
             raise HomeAssistantError("Unsupported mower command")
         if self.command and self.command.state in ("sending", "pending"):
@@ -355,7 +432,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
 
     async def async_send_command(self, dp: str, value) -> None:
         """Write a single DPS value or raise a visible Home Assistant error."""
-        self._require_control_enabled()
+        self._require_writes_available()
         _LOGGER.debug("Sending command DP %s = %s", dp, value)
         try:
             result = await self.hass.async_add_executor_job(
@@ -377,7 +454,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         Keyword arguments: edge_mm, path_mm, travel_speed, blade_speed, pad_direction.
         Raises a visible Home Assistant error when the write is not confirmed.
         """
-        self._require_control_enabled()
+        self._require_writes_available()
         if not self.cloud_client:
             raise HomeAssistantError(
                 "Cloud settings are unavailable because no cloud client is configured."

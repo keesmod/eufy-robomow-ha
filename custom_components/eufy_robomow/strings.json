@@ -32,21 +32,38 @@
     "step": {
       "init": {
         "title": "Eufy Robomow options",
-        "description": "Observe-only disables mower and settings writes. The optional map source is always read-only; leave its URL empty to disable the map entity.",
+        "description": "Observe-only disables mower and settings writes. The local backend polls the mower itself. The bridge backend reads state from the dedicated mower bridge and routes no command yet. The optional map source is always read-only; leave its URL empty to disable the map entity.",
         "data": {
           "operating_mode": "Operating mode",
+          "backend": "Mower backend",
+          "bridge_url": "Bridge URL",
+          "bridge_token": "Bridge token",
+          "bridge_mower_id": "Bridge mower id (optional)",
+          "bridge_certificate_fingerprint": "Bridge certificate SHA-256 fingerprint (optional)",
           "map_source_url": "Map source HTTPS URL",
           "map_certificate_fingerprint": "Certificate SHA-256 fingerprint (optional)"
         },
         "data_description": {
           "operating_mode": "observe_only is the safe default; control enables physical mower commands and setting changes.",
+          "backend": "local keeps this integration's own polling and cloud client. bridge reads state from the mower bridge only and creates no local connection.",
+          "bridge_url": "http or https base URL of the mower bridge, for example http://127.0.0.1:8090.",
+          "bridge_token": "The bridge's bearer token. It is stored in this entry's options.",
+          "bridge_mower_id": "The mower id from the bridge's discovery. Leave empty when the bridge discovers exactly one mower.",
+          "bridge_certificate_fingerprint": "Optional pin for a private or self-signed TLS certificate on an https bridge URL.",
           "map_source_url": "Base URL of a compatible E15 map source.",
           "map_certificate_fingerprint": "Optional pin for a private or self-signed TLS certificate."
         }
       }
     },
     "error": {
-      "invalid_map_source": "The map source URL or certificate fingerprint is invalid."
+      "invalid_map_source": "The map source URL or certificate fingerprint is invalid.",
+      "invalid_bridge": "The bridge URL, token, mower id or certificate fingerprint is invalid.",
+      "bridge_unauthorized": "The bridge rejected the token.",
+      "bridge_cannot_connect": "Cannot connect to the bridge. Check the URL, the certificate and that the bridge is running.",
+      "bridge_mower_selection_required": "The bridge discovered more than one mower. Enter the mower id.",
+      "bridge_unknown_mower": "The bridge did not discover a mower with this id.",
+      "bridge_no_mowers": "The bridge discovered no mower for this account.",
+      "bridge_unavailable": "The bridge answered but is not ready. Check its state and try again."
     }
   },
   "entity": {

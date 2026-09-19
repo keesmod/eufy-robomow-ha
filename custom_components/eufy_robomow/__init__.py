@@ -16,15 +16,25 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import config_validation as cv
 
+from .bridge_client import BridgeClient, BridgeSettings, BridgeSettingsError
 from .const import (
     DOMAIN,
+    BACKEND_BRIDGE,
+    BACKENDS,
+    CONF_BACKEND,
+    CONF_BRIDGE_CERTIFICATE_FINGERPRINT,
+    CONF_BRIDGE_MOWER_ID,
+    CONF_BRIDGE_TOKEN,
+    CONF_BRIDGE_URL,
     CONF_DEVICE_ID,
     CONF_LOCAL_KEY,
     CONF_EUFY_EMAIL,
     CONF_EUFY_PASSWORD,
     CONF_OPERATING_MODE,
+    DEFAULT_BACKEND,
     DEFAULT_OPERATING_MODE,
 )
 from .coordinator import EufyMowerCoordinator
@@ -59,18 +69,43 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Eufy Robomow from a config entry."""
-    email    = entry.data.get(CONF_EUFY_EMAIL, "").strip()
-    password = entry.data.get(CONF_EUFY_PASSWORD, "").strip()
+    backend = entry.options.get(CONF_BACKEND, DEFAULT_BACKEND)
+    if backend not in BACKENDS:
+        raise ConfigEntryError(f"Unknown mower backend {backend!r}")
 
     cloud_client = None
-    if email and password:
-        from .cloud import EufyCloudClient  # lazy import — avoids loading cryptography at startup
-        cloud_client = EufyCloudClient(
-            email=email,
-            password=password,
-            device_id=entry.data[CONF_DEVICE_ID],
-        )
-        _LOGGER.debug("Cloud client created")
+    bridge: BridgeClient | None = None
+    bridge_mower_id: str | None = None
+    if backend == BACKEND_BRIDGE:
+        # The bridge owns cloud and LAN access to the mower. This integration then
+        # creates no cloud client and no local device, so nothing is polled twice.
+        try:
+            settings = BridgeSettings.from_values(
+                base_url=entry.options.get(CONF_BRIDGE_URL, ""),
+                token=entry.options.get(CONF_BRIDGE_TOKEN, ""),
+                mower_id=entry.options.get(CONF_BRIDGE_MOWER_ID, ""),
+                certificate_fingerprint=entry.options.get(
+                    CONF_BRIDGE_CERTIFICATE_FINGERPRINT, ""
+                ),
+            )
+        except BridgeSettingsError as exc:
+            raise ConfigEntryError(f"Invalid mower bridge settings: {exc}") from exc
+        if settings.mower_id is None:
+            raise ConfigEntryError("The mower bridge backend needs a mower id")
+        bridge = BridgeClient(hass, settings)
+        bridge_mower_id = settings.mower_id
+        _LOGGER.debug("Mower bridge backend selected")
+    else:
+        email    = entry.data.get(CONF_EUFY_EMAIL, "").strip()
+        password = entry.data.get(CONF_EUFY_PASSWORD, "").strip()
+        if email and password:
+            from .cloud import EufyCloudClient  # lazy import — avoids loading cryptography at startup
+            cloud_client = EufyCloudClient(
+                email=email,
+                password=password,
+                device_id=entry.data[CONF_DEVICE_ID],
+            )
+            _LOGGER.debug("Cloud client created")
 
     coordinator = EufyMowerCoordinator(
         hass,
@@ -82,6 +117,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             CONF_OPERATING_MODE,
             entry.data.get(CONF_OPERATING_MODE, DEFAULT_OPERATING_MODE),
         ),
+        backend=backend,
+        bridge=bridge,
+        bridge_mower_id=bridge_mower_id,
     )
 
     session_store = SessionStore(hass, entry.entry_id)
