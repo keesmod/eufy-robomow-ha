@@ -8,7 +8,7 @@ import { EufyError, type AuthAnswer, type AuthState, type MowerAdapter, type Mow
 import { MowerBridge, type BridgeState } from '../src/bridge.ts';
 import { STATE_PATH } from '../src/server.ts';
 import { IDENTITY_FILE, SESSION_FILE } from '../src/storage.ts';
-import { TOKEN, assertNoSecrets, call, settledHandles, temporaryDirectory, testConfig, transportHandles } from './helpers.ts';
+import { TOKEN, assertNoSecrets, baselineHandles, call, settledHandles, temporaryDirectory, testConfig } from './helpers.ts';
 
 /** Every bridge is stopped when its test ends, so a failed assertion never leaves a listener behind. */
 function owned(t: TestContext, ...parameters: ConstructorParameters<typeof MowerBridge>): MowerBridge {
@@ -73,7 +73,7 @@ class SyntheticAdapter implements MowerAdapter {
 test('idle startup and shutdown keep observe_only, touch no cloud and leave no transport handles', async (t) => {
   const directory = await temporaryDirectory();
   t.after(directory.remove);
-  const handles = transportHandles();
+  const handles = await baselineHandles();
   let adapters = 0;
   const bridge = owned(t, testConfig(directory.path), {
     adapter: () => {
@@ -91,7 +91,8 @@ test('idle startup and shutdown keep observe_only, touch no cloud and leave no t
   assert.equal(state.lifecycle, 'running');
   assert.deepEqual(state.auth, { state: 'disconnected', last_error: null, attempted_at: null });
   assert.deepEqual(state.client, { package: '@keesmod/eufy-mega-client', version: '0.13.0', module: 'mowers', lifecycle: 'open', connected: false });
-  assert.deepEqual(state.routes, { discovery: false, state: false, control: false, maps: false });
+  assert.deepEqual(state.mowers, { count: null, discovered_at: null, error: null });
+  assert.deepEqual(state.routes, { discovery: true, state: true, control: false, maps: false });
   assert.match(String(state.bridge_id), /^[0-9a-f-]{36}$/);
   assert.equal(state.bridge_id, bridge.bridgeId);
   assert.equal((await call(base(bridge), STATE_PATH)).status, 401);
@@ -114,7 +115,7 @@ test('idle startup and shutdown keep observe_only, touch no cloud and leave no t
 test('failed cloud authentication records a stable code, keeps observe_only and leaves no handles', async (t) => {
   const directory = await temporaryDirectory();
   t.after(directory.remove);
-  const handles = transportHandles();
+  const handles = await baselineHandles();
   const requests: string[] = [];
   const fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     requests.push(new URL(String(input)).pathname);
@@ -152,7 +153,7 @@ test('adapter failures without a known code are reduced to mower_authentication_
 test('a connected session is stored privately in the mower data path and restored after a restart', async (t) => {
   const directory = await temporaryDirectory();
   t.after(directory.remove);
-  const handles = transportHandles();
+  const handles = await baselineHandles();
   const adapters: SyntheticAdapter[] = [];
   const dependencies = {
     adapter: (context: MowerAdapterContext) => {
@@ -190,7 +191,7 @@ test('a connected session is stored privately in the mower data path and restore
 test('authentication is bounded, cancelled by shutdown and never retried', async (t) => {
   const directory = await temporaryDirectory();
   t.after(directory.remove);
-  const handles = transportHandles();
+  const handles = await baselineHandles();
   let adapter: SyntheticAdapter | undefined;
   const bridge = owned(t, testConfig(directory.path), {
     adapter: (context) => (adapter = new SyntheticAdapter(context, 'wait')),
@@ -222,7 +223,7 @@ test('a port in use fails startup cleanly with nothing left behind', async (t) =
   await once(blocker, 'listening');
   const address = blocker.address();
   assert.ok(address && typeof address === 'object');
-  const handles = transportHandles();
+  const handles = await baselineHandles();
   const bridge = owned(t, testConfig(directory.path, { port: address.port }));
   await assert.rejects(bridge.start(), { code: 'address_in_use' });
   assert.equal(bridge.lifecycle, 'stopped');
@@ -234,7 +235,7 @@ test('a port in use fails startup cleanly with nothing left behind', async (t) =
 test('shutdown reports incomplete or overdue library cleanup while the server still closes', async (t) => {
   const directory = await temporaryDirectory();
   t.after(directory.remove);
-  const handles = transportHandles();
+  const handles = await baselineHandles();
   const failing = owned(t, testConfig(directory.path), { adapter: (context) => new SyntheticAdapter(context, 'fail-shutdown') });
   await failing.start();
   await failing.connect();
