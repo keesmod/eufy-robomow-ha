@@ -91,7 +91,7 @@ DP_PAUSED = "2"  # bool  True = session paused, False = actively moving
 DP_BATTERY = "8"  # int   Battery level 0–100 %
 DP_VOLUME = "26"  # int   Speaker volume 0–100 %
 DP_CHILD_PROTECTION = "47"  # bool  True = child/pet protection active
-DP_SIGNAL = "109"  # int   Signal strength (raw value; e.g. 50 → −50 dBm)
+DP_SIGNAL = "109"  # int   Wi-Fi signal strength 0–100 % as declared by the mower (not dBm)
 DP_CUT_HEIGHT = "110"  # int   Blade height in mm (e.g. 40)
 DP_LIVE_VIEW = "114"  # int   Live-view/camera state:
 #       32  = idle (no live view)
