@@ -26,6 +26,18 @@ TOKEN = "synthetic-bridge-token-0123456789abcdef"
 MOWER_ID = "a" * 64
 OTHER_ID = "b" * 64
 OBSERVED_AT = "2026-09-19T10:00:01.250Z"
+# Library 0.15.0 lists DP 107 once per confirmed status definition.
+STATUS_DP = ["107", "107", "107"]
+
+
+def _status(activity: str) -> dict[str, Any]:
+    return {
+        "state": "reported",
+        "value": activity,
+        "dp": STATUS_DP,
+        "source": "local-tuya-3.5",
+        "observedAt": OBSERVED_AT,
+    }
 
 
 def _settings(**overrides: str) -> BridgeSettings:
@@ -48,7 +60,7 @@ def _document(**overrides: Any) -> dict[str, Any]:
         "age_ms": 12,
         "stale": False,
         "error": None,
-        "status": {"state": "unconfirmed", "level": "observed"},
+        "status": {"state": "missing", "dp": STATUS_DP},
         "battery": {
             "state": "reported",
             "value": {"percent": 85},
@@ -123,17 +135,19 @@ def test_state_document_maps_only_reported_typed_fields() -> None:
     assert telemetry.age_ms == 12
     assert telemetry.stale is False
     assert telemetry.error is None
-    assert telemetry.activity is None, "an unconfirmed status is never turned into an activity"
+    assert telemetry.status == "missing"
+    assert telemetry.activity is None, "a missing status is never turned into an activity"
     assert telemetry.dps == {"8": 85, "134": "Wifi", "109": 70}
 
     reported = parse_state_document(
         _document(
-            status={"state": "reported", "value": "mowing", "dp": ["107"], "source": "local-tuya-3.5", "observedAt": OBSERVED_AT},
+            status=_status("mowing"),
             battery={"state": "missing", "dp": ["8"]},
             network={"state": "reported", "value": {"kind": "cellular"}, "dp": ["134"], "source": "local-tuya-3.5", "observedAt": OBSERVED_AT},
         ),
         MOWER_ID,
     )
+    assert reported.status == "reported"
     assert reported.activity == "mowing"
     assert reported.dps == {"134": "Cellular"}
 
@@ -141,6 +155,30 @@ def test_state_document_maps_only_reported_typed_fields() -> None:
     assert stale.stale is True
     assert stale.error == "mower_local_unreachable"
     assert stale.age_ms == 30_000
+
+
+@pytest.mark.parametrize("activity", ["mowing", "paused", "returning"])
+def test_state_document_reports_each_confirmed_activity(activity: str) -> None:
+    telemetry = parse_state_document(_document(status=_status(activity)), MOWER_ID)
+    assert telemetry.status == "reported"
+    assert telemetry.activity == activity
+    assert telemetry.observed_at == datetime(2026, 9, 19, 10, 0, 1, 250000, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        ({"state": "missing", "dp": STATUS_DP}, "missing"),
+        ({"state": "invalid", "dp": STATUS_DP}, "invalid"),
+        ({"state": "unconfirmed", "level": "observed"}, "unconfirmed"),
+        ({"state": "unconfirmed"}, "unconfirmed"),
+    ],
+)
+def test_state_document_keeps_missing_and_invalid_status_explicit(status: dict[str, Any], expected: str) -> None:
+    telemetry = parse_state_document(_document(status=status), MOWER_ID)
+    assert telemetry.status == expected
+    assert telemetry.activity is None, "only a reported status carries an activity"
+    assert telemetry.dps == {"8": 85, "134": "Wifi", "109": 70}, "the other fields are unaffected"
 
 
 @pytest.mark.parametrize(
@@ -158,6 +196,9 @@ def test_state_document_maps_only_reported_typed_fields() -> None:
         {"battery": {"state": "reported", "value": "85"}},
         {"network": {"state": "reported", "value": {"signalPercent": -1}}},
         {"status": {"state": "reported", "value": {"activity": "mowing"}}},
+        {"status": {"state": "reported", "dp": STATUS_DP}},
+        {"status": {"state": "stale", "dp": STATUS_DP}},
+        {"status": {"dp": STATUS_DP}},
         {"progress": "unconfirmed"},
     ],
 )
