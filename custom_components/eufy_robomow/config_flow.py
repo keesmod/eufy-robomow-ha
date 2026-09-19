@@ -21,11 +21,26 @@ from homeassistant.config_entries import (
     OptionsFlowWithReload,
 )
 from homeassistant.const import CONF_HOST
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import selector
 
+from .bridge_client import (
+    BridgeClient,
+    BridgeClientError,
+    BridgeSettings,
+    BridgeSettingsError,
+    resolve_mower_id,
+)
 from .const import (
     DOMAIN,
+    BACKEND_BRIDGE,
+    BACKENDS,
+    CONF_BACKEND,
+    CONF_BRIDGE_CERTIFICATE_FINGERPRINT,
+    CONF_BRIDGE_MOWER_ID,
+    CONF_BRIDGE_TOKEN,
+    CONF_BRIDGE_URL,
     CONF_DEVICE_ID,
     CONF_LOCAL_KEY,
     CONF_EUFY_EMAIL,
@@ -33,6 +48,7 @@ from .const import (
     CONF_MAP_CERTIFICATE_FINGERPRINT,
     CONF_MAP_SOURCE_URL,
     CONF_OPERATING_MODE,
+    DEFAULT_BACKEND,
     DEFAULT_OPERATING_MODE,
     OPERATING_MODES,
 )
@@ -209,8 +225,41 @@ class EufyRobomowConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
 
+# Bridge client failure codes mapped onto options-flow error keys. Every other
+# code, including bridge-side 503 codes, becomes a generic unavailable error.
+_BRIDGE_FLOW_ERRORS = {
+    "unauthorized": "bridge_unauthorized",
+    "cannot_connect": "bridge_cannot_connect",
+    "timeout": "bridge_cannot_connect",
+    "transport_failed": "bridge_cannot_connect",
+    "certificate_mismatch": "bridge_cannot_connect",
+    "certificate_invalid": "bridge_cannot_connect",
+    "mower_selection_required": "bridge_mower_selection_required",
+    "unknown_mower": "bridge_unknown_mower",
+    "no_mowers": "bridge_no_mowers",
+}
+
+
+async def _async_validate_bridge(hass: HomeAssistant, settings: BridgeSettings) -> str:
+    """Prove the token against the bridge and resolve the mower this entry owns.
+
+    Discovery may legitimately be unavailable while the bridge is not connected
+    to the cloud yet. An explicitly configured id is then kept as given. Without
+    an id, discovery has to succeed so the entry never guesses a mower.
+    """
+    client = BridgeClient(hass, settings)
+    await client.async_state()
+    try:
+        discovery = await client.async_mowers()
+    except BridgeClientError:
+        if settings.mower_id is not None:
+            return settings.mower_id
+        raise
+    return resolve_mower_id(discovery, settings.mower_id)
+
+
 class EufyRobomowOptionsFlow(OptionsFlowWithReload):
-    """Manage operating mode and optional read-only map acquisition."""
+    """Manage operating mode, the mower backend and optional read-only map acquisition."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -229,27 +278,61 @@ class EufyRobomowOptionsFlow(OptionsFlowWithReload):
                 )
             except MapSourceError:
                 errors["base"] = "invalid_map_source"
-            else:
+            if not errors and user_input.get(CONF_BACKEND, DEFAULT_BACKEND) == BACKEND_BRIDGE:
+                try:
+                    settings = BridgeSettings.from_values(
+                        base_url=user_input.get(CONF_BRIDGE_URL, ""),
+                        token=user_input.get(CONF_BRIDGE_TOKEN, ""),
+                        mower_id=user_input.get(CONF_BRIDGE_MOWER_ID, ""),
+                        certificate_fingerprint=user_input.get(
+                            CONF_BRIDGE_CERTIFICATE_FINGERPRINT, ""
+                        ),
+                    )
+                    mower_id = await _async_validate_bridge(self.hass, settings)
+                except BridgeSettingsError:
+                    errors["base"] = "invalid_bridge"
+                except BridgeClientError as exc:
+                    errors["base"] = _BRIDGE_FLOW_ERRORS.get(exc.code, "bridge_unavailable")
+                else:
+                    user_input = {
+                        **user_input,
+                        CONF_BRIDGE_URL: settings.base_url,
+                        CONF_BRIDGE_TOKEN: settings.token,
+                        CONF_BRIDGE_MOWER_ID: mower_id,
+                    }
+            if not errors:
                 return self.async_create_entry(data=user_input)
 
-        current_mode = self.config_entry.options.get(
+        options = self.config_entry.options
+        current_mode = options.get(
             CONF_OPERATING_MODE,
             self.config_entry.data.get(CONF_OPERATING_MODE, DEFAULT_OPERATING_MODE),
         )
         schema = vol.Schema(
             {
                 vol.Required(CONF_OPERATING_MODE): vol.In(OPERATING_MODES),
+                vol.Required(CONF_BACKEND, default=DEFAULT_BACKEND): vol.In(BACKENDS),
+                vol.Optional(CONF_BRIDGE_URL): str,
+                vol.Optional(CONF_BRIDGE_TOKEN): selector.TextSelector(
+                    selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+                ),
+                vol.Optional(CONF_BRIDGE_MOWER_ID): str,
+                vol.Optional(CONF_BRIDGE_CERTIFICATE_FINGERPRINT): str,
                 vol.Optional(CONF_MAP_SOURCE_URL): str,
                 vol.Optional(CONF_MAP_CERTIFICATE_FINGERPRINT): str,
             }
         )
         suggested = {
             CONF_OPERATING_MODE: current_mode,
-            CONF_MAP_SOURCE_URL: self.config_entry.options.get(
-                CONF_MAP_SOURCE_URL,
-                "",
+            CONF_BACKEND: options.get(CONF_BACKEND, DEFAULT_BACKEND),
+            CONF_BRIDGE_URL: options.get(CONF_BRIDGE_URL, ""),
+            CONF_BRIDGE_TOKEN: options.get(CONF_BRIDGE_TOKEN, ""),
+            CONF_BRIDGE_MOWER_ID: options.get(CONF_BRIDGE_MOWER_ID, ""),
+            CONF_BRIDGE_CERTIFICATE_FINGERPRINT: options.get(
+                CONF_BRIDGE_CERTIFICATE_FINGERPRINT, ""
             ),
-            CONF_MAP_CERTIFICATE_FINGERPRINT: self.config_entry.options.get(
+            CONF_MAP_SOURCE_URL: options.get(CONF_MAP_SOURCE_URL, ""),
+            CONF_MAP_CERTIFICATE_FINGERPRINT: options.get(
                 CONF_MAP_CERTIFICATE_FINGERPRINT,
                 "",
             ),

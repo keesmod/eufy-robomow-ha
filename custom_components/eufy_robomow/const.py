@@ -25,6 +25,17 @@ CONF_MAP_SOURCE_URL = "map_source_url"
 CONF_MAP_CERTIFICATE_FINGERPRINT = "map_certificate_fingerprint"
 CONF_OPERATING_MODE = "operating_mode"
 
+# Backend that owns the mower. Exactly one backend polls and writes at a time.
+CONF_BACKEND = "backend"
+BACKEND_LOCAL = "local"  # this integration's own Tuya local polling and cloud client
+BACKEND_BRIDGE = "bridge"  # the dedicated Node mower bridge under bridge/
+BACKENDS = [BACKEND_LOCAL, BACKEND_BRIDGE]
+DEFAULT_BACKEND = BACKEND_LOCAL
+CONF_BRIDGE_URL = "bridge_url"
+CONF_BRIDGE_TOKEN = "bridge_token"
+CONF_BRIDGE_MOWER_ID = "bridge_mower_id"
+CONF_BRIDGE_CERTIFICATE_FINGERPRINT = "bridge_certificate_fingerprint"
+
 # Physical commands and setting writes are opt-in while the integration is alpha.
 OPERATING_MODE_OBSERVE_ONLY = "observe_only"
 OPERATING_MODE_CONTROL = "control"

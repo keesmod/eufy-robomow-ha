@@ -17,6 +17,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     DOMAIN,
+    BACKEND_BRIDGE,
     CONF_DEVICE_ID,
     DP_PAUSED,
     DP_PROGRESS,
@@ -26,6 +27,18 @@ from .coordinator import EufyMowerCoordinator
 from .telemetry import task_active
 
 _LOGGER = logging.getLogger(__name__)
+
+# The library's typed activity, only when it is reported from a confirmed
+# definition. Nothing here is inferred from age, absence or inactivity.
+BRIDGE_ACTIVITIES: dict[str, LawnMowerActivity] = {
+    "mowing": LawnMowerActivity.MOWING,
+    "paused": LawnMowerActivity.PAUSED,
+    "returning": LawnMowerActivity.RETURNING,
+    "docked": LawnMowerActivity.DOCKED,
+    "charging": LawnMowerActivity.DOCKED,
+    "idle": LawnMowerActivity.DOCKED,
+    "error": LawnMowerActivity.ERROR,
+}
 
 
 async def async_setup_entry(
@@ -66,8 +79,12 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
 
     @property
     def supported_features(self) -> LawnMowerEntityFeature:
-        """Expose controls only after the user explicitly opts in."""
-        if not self.coordinator.control_enabled:
+        """Expose controls only after the user explicitly opts in.
+
+        The bridge backend routes no command yet, so it never exposes controls,
+        whatever the operating mode.
+        """
+        if not self.coordinator.writes_available:
             return LawnMowerEntityFeature(0)
         return self._CONTROL_FEATURES
 
@@ -75,6 +92,9 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
 
     @property
     def activity(self) -> LawnMowerActivity | None:
+        if self.coordinator.backend == BACKEND_BRIDGE:
+            reported = self.coordinator.bridge_activity
+            return BRIDGE_ACTIVITIES.get(reported) if reported else None
         dps = self.coordinator.local_dps
         dp1 = task_active(dps)
         if type(dp1) is not bool:
@@ -102,11 +122,16 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {
+        attributes = {
             "operating_mode": self.coordinator.operating_mode,
+            "backend": self.coordinator.backend,
             "telemetry_updated_at": self.coordinator.last_local_update,
             "command": self.coordinator.command.as_dict() if self.coordinator.command else None,
         }
+        if self.coordinator.backend == BACKEND_BRIDGE:
+            attributes["bridge_activity"] = self.coordinator.bridge_activity
+            attributes["bridge_error"] = self.coordinator.bridge_error
+        return attributes
 
     async def async_start_mowing(self) -> None:
         action = "resume" if self.activity == LawnMowerActivity.PAUSED else "start"
