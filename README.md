@@ -120,7 +120,8 @@ failed local poll. Nothing is carried forward.
 
 Bridge mode is state only today. It exposes no mower controls and creates no
 settings entities, whatever the operating mode, and a write raises a clear
-error. Session history does not grow in bridge mode. Activity comes from the
+error. Bridge 0.5.0 offers opt-in start, pause and resume routes, which the
+integration does not use yet (issue #22). Session history does not grow in bridge mode. Activity comes from the
 library's typed status. With bridge 0.4.0 on library 0.15.0 the mower entity
 reports mowing, paused and returning from the confirmed DP 107 payloads, with
 `telemetry_updated_at` as the observation time. The `bridge_status` attribute
@@ -219,11 +220,11 @@ issue or include them in diagnostics.
 [`bridge/`](bridge/README.md) contains the dedicated Node 24 mower bridge that
 later steps connect to this integration. It consumes
 [`@keesmod/eufy-mega-client`](https://github.com/keesmod/eufy-mega-client)
-0.15.0 as a library, pinned to the exact release tarball, and instantiates only
+0.16.0 as a library, pinned to the exact release tarball, and instantiates only
 the library's mower module. It has its own token, credentials, session file,
 data directory, port and lifecycle, and runs with no camera bridge present.
 
-Version 0.4.0 validates its configuration, keeps one private session, makes one
+Version 0.5.0 validates its configuration, keeps one private session, makes one
 explicit authentication attempt without retries and stops cleanly on `SIGTERM`.
 Its read-only routes are `GET /v1/state`, `GET /v1/mowers` for the discovered
 E15 mowers and `GET /v1/mowers/{id}/state` for one typed local query over the
@@ -231,10 +232,15 @@ LAN with explicit freshness and stale last-good results. Battery, network,
 signal and the E15 activities mowing, paused and returning are confirmed in
 the library today, see [DP 107 activity](docs/protocol-provenance.md#dp-107-activity).
 No E15 payload identifies docked, charging, idle or error and mowing progress
-stays unconfirmed. It starts only in
-`observe_only` and exposes no control, settings or map routes. The Python
-integration consumes it through the optional **bridge** mower backend described
-above, for state only. It ships as a reproducible container image and as a
+stays unconfirmed. It starts in `observe_only` by default, where every command
+route answers `403`. With `operating_mode: control` and a required stop route
+it adds `POST /v1/mowers/{id}/commands/{start|pause|resume}`, each checked on
+the bridge for mode, class, mower, host, exclusive ownership and the age of the
+last state observation, and served as the library's confirmed, failed or
+uncertain outcome without retry or replay. `return` stays unsupported until
+the library has a route the owned firmware honours. No settings or map routes.
+The Python integration consumes it through the optional **bridge** mower
+backend described above, for state only. It ships as a reproducible container image and as a
 local Home Assistant app candidate with a health check, see the
 [deployment guide](docs/bridge-deployment.md). The follow-up order is recorded
 in [issue #12](https://github.com/keesmod/eufy-robomow-ha/issues/12). See

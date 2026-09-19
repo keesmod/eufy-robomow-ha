@@ -4,6 +4,8 @@ import {
   ConfigError,
   DEFAULT_BIND_ADDRESS,
   DEFAULT_CLOUD_TIMEOUT_MS,
+  DEFAULT_CONTROL_MAX_STATE_AGE_MS,
+  DEFAULT_CONTROL_READ_BACK_MS,
   DEFAULT_DATA_DIR,
   DEFAULT_LOCAL_TIMEOUT_MS,
   DEFAULT_PORT,
@@ -32,6 +34,7 @@ test('minimal values resolve to observe-only defaults with a separate mower data
     localTimeoutMs: DEFAULT_LOCAL_TIMEOUT_MS,
     hosts: {},
     host: null,
+    control: null,
   });
   assert.equal(config.bindAddress, '127.0.0.1', 'the private API binds to loopback unless configured otherwise');
   assert.notEqual(config.dataDir, '/data', 'the mower keeps its own data path');
@@ -59,13 +62,30 @@ test('every required value and format is validated before startup', () => {
   assert.equal(resolveConfig(syntheticValues({ port: '8091' })).port, 8091);
 });
 
-test('E15 stays observe_only: any other operating mode is refused at startup', () => {
-  assert.throws(
-    () => resolveConfig(syntheticValues({ operating_mode: 'control' })),
-    (error: unknown) => error instanceof ConfigError && error.key === 'operating_mode' && error.message.includes('observe_only'),
-  );
+test('observe_only is the default and control needs the explicit stop route opt-in', () => {
   assert.equal(resolveConfig(syntheticValues({ operating_mode: 'observe_only' })).operatingMode, 'observe_only');
   assert.equal(resolveConfig(syntheticValues({ operating_mode: '' })).operatingMode, 'observe_only');
+  rejects(syntheticValues({ operating_mode: 'manual' }), 'operating_mode');
+  rejects(syntheticValues({ operating_mode: 'Control' }), 'operating_mode');
+  rejects(syntheticValues({ operating_mode: 'control' }), 'control_stop_route');
+  rejects(syntheticValues({ operating_mode: 'control', control_stop_route: '   ' }), 'control_stop_route');
+  rejects(syntheticValues({ operating_mode: 'control', control_stop_route: 'x'.repeat(201) }), 'control_stop_route');
+  rejects(syntheticValues({ operating_mode: 'control', control_stop_route: 'pause\nthen return' }), 'control_stop_route');
+  rejects(syntheticValues({ operating_mode: 'control', control_stop_route: 'pause then the app', control_max_state_age_ms: 999 }), 'control_max_state_age_ms');
+  rejects(syntheticValues({ operating_mode: 'control', control_stop_route: 'pause then the app', control_max_state_age_ms: 300_001 }), 'control_max_state_age_ms');
+  rejects(syntheticValues({ operating_mode: 'control', control_stop_route: 'pause then the app', control_read_back_ms: 60_001 }), 'control_read_back_ms');
+  const control = resolveConfig(syntheticValues({ operating_mode: 'control', control_stop_route: '  pause then the app  ' }));
+  assert.equal(control.operatingMode, 'control');
+  assert.deepEqual(control.control, { stopRoute: 'pause then the app', maxStateAgeMs: DEFAULT_CONTROL_MAX_STATE_AGE_MS, readBackMs: DEFAULT_CONTROL_READ_BACK_MS });
+  const tuned = resolveConfig(syntheticValues({ operating_mode: 'control', control_stop_route: 'pause then the app', control_max_state_age_ms: '15000', control_read_back_ms: 45_000 }));
+  assert.deepEqual(tuned.control, { stopRoute: 'pause then the app', maxStateAgeMs: 15_000, readBackMs: 45_000 });
+  const ignored = resolveConfig(syntheticValues({ control_stop_route: 'pause then the app', control_read_back_ms: 45_000 }));
+  assert.equal(ignored.control, null, 'control options without the mode change nothing');
+  const description = describeConfig(control);
+  assert.equal(description.operating_mode, 'control');
+  assert.equal(description.control_max_state_age_ms, DEFAULT_CONTROL_MAX_STATE_AGE_MS);
+  assert.equal(description.control_read_back_ms, DEFAULT_CONTROL_READ_BACK_MS);
+  assert.ok(!JSON.stringify(description).includes('pause then the app'), 'the stop route is not logged');
 });
 
 test('options file values are merged and overridden by the environment', async () => {
@@ -85,6 +105,11 @@ test('options file values are merged and overridden by the environment', async (
     io,
   );
   assert.equal(fromEnvironment.dataDir, '/private/mower');
+  const controlled = await loadConfig(
+    { [ENV.options_file]: '/options.json', [ENV.operating_mode]: 'control', [ENV.control_stop_route]: 'pause then the app', [ENV.control_read_back_ms]: '30000' },
+    io,
+  );
+  assert.deepEqual(controlled.control, { stopRoute: 'pause then the app', maxStateAgeMs: DEFAULT_CONTROL_MAX_STATE_AGE_MS, readBackMs: 30_000 });
   await assert.rejects(loadConfig({ [ENV.options_file]: '/missing.json' }, io), (error: unknown) => error instanceof ConfigError && error.key === 'options_file');
   await assert.rejects(loadConfig({}, io), (error: unknown) => error instanceof ConfigError && error.key === 'token');
 });
@@ -97,6 +122,11 @@ test('options file rejects unknown keys, nested values, non-objects and oversize
   assert.throws(() => parseOptions('{"port":8.5}'), (error: unknown) => error instanceof ConfigError && error.key === 'port');
   assert.throws(() => parseOptions(`{"token":"${'x'.repeat(70_000)}"}`), (error: unknown) => error instanceof ConfigError && error.message.includes('too large'));
   assert.deepEqual(parseOptions('{"port":8090,"country":"nl","token":null}'), { port: 8090, country: 'nl' });
+  assert.deepEqual(parseOptions('{"operating_mode":"control","control_stop_route":"pause then the app","control_max_state_age_ms":15000}'), {
+    operating_mode: 'control',
+    control_stop_route: 'pause then the app',
+    control_max_state_age_ms: 15000,
+  });
 });
 
 test('the startup description never contains the token or credentials', () => {
