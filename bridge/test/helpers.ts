@@ -90,3 +90,9 @@ export async function settledHandles(baseline: string[]): Promise<string[]> {
   }
   return current;
 }
+
+/** Baseline taken after handles closed by an earlier test have left the active list. */
+export async function baselineHandles(): Promise<string[]> {
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  return transportHandles();
+}

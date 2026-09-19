@@ -1,4 +1,4 @@
-import { MowerBridge } from './bridge.ts';
+import { BridgeError, MowerBridge } from './bridge.ts';
 import { ConfigError, describeConfig, loadConfig, type BridgeConfig } from './config.ts';
 import { BRIDGE_NAME, BRIDGE_VERSION } from './version.ts';
 
@@ -50,8 +50,16 @@ async function main(): Promise<number> {
   log('info', `${BRIDGE_VERSION} listening on ${address?.address}:${address?.port} ${JSON.stringify(describeConfig(config))}`);
   log('info', `operating mode ${config.operatingMode}: no mower command is available in this version`);
   const auth = await bridge.connect();
-  if (auth.state === 'connected') log('info', 'mower cloud session connected');
-  else log('warn', `mower authentication not connected (${auth.last_error ?? auth.state}). No automatic retry.`);
+  if (auth.state === 'connected') {
+    log('info', 'mower cloud session connected');
+    try {
+      const discovery = await bridge.discover();
+      const hosts = discovery.mowers.filter((mower) => mower.state_available).length;
+      log('info', `discovered ${discovery.mowers.length} mower(s), ${hosts} with a configured LAN host`);
+    } catch (error) {
+      log('warn', `mower discovery failed (${error instanceof BridgeError ? error.code : 'unexpected error'}). No automatic retry.`);
+    }
+  } else log('warn', `mower authentication not connected (${auth.last_error ?? auth.state}). No automatic retry.`);
   return stopped;
 }
 

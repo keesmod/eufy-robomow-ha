@@ -183,12 +183,15 @@ later steps connect to this integration. It consumes
 the library's mower module. It has its own token, credentials, session file,
 data directory, port and lifecycle, and runs with no camera bridge present.
 
-Version 0.1.0 is a lifecycle foundation only. It validates its configuration,
-keeps one private session, serves one authenticated `GET /v1/state` document,
-makes one explicit authentication attempt without retries and stops cleanly on
-`SIGTERM`. It starts only in `observe_only` and exposes no discovery, telemetry,
-control, settings or map routes. The Python integration does not use it yet and
-keeps its own local backend. The follow-up order is recorded in
+Version 0.2.0 validates its configuration, keeps one private session, makes one
+explicit authentication attempt without retries and stops cleanly on `SIGTERM`.
+Its read-only routes are `GET /v1/state`, `GET /v1/mowers` for the discovered
+E15 mowers and `GET /v1/mowers/{id}/state` for one typed local query over the
+LAN with explicit freshness and stale last-good results. Only battery and
+network fields are confirmed in the library today. It starts only in
+`observe_only` and exposes no control, settings or map routes. The Python
+integration does not use it yet and keeps its own local backend. The follow-up
+order is recorded in
 [issue #12](https://github.com/keesmod/eufy-robomow-ha/issues/12). See
 [ADR 0003](docs/architecture/0003-dedicated-mower-bridge.md).
 
