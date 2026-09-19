@@ -17,7 +17,12 @@ workdir=$(mktemp -d)
 
 cleanup() {
   docker rm -f "$name" >/dev/null 2>&1 || true
-  rm -rf "$workdir"
+  # The app container creates /data/eufy-mower as uid 1000 inside the bind mount, which the
+  # calling user cannot delete on Linux. Remove it through a root container first.
+  if [ -d "$workdir/data" ]; then
+    docker run --rm --user 0 --network none -v "$workdir:/work" "$image" rm -rf /work/data >/dev/null 2>&1 || true
+  fi
+  rm -rf "$workdir" 2>/dev/null || true
 }
 trap cleanup EXIT
 
