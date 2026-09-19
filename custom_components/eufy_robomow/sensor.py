@@ -129,13 +129,15 @@ SENSORS: tuple[EufySensorDescription, ...] = (
         icon="mdi:wifi",
     ),
     EufySensorDescription(
+        # DP 109 is declared by the mower as wifi_signal_strength, integer 0 to 100, unit %.
+        # Confirmed on the owned E15 (firmware 6.9.28), see docs/protocol-provenance.md.
+        # It is not a dBm reading, so no signal_strength device class and no sign change.
         key="signal",
         dp=DP_SIGNAL,
         name="Signal Strength",
-        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="dBm",
-        icon="mdi:signal",
+        native_unit_of_measurement=PERCENTAGE,
+        icon="mdi:wifi-strength-3",
     ),
     EufySensorDescription(
         key="live_view",
@@ -365,9 +367,6 @@ class EufySensor(CoordinatorEntity[EufyMowerCoordinator], SensorEntity):
         # Convert DP125 raw units → hours
         if self.entity_description.dp == DP_TOTAL_TIME:
             return round((raw * DP125_SECONDS_PER_UNIT) / 3600, 1)
-        # Convert DP109 raw signal → negative dBm (device sends 58, means -58 dBm)
-        if self.entity_description.dp == DP_SIGNAL:
-            return -raw
         # DP118 "Return Progress":
         #   0 = idle / mowing — not a meaningful progress value, return None
         #       so HA shows "Unknown" rather than a misleading 0%.
