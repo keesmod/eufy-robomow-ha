@@ -2,15 +2,21 @@ import { readFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { isAbsolute } from 'node:path';
 
-/** Physical control is not part of this bridge version. Only observe-only configurations start. */
+/** Default. No route writes to the mower and every command route answers 403. */
 export const OPERATING_MODE_OBSERVE_ONLY = 'observe_only';
-export type OperatingMode = typeof OPERATING_MODE_OBSERVE_ONLY;
+/** Explicit opt-in. Requires `control_stop_route`. Enables the typed command routes. */
+export const OPERATING_MODE_CONTROL = 'control';
+export type OperatingMode = typeof OPERATING_MODE_OBSERVE_ONLY | typeof OPERATING_MODE_CONTROL;
 
 export const DEFAULT_PORT = 8090;
 export const DEFAULT_BIND_ADDRESS = '127.0.0.1';
 export const DEFAULT_DATA_DIR = '/data/eufy-mower';
 export const DEFAULT_CLOUD_TIMEOUT_MS = 15_000;
 export const DEFAULT_LOCAL_TIMEOUT_MS = 5_000;
+/** A command is refused when the last successful state observation of that mower is older. */
+export const DEFAULT_CONTROL_MAX_STATE_AGE_MS = 30_000;
+/** Library read-back bound after every write. The library accepts 1000 to 60000. */
+export const DEFAULT_CONTROL_READ_BACK_MS = 20_000;
 export const MAX_OPTIONS_FILE_BYTES = 65_536;
 
 /** Mower account credentials. Secret. Never logged, never part of any state response. */
@@ -37,6 +43,14 @@ export interface BridgeConfig {
   hosts: Readonly<Record<string, string>>;
   /** LAN host used when exactly one mower is discovered and it has no entry in `hosts`. */
   host: string | null;
+  /** Present only in `control` mode. The stop route is the operator's own words, passed to the library opt-in. */
+  control: ControlConfig | null;
+}
+
+export interface ControlConfig {
+  stopRoute: string;
+  maxStateAgeMs: number;
+  readBackMs: number;
 }
 
 export class ConfigError extends Error {
@@ -64,6 +78,9 @@ export const ENV = {
   local_timeout_ms: 'EUFY_MOWER_LOCAL_TIMEOUT_MS',
   host: 'EUFY_MOWER_HOST',
   hosts: 'EUFY_MOWER_HOSTS',
+  control_stop_route: 'EUFY_MOWER_CONTROL_STOP_ROUTE',
+  control_max_state_age_ms: 'EUFY_MOWER_CONTROL_MAX_STATE_AGE_MS',
+  control_read_back_ms: 'EUFY_MOWER_CONTROL_READ_BACK_MS',
   options_file: 'EUFY_MOWER_OPTIONS_FILE',
 } as const;
 
@@ -82,6 +99,9 @@ const OPTION_KEYS: readonly OptionKey[] = [
   'local_timeout_ms',
   'host',
   'hosts',
+  'control_stop_route',
+  'control_max_state_age_ms',
+  'control_read_back_ms',
 ];
 
 /** `hosts` is `id=host` pairs separated by commas, or an object of id to host in the options file. */
@@ -160,8 +180,8 @@ export function resolveConfig(values: OptionValues): BridgeConfig {
   if (!isAbsolute(dataDir) || dataDir.includes('\0'))
     throw new ConfigError('data_dir', 'must be an absolute path');
   const operatingMode = text(values, 'operating_mode') || OPERATING_MODE_OBSERVE_ONLY;
-  if (operatingMode !== OPERATING_MODE_OBSERVE_ONLY)
-    throw new ConfigError('operating_mode', `only ${OPERATING_MODE_OBSERVE_ONLY} is available in this bridge version`);
+  if (operatingMode !== OPERATING_MODE_OBSERVE_ONLY && operatingMode !== OPERATING_MODE_CONTROL)
+    throw new ConfigError('operating_mode', `must be ${OPERATING_MODE_OBSERVE_ONLY} or ${OPERATING_MODE_CONTROL}`);
   const cloudTimeoutMs = integer(values, 'cloud_timeout_ms', DEFAULT_CLOUD_TIMEOUT_MS, 1000, 60_000);
   const localTimeoutMs = integer(values, 'local_timeout_ms', DEFAULT_LOCAL_TIMEOUT_MS, 1000, 60_000);
   const single = text(values, 'host');
@@ -171,11 +191,28 @@ export function resolveConfig(values: OptionValues): BridgeConfig {
     port,
     bindAddress,
     dataDir,
-    operatingMode: OPERATING_MODE_OBSERVE_ONLY,
+    operatingMode,
     cloudTimeoutMs,
     localTimeoutMs,
     hosts: hosts(values.hosts),
     host: single ? host('host', single) : null,
+    control: operatingMode === OPERATING_MODE_CONTROL ? control(values) : null,
+  };
+}
+
+/**
+ * The control opt-in. The stop route is required in the operator's own words, as the library
+ * requires it, so nobody enables physical control without stating how the mower is stopped.
+ */
+function control(values: OptionValues): ControlConfig {
+  const stopRoute = (text(values, 'control_stop_route') ?? '').trim();
+  if (!stopRoute) throw new ConfigError('control_stop_route', `is required in ${OPERATING_MODE_CONTROL} mode`);
+  if (!/^[\x20-\x7e]{1,200}$/.test(stopRoute))
+    throw new ConfigError('control_stop_route', 'must be 1 to 200 printable ASCII characters');
+  return {
+    stopRoute,
+    maxStateAgeMs: integer(values, 'control_max_state_age_ms', DEFAULT_CONTROL_MAX_STATE_AGE_MS, 1000, 300_000),
+    readBackMs: integer(values, 'control_read_back_ms', DEFAULT_CONTROL_READ_BACK_MS, 1000, 60_000),
   };
 }
 
@@ -251,5 +288,8 @@ export function describeConfig(config: BridgeConfig): Record<string, string | nu
     cloud_timeout_ms: config.cloudTimeoutMs,
     local_timeout_ms: config.localTimeoutMs,
     configured_hosts: Object.keys(config.hosts).length + (config.host ? 1 : 0),
+    ...(config.control
+      ? { control_max_state_age_ms: config.control.maxStateAgeMs, control_read_back_ms: config.control.readBackMs }
+      : {}),
   };
 }

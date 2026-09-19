@@ -8,6 +8,10 @@ import {
   type MowerActivity,
   type MowerAdapter,
   type MowerAdapterContext,
+  type MowerCommandEnd,
+  type MowerCommandKind,
+  type MowerCommandOutcome,
+  type MowerCommandStage,
   type MowerDevice,
   type MowerHomeOptions,
   type MowerLocalSession,
@@ -17,7 +21,7 @@ import {
   type MowerTelemetry,
   type MowerTelemetryField,
 } from '@keesmod/eufy-mega-client';
-import { MOWER_ID, type BridgeConfig } from './config.ts';
+import { MOWER_ID, type BridgeConfig, type ControlConfig } from './config.ts';
 import { ApiError, BridgeError } from './errors.ts';
 import { createPrivateServer } from './server.ts';
 import { MowerSessionFile, PrivateDirectory, bridgeIdentity } from './storage.ts';
@@ -35,6 +39,15 @@ export const DEFAULT_DISCOVERY_CACHE_MS = 10 * 60_000;
 export const DEFAULT_DISCOVERY_INTERVAL_MS = 60_000;
 
 export { ApiError, BridgeError } from './errors.ts';
+
+/**
+ * Command classes with a route. `return` is declared by the library but was not honoured by the
+ * owned E15 on firmware 6.9.28 (library receipt of 2026-09-19), so it answers `command_unsupported`
+ * until the library has a working return route.
+ */
+export const ROUTED_COMMAND_CLASSES = ['start', 'pause', 'resume'] as const satisfies readonly MowerCommandKind[];
+const COMMAND_CLASSES: readonly string[] = ['start', 'pause', 'resume', 'return'] satisfies readonly MowerCommandKind[];
+type RoutedCommandClass = (typeof ROUTED_COMMAND_CLASSES)[number];
 
 export type OpenLocalSession = (
   id: string,
@@ -99,6 +112,30 @@ export interface MowerStateDocument extends TelemetryFields {
   error: string | null;
 }
 
+/** Contract 1 of `POST /v1/mowers/{id}/commands/{class}`. Raw reports and data points are never served. */
+export interface MowerCommandDocument {
+  contract: 1;
+  id: string;
+  command: MowerCommandKind;
+  /**
+   * `confirmed` when a fresh report reflected the expected activity, `failed` when the device
+   * rejected the control frame, `uncertain` when the bound passed or the report limit was reached
+   * after the write. An uncertain command was written and must never be repeated automatically.
+   */
+  result: 'confirmed' | 'failed' | 'uncertain';
+  write: { dp: string; code: string; value: boolean };
+  sent_at: string;
+  stage: MowerCommandStage;
+  end: MowerCommandEnd;
+  /** Observation time of the fresh status query the library ran before the write. */
+  before_observed_at: string;
+  reply: { observed_at: string; return_code_zero: boolean; rejected: boolean } | null;
+  acknowledgement: { observed_at: string; sequence: number; dp: string } | null;
+  activity: { observed_at: string; sequence: number; value: MowerActivity } | null;
+  /** Number of fresh reports received during the read-back. */
+  reports: number;
+}
+
 export type BridgeLifecycle = 'created' | 'starting' | 'running' | 'stopping' | 'stopped';
 
 /** Authentication summary. Captcha images and verification prompts are not exposed by this version. */
@@ -125,8 +162,10 @@ export interface BridgeState {
     connected: boolean;
   };
   mowers: { count: number | null; discovered_at: string | null; error: string | null };
-  /** Control and map routes arrive in later steps. Physical control is never part of observe-only operation. */
-  routes: { discovery: true; state: true; control: false; maps: false };
+  /** `control` is true only in `control` mode. Map routes arrive in a later step. */
+  routes: { discovery: true; state: true; control: boolean; maps: false };
+  /** The command opt-in in effect, or null in `observe_only`. The stop route text is not served. */
+  control: { classes: RoutedCommandClass[]; max_state_age_ms: number; read_back_ms: number } | null;
 }
 
 interface Deadline {
@@ -180,6 +219,31 @@ function errorCode(error: unknown): string {
   return 'internal_error';
 }
 
+function commandDocument(id: string, outcome: MowerCommandOutcome): MowerCommandDocument {
+  const result = outcome.end === 'reflected' ? 'confirmed' : outcome.end === 'rejected' ? 'failed' : 'uncertain';
+  return {
+    contract: 1,
+    id,
+    command: outcome.command,
+    result,
+    write: { dp: outcome.write.dp, code: outcome.write.code, value: outcome.write.value },
+    sent_at: outcome.sentAt,
+    stage: outcome.stage,
+    end: outcome.end,
+    before_observed_at: outcome.before.observedAt,
+    reply: outcome.reply
+      ? { observed_at: outcome.reply.observedAt, return_code_zero: outcome.reply.returnCodeZero, rejected: outcome.reply.rejected }
+      : null,
+    acknowledgement: outcome.acknowledgement
+      ? { observed_at: outcome.acknowledgement.observedAt, sequence: outcome.acknowledgement.sequence, dp: outcome.acknowledgement.dp }
+      : null,
+    activity: outcome.activity
+      ? { observed_at: outcome.activity.observedAt, sequence: outcome.activity.sequence, value: outcome.activity.value }
+      : null,
+    reports: outcome.reports.length,
+  };
+}
+
 /** Stops accepting connections, lets in-flight responses finish briefly, then forces the rest closed. */
 function closeServer(server: Server, graceMs: number): Promise<void> {
   if (!server.listening) return Promise.resolve();
@@ -196,7 +260,8 @@ function closeServer(server: Server, graceMs: number): Promise<void> {
 /**
  * Owns exactly one library client with only the mower module, one private session file, one
  * identity and one private HTTP server. Startup, one explicit authentication attempt and
- * shutdown are each bounded. Nothing is retried and no mower command exists in this version.
+ * shutdown are each bounded. Nothing is retried. Commands exist only behind the `control`
+ * opt-in, one per mower at a time, and are never replayed.
  */
 export class MowerBridge {
   readonly #config: BridgeConfig;
@@ -217,7 +282,10 @@ export class MowerBridge {
   #discoveryAttemptAt: number | undefined;
   #discovering: Promise<void> | undefined;
   #lastGood = new Map<string, TelemetryFields>();
+  /** Ids whose most recent state query failed, so their last good result is only served as stale. */
+  #staleIds = new Set<string>();
   #queries = new Map<string, Promise<MowerStateDocument>>();
+  #commands = new Map<string, Promise<MowerCommandDocument>>();
 
   constructor(config: BridgeConfig, dependencies: BridgeDependencies = {}) {
     this.#config = config;
@@ -263,7 +331,14 @@ export class MowerBridge {
         discovered_at: this.#discovery ? new Date(this.#discovery.at).toISOString() : null,
         error: this.#discoveryError,
       },
-      routes: { discovery: true, state: true, control: false, maps: false },
+      routes: { discovery: true, state: true, control: this.#config.control !== null, maps: false },
+      control: this.#config.control
+        ? {
+            classes: [...ROUTED_COMMAND_CLASSES],
+            max_state_age_ms: this.#config.control.maxStateAgeMs,
+            read_back_ms: this.#config.control.readBackMs,
+          }
+        : null,
     };
   }
 
@@ -394,9 +469,11 @@ export class MowerBridge {
         network: structuredClone(telemetry.network),
       };
       this.#lastGood.set(id, fields);
+      this.#staleIds.delete(id);
       return this.#stateDocument(id, fields, null);
     } catch (error) {
       const code = errorCode(error);
+      this.#staleIds.add(id);
       const last = this.#lastGood.get(id);
       if (last) return this.#stateDocument(id, last, code);
       throw new ApiError(503, code);
@@ -416,6 +493,66 @@ export class MowerBridge {
     };
   }
 
+  /**
+   * One opt-in command for one discovered mower, `POST /v1/mowers/{id}/commands/{class}`. Every
+   * check runs on the bridge before the library is touched: the operating mode, the class, the
+   * mower and its host, and the age of the last successful state observation against
+   * `control.maxStateAgeMs`. One command owns a mower at a time. The library's outcome is served
+   * as confirmed, failed or uncertain and is never retried or replayed.
+   */
+  command(id: string, kind: string): Promise<MowerCommandDocument> {
+    let mowers: MowerModule;
+    try {
+      mowers = this.#running();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    const control = this.#config.control;
+    if (!control) return Promise.reject(new ApiError(403, 'control_disabled'));
+    if (!COMMAND_CLASSES.includes(kind)) return Promise.reject(new ApiError(404, 'not_found'));
+    if (!(ROUTED_COMMAND_CLASSES as readonly string[]).includes(kind)) return Promise.reject(new ApiError(409, 'command_unsupported'));
+    if (!MOWER_ID.test(id)) return Promise.reject(new ApiError(400, 'invalid_mower_id'));
+    if (this.#commands.has(id)) return Promise.reject(new ApiError(409, 'command_in_progress'));
+    const run = this.#runCommand(mowers, control, id, kind as RoutedCommandClass);
+    this.#commands.set(id, run);
+    void run.then(
+      () => this.#commands.delete(id),
+      () => this.#commands.delete(id),
+    );
+    return run;
+  }
+
+  async #runCommand(mowers: MowerModule, control: ControlConfig, id: string, kind: RoutedCommandClass): Promise<MowerCommandDocument> {
+    if (!this.#discovery) await this.#refreshDiscovery(mowers);
+    if (!this.#discovery) throw new ApiError(503, this.#discoveryError ?? 'mower_request_failed');
+    const mower = this.#discovery.mowers.find((entry) => entry.id === id);
+    if (!mower) throw new ApiError(404, 'unknown_mower');
+    if (mower.model !== 'E15') throw new ApiError(409, 'command_unsupported');
+    const host = this.#hostFor(id);
+    if (!host) throw new ApiError(503, 'mower_host_unconfigured');
+    const last = this.#lastGood.get(id);
+    const observed = last ? Date.parse(last.observed_at) : Number.NaN;
+    if (this.#staleIds.has(id) || !Number.isFinite(observed) || this.#now() - observed > control.maxStateAgeMs)
+      throw new ApiError(409, 'telemetry_stale');
+    const open: OpenLocalSession =
+      this.#dependencies.openLocalSession ?? ((target, options, signal) => mowers.openLocalSession(target, options, signal));
+    const signal = this.#lifetime.signal;
+    let outcome: MowerCommandOutcome;
+    try {
+      const session = await open(id, { host, timeoutMs: this.#config.localTimeoutMs }, signal);
+      try {
+        outcome = await session.sendCommand({ kind }, signal);
+      } finally {
+        await session.disconnect();
+      }
+    } catch (error) {
+      const code = errorCode(error);
+      // The library's typed refusals happen before any frame is written. Everything else is a transport or session failure.
+      throw new ApiError(code.startsWith('mower_command') ? 409 : 503, code);
+    }
+    return commandDocument(id, outcome);
+  }
+
   /** Prepares private storage, constructs the mower-only client and starts listening. Bounded. */
   async start(): Promise<void> {
     if (this.#lifecycle !== 'created') throw new BridgeError('bridge_not_restartable');
@@ -433,12 +570,16 @@ export class MowerBridge {
           sessionStore: this.#sessions,
           home,
           ...(this.#dependencies.adapter ? { adapter: this.#dependencies.adapter } : {}),
+          ...(this.#config.control
+            ? { commands: { enabled: true as const, stopRoute: this.#config.control.stopRoute, readBackMs: this.#config.control.readBackMs } }
+            : {}),
         },
       });
       this.#server = createPrivateServer(this.#config.token, {
         state: () => this.state(),
         discover: () => this.discover(),
         mowerState: (id) => this.mowerState(id),
+        command: (id, kind) => this.command(id, kind),
       });
       await listen(this.#server, this.#config.port, this.#config.bindAddress, bound.signal);
       this.#lifecycle = 'running';
@@ -512,7 +653,7 @@ export class MowerBridge {
     this.#lifetime.abort();
     this.#connecting?.controller.abort();
     await this.#connecting?.done;
-    await Promise.allSettled([this.#discovering, ...this.#queries.values()]);
+    await Promise.allSettled([this.#discovering, ...this.#queries.values(), ...this.#commands.values()]);
     const server = this.#server;
     const client = this.#client;
     this.#server = undefined;

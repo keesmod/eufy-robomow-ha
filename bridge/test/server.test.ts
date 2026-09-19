@@ -18,6 +18,10 @@ async function withServer(run: (base: string, calls: () => number) => Promise<vo
       if (id === 'broken') throw new Error('upstream detail that must not leak');
       return { contract: 1, id };
     },
+    command: async (id: string, kind: string) => {
+      if (id === 'observed') throw new ApiError(403, 'control_disabled');
+      return { contract: 1, id, command: kind };
+    },
   };
   const server = createPrivateServer(TOKEN, api);
   server.listen(0, '127.0.0.1');
@@ -50,7 +54,7 @@ test('every request needs the exact bearer token before any route is visible', a
   assert.deepEqual(await settledHandles(handles), handles);
 });
 
-test('the read-only routes are served without caching and refuse other methods and paths', async () => {
+test('the routes are served without caching and refuse other methods and paths', async () => {
   await withServer(async (base, calls) => {
     const reply = await call(base, STATE_PATH, { token: TOKEN });
     assert.equal(reply.status, 200);
@@ -75,7 +79,16 @@ test('the read-only routes are served without caching and refuse other methods a
         assert.deepEqual(refused.json, { error: 'method_not_allowed' });
       }
     }
-    for (const path of ['/v1/state/', '/v1/mowers/', '/v1/mowers/abc', '/v1/mowers/abc/state/extra', '/v1/mowers/a/b/state', '/v1/login', '/v1/cameras', '/health', '/']) {
+    const command = await call(base, `${MOWERS_PATH}/abc/commands/start`, { token: TOKEN, method: 'POST', body: 'ignored body' });
+    assert.equal(command.status, 200, 'the command route is POST and addressed by path');
+    assert.deepEqual(command.json, { contract: 1, id: 'abc', command: 'start' });
+    for (const method of ['GET', 'PUT', 'DELETE']) {
+      const refused = await call(base, `${MOWERS_PATH}/abc/commands/start`, { token: TOKEN, method });
+      assert.equal(refused.status, 405, `${method} command`);
+      assert.equal(refused.headers.allow, 'POST');
+      assert.deepEqual(refused.json, { error: 'method_not_allowed' });
+    }
+    for (const path of ['/v1/state/', '/v1/mowers/', '/v1/mowers/abc', '/v1/mowers/abc/state/extra', '/v1/mowers/a/b/state', '/v1/mowers/abc/commands', '/v1/mowers/abc/commands/', '/v1/mowers/abc/commands/START', '/v1/mowers/abc/commands/start/extra', '/v1/mowers/abc/commands/start-now', '/v1/login', '/v1/cameras', '/health', '/']) {
       const missing = await call(base, path, { token: TOKEN });
       assert.equal(missing.status, 404, path);
       assert.deepEqual(missing.json, { error: 'not_found' });
@@ -93,5 +106,8 @@ test('route failures carry only their status and stable code', async () => {
     assert.equal(broken.status, 500);
     assert.deepEqual(broken.json, { error: 'internal_error' });
     assert.ok(!broken.text.includes('upstream detail'));
+    const forbidden = await call(base, `${MOWERS_PATH}/observed/commands/start`, { token: TOKEN, method: 'POST' });
+    assert.equal(forbidden.status, 403);
+    assert.deepEqual(forbidden.json, { error: 'control_disabled' });
   });
 });

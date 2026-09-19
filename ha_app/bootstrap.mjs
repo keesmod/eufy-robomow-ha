@@ -16,6 +16,9 @@ const ENVIRONMENT = {
   local_timeout_ms: 'EUFY_MOWER_LOCAL_TIMEOUT_MS',
   host: 'EUFY_MOWER_HOST',
   hosts: 'EUFY_MOWER_HOSTS',
+  control_stop_route: 'EUFY_MOWER_CONTROL_STOP_ROUTE',
+  control_max_state_age_ms: 'EUFY_MOWER_CONTROL_MAX_STATE_AGE_MS',
+  control_read_back_ms: 'EUFY_MOWER_CONTROL_READ_BACK_MS',
 };
 
 let options;

@@ -5,12 +5,16 @@ import { ApiError } from './errors.ts';
 export const STATE_PATH = '/v1/state';
 export const MOWERS_PATH = '/v1/mowers';
 const MOWER_STATE_PATH = /^\/v1\/mowers\/([^/]{1,128})\/state$/;
+/** `POST /v1/mowers/{id}/commands/{class}`. The class is addressed by path, bodies are discarded. */
+const MOWER_COMMAND_PATH = /^\/v1\/mowers\/([^/]{1,128})\/commands\/([a-z]{1,16})$/;
 
-/** Read-only operations behind the private API. Every method may throw an ApiError. */
+/** Operations behind the private API. Every method may throw an ApiError. */
 export interface PrivateApi {
   state(): unknown;
   discover(): Promise<unknown>;
   mowerState(id: string): Promise<unknown>;
+  /** The only write route. Refused with 403 unless the bridge runs in `control` mode. */
+  command(id: string, kind: string): Promise<unknown>;
 }
 
 /** Constant-time bearer comparison so the token cannot be recovered through response timing. */
@@ -31,17 +35,25 @@ function json(response: ServerResponse, status: number, value: unknown, headers:
   response.end(body);
 }
 
-function route(api: PrivateApi, pathname: string): (() => unknown) | undefined {
-  if (pathname === STATE_PATH) return () => api.state();
-  if (pathname === MOWERS_PATH) return () => api.discover();
+interface Route {
+  method: 'GET' | 'POST';
+  handler: () => unknown;
+}
+
+function route(api: PrivateApi, pathname: string): Route | undefined {
+  if (pathname === STATE_PATH) return { method: 'GET', handler: () => api.state() };
+  if (pathname === MOWERS_PATH) return { method: 'GET', handler: () => api.discover() };
   const mower = MOWER_STATE_PATH.exec(pathname);
-  if (mower) return () => api.mowerState(mower[1]!);
+  if (mower) return { method: 'GET', handler: () => api.mowerState(mower[1]!) };
+  const command = MOWER_COMMAND_PATH.exec(pathname);
+  if (command) return { method: 'POST', handler: () => api.command(command[1]!, command[2]!) };
   return undefined;
 }
 
 /**
- * Private HTTP shell. Every request needs the bearer token before any route is visible. All
- * routes are GET and read-only. Request bodies are discarded and every timeout is bounded.
+ * Private HTTP shell. Every request needs the bearer token before any route is visible. The
+ * read routes are GET, the command route is POST. Request bodies are discarded and every
+ * timeout is bounded.
  */
 export function createPrivateServer(token: string, api: PrivateApi): Server {
   const server = createServer((request, response) => {
@@ -51,17 +63,17 @@ export function createPrivateServer(token: string, api: PrivateApi): Server {
       return;
     }
     const url = new URL(request.url ?? '/', 'http://bridge');
-    const handler = route(api, url.pathname);
-    if (!handler) {
+    const matched = route(api, url.pathname);
+    if (!matched) {
       json(response, 404, { error: 'not_found' });
       return;
     }
-    if (request.method !== 'GET') {
-      json(response, 405, { error: 'method_not_allowed' }, { Allow: 'GET' });
+    if (request.method !== matched.method) {
+      json(response, 405, { error: 'method_not_allowed' }, { Allow: matched.method });
       return;
     }
     Promise.resolve()
-      .then(handler)
+      .then(matched.handler)
       .then(
         (value) => json(response, 200, value),
         (error: unknown) => {
