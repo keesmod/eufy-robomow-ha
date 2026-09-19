@@ -7,7 +7,8 @@ Control and monitor your Eufy mower directly from Home Assistant over your local
 GitHub is the development source and issue tracker for this fork. Version 0.7.0
 adds a dedicated dashboard card, observed session history, confirmed commands
 and an optional Home Assistant planning package. Version 0.8.0 adds an optional
-mower backend that reads state from the dedicated mower bridge.
+mower backend that reads state from the dedicated mower bridge. Version 0.8.1
+corrects the Signal Strength sensor to the percentage the mower declares.
 
 ---
 
@@ -22,7 +23,7 @@ mower backend that reads state from the dedicated mower bridge.
 | Return Progress | `sensor` | Return-to-base progress (%) |
 | Session Distance | `sensor` | Distance traveled in the current session (m) |
 | Network | `sensor` | WiFi / Cellular connection type |
-| Signal Strength | `sensor` | WiFi signal strength (dBm) |
+| Signal Strength | `sensor` | WiFi signal strength (%), the mower's own declared percentage |
 | Cut Height | `number` | Blade height 25–75 mm, step 5 mm (local, instant) |
 | Volume | `number` | Speaker volume 0–100 % (local) |
 | Edge Distance | `number` | −15 to +15 cm — how far inside/outside the border wire the mower cuts |
@@ -245,6 +246,16 @@ TinyTuya remains pinned to 1.20.0 until another version passes the same local
 protocol tests.
 
 ---
+
+## Upgrade notes
+
+- **0.8.1, Signal Strength unit.** DP 109 is declared by the mower as a
+  percentage from 0 to 100. Earlier versions negated the value and labelled it
+  dBm without evidence. The sensor keeps its entity id and now reports the
+  percentage. Home Assistant detects the changed unit of the sensor's
+  long-term statistics and offers a repair to update or clear the old
+  statistics. Automations that compared the value against negative dBm
+  thresholds need the percentage instead.
 
 ## Known limitations
 
