@@ -2,7 +2,7 @@
 
 The bridge serves contract 1 of ``GET /v1/state``, ``GET /v1/mowers``,
 ``GET /v1/mowers/{id}/state`` and, in its ``control`` mode, one opt-in
-``POST /v1/mowers/{id}/commands/{start|pause|resume}``. This client validates the
+``POST /v1/mowers/{id}/commands/{start|pause|resume|stop}``. This client validates the
 connection settings, bounds every request and reduces failures to stable codes
 without upstream detail. It never logs the token or a document, and it never
 retries: a command request is sent exactly once.
@@ -38,9 +38,11 @@ _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15, connect=5)
 # A command answers after the bridge's connect time plus its read-back bound, at
 # most 60 seconds, so its request may take far longer than a state query.
 _COMMAND_TIMEOUT = aiohttp.ClientTimeout(total=75, connect=5)
-# The command classes bridge 0.5.0 routes. ``return`` is refused by the bridge
-# with ``command_unsupported`` because the owned E15 firmware ignores its write.
-COMMAND_CLASSES = frozenset({"start", "pause", "resume"})
+# The command classes bridge 0.6.0 routes. ``stop`` writes DP 1 false, which on
+# the owned E15 ends the task and returns the mower to the dock by itself.
+# ``return`` is refused by the bridge with ``command_unsupported`` because the
+# owned E15 firmware ignored its DP 3 write from paused and from the stopped task.
+COMMAND_CLASSES = frozenset({"start", "pause", "resume", "stop"})
 _COMMAND_RESULTS = frozenset({"confirmed", "failed", "uncertain"})
 # Codes the bridge, the library or this client raise before any frame is written.
 # Every other failure of a command request leaves the write uncertain.
@@ -272,6 +274,10 @@ class BridgeCommandOutcome:
     # The activity a fresh report reflected, only when one did.
     activity: str | None
     sent_at: str
+    # The name of the DP 107 payload that reflected a ``stop``, ``map_saving``.
+    # On the owned E15 it marks the dock arrival, about 30 seconds after the
+    # write, because a stop ends the task and the mower returns by itself.
+    payload: str | None = None
 
 
 def parse_command_outcome(document: Any, mower_id: str, kind: str) -> BridgeCommandOutcome:
@@ -298,11 +304,18 @@ def parse_command_outcome(document: Any, mower_id: str, kind: str) -> BridgeComm
         if not isinstance(activity_field, dict) or not isinstance(activity_field.get("value"), str):
             raise BridgeClientError("invalid_document")
         activity = activity_field["value"]
-    if result == "confirmed" and activity is None:
-        # Confirmed means a fresh report reflected the expected activity.
+    payload_field = document.get("payload")
+    payload: str | None = None
+    if payload_field is not None:
+        if not isinstance(payload_field, dict) or not isinstance(payload_field.get("name"), str):
+            raise BridgeClientError("invalid_document")
+        payload = payload_field["name"]
+    if result == "confirmed" and activity is None and payload is None:
+        # Confirmed means a fresh report reflected the expected activity or,
+        # for a stop, the map-saving payload.
         raise BridgeClientError("invalid_document")
     return BridgeCommandOutcome(
-        result=result, stage=stage, end=end, activity=activity, sent_at=sent_at
+        result=result, stage=stage, end=end, activity=activity, sent_at=sent_at, payload=payload
     )
 
 

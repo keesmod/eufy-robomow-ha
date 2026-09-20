@@ -46,10 +46,10 @@ version 0.8.1.
 ## DP 107 activity
 
 The mower declares DP 107 `robot_status` as a raw data point. Library
-`@keesmod/eufy-mega-client` 0.16.0, pinned by the mower bridge to the release
+`@keesmod/eufy-mega-client` 0.17.0, pinned by the mower bridge to the release
 tarball with SHA-256
-`021186b38ff4d4c058e7e0f8406214737a61e5b9248235556bf6affd3180d184` from source commit
-`f29df02eabba4376a9f7c9ba031a013fef7686cb`, confirms three payloads on the
+`ff7ab463d418c7bd0a98e204a81acc362e4f3affbc1f53ebc4c0dcc21aaf5288` from source commit
+`192e57e6830fa81680cc55d239ae4387b8f44a95`, confirms three payloads on the
 owned E15 (product code T2880, firmware 6.9.28, Anker eufy app 6.1.00): fields
 1 = 2 and 3 = 1 `mowing`, fields 1 = 2 and 3 = 2 `paused`, and fields 1 = 1 and
 3 = 1 `returning`. Each reached at least four app-correlated transitions across
@@ -57,7 +57,7 @@ two owner-operated windows, recorded in the library's
 [contract receipt](https://github.com/keesmod/eufy-mega-client/blob/ee1ac36bead945445aee63fe049b295e81b9eafc/docs/research/E15_ROBOT_STATUS_CONTRACT_2026-09-16.md)
 and
 [reproduction receipt](https://github.com/keesmod/eufy-mega-client/blob/ee1ac36bead945445aee63fe049b295e81b9eafc/docs/research/E15_ROBOT_STATUS_REPRODUCTION_2026-09-19.md).
-The three activities are `confirmed`. Mower bridge 0.5.0 serves them in the
+The three activities are `confirmed`. Mower bridge 0.6.0 serves them in the
 `status` field of the state route and the integration's bridge mode (0.8.2)
 maps them onto the mower entity, both with the observation time of the query
 that carried the payload.

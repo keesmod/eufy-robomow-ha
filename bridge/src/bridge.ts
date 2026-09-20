@@ -41,12 +41,13 @@ export const DEFAULT_DISCOVERY_INTERVAL_MS = 60_000;
 export { ApiError, BridgeError } from './errors.ts';
 
 /**
- * Command classes with a route. `return` is declared by the library but was not honoured by the
- * owned E15 on firmware 6.9.28 (library receipt of 2026-09-19), so it answers `command_unsupported`
- * until the library has a working return route.
+ * Command classes with a route. `stop` writes DP 1 `switch_go` false: on the owned E15 with firmware
+ * 6.9.28 it ends the task and the mower returns to the dock by itself, reflected by the map-saving
+ * payload at dock arrival (library receipt of 2026-09-20). `return` is declared by the library but
+ * DP 3 was ignored from `paused` and from the stopped task, so it answers `command_unsupported`.
  */
-export const ROUTED_COMMAND_CLASSES = ['start', 'pause', 'resume'] as const satisfies readonly MowerCommandKind[];
-const COMMAND_CLASSES: readonly string[] = ['start', 'pause', 'resume', 'return'] satisfies readonly MowerCommandKind[];
+export const ROUTED_COMMAND_CLASSES = ['start', 'pause', 'resume', 'stop'] as const satisfies readonly MowerCommandKind[];
+const COMMAND_CLASSES: readonly string[] = ['start', 'pause', 'resume', 'stop', 'return'] satisfies readonly MowerCommandKind[];
 type RoutedCommandClass = (typeof ROUTED_COMMAND_CLASSES)[number];
 
 export type OpenLocalSession = (
@@ -118,9 +119,10 @@ export interface MowerCommandDocument {
   id: string;
   command: MowerCommandKind;
   /**
-   * `confirmed` when a fresh report reflected the expected activity, `failed` when the device
-   * rejected the control frame, `uncertain` when the bound passed or the report limit was reached
-   * after the write. An uncertain command was written and must never be repeated automatically.
+   * `confirmed` when a fresh report reflected the expected activity, or the map-saving payload for
+   * `stop`, `failed` when the device rejected the control frame, `uncertain` when the bound passed
+   * or the report limit was reached after the write. An uncertain command was written and must
+   * never be repeated automatically.
    */
   result: 'confirmed' | 'failed' | 'uncertain';
   write: { dp: string; code: string; value: boolean };
@@ -132,6 +134,12 @@ export interface MowerCommandDocument {
   reply: { observed_at: string; return_code_zero: boolean; rejected: boolean } | null;
   acknowledgement: { observed_at: string; sequence: number; dp: string } | null;
   activity: { observed_at: string; sequence: number; value: MowerActivity } | null;
+  /**
+   * The DP 107 payload that reflected a `stop`, the map-saving payload. On the owned E15 it marks
+   * the dock arrival about 30 seconds after the write, because a stop ends the task and the mower
+   * returns to the dock by itself. `stop` has no `activity`, every other class has no `payload`.
+   */
+  payload: { observed_at: string; sequence: number; name: 'map_saving' } | null;
   /** Number of fresh reports received during the read-back. */
   reports: number;
 }
@@ -239,6 +247,9 @@ function commandDocument(id: string, outcome: MowerCommandOutcome): MowerCommand
       : null,
     activity: outcome.activity
       ? { observed_at: outcome.activity.observedAt, sequence: outcome.activity.sequence, value: outcome.activity.value }
+      : null,
+    payload: outcome.payload
+      ? { observed_at: outcome.payload.observedAt, sequence: outcome.payload.sequence, name: outcome.payload.name }
       : null,
     reports: outcome.reports.length,
   };

@@ -69,6 +69,7 @@ def _outcome(**overrides: Any) -> dict[str, Any]:
         "reply": {"observed_at": "2026-09-19T16:42:38.202Z", "return_code_zero": True, "rejected": False},
         "acknowledgement": {"observed_at": "2026-09-19T16:42:39.150Z", "sequence": 63859, "dp": "1"},
         "activity": {"observed_at": "2026-09-19T16:42:39.351Z", "sequence": 63860, "value": "mowing"},
+        "payload": None,
         "reports": 3,
     }
     document.update(overrides)
@@ -384,7 +385,6 @@ def test_client_pins_the_certificate_on_commands_too() -> None:
 @pytest.mark.parametrize(("mower_id", "kind", "code"), [
     (MOWER_ID, "dock", "command_unsupported"),
     (MOWER_ID, "return", "command_unsupported"),
-    (MOWER_ID, "stop", "command_unsupported"),
     ("../commands", "start", "invalid_mower_id"),
     (MOWER_ID.upper(), "start", "invalid_mower_id"),
 ])
@@ -457,6 +457,9 @@ def test_command_outcome_keeps_failed_and_uncertain_explicit(overrides: dict[str
         {"activity": {"observed_at": "x", "sequence": 1}},
         {"activity": {"value": 1}},
         {"result": "confirmed", "activity": None},
+        {"payload": "map_saving"},
+        {"payload": {"observed_at": "x", "sequence": 1}},
+        {"payload": {"name": 5}},
     ],
 )
 def test_command_outcome_rejects_invalid_shapes(overrides: dict[str, Any]) -> None:
@@ -464,6 +467,36 @@ def test_command_outcome_rejects_invalid_shapes(overrides: dict[str, Any]) -> No
         parse_command_outcome(_outcome(**overrides), MOWER_ID, "start")
     with pytest.raises(BridgeClientError, match="invalid_document"):
         parse_command_outcome(["not", "a", "document"], MOWER_ID, "start")
+
+
+STOP_PAYLOAD = {"observed_at": "2026-09-20T10:58:18.236Z", "sequence": 47724, "name": "map_saving"}
+
+
+def test_client_posts_a_stop_and_returns_the_map_saving_payload() -> None:
+    answer = _outcome(
+        command="stop",
+        write={"dp": "1", "code": "switch_go", "value": False},
+        activity=None,
+        payload=STOP_PAYLOAD,
+    )
+    session = _FakeSession([_FakeResponse(200, _json(answer))])
+    client, patcher = _client(session)
+    with patcher:
+        outcome = asyncio.run(client.async_send_command(MOWER_ID, "stop"))
+    assert outcome.result == "confirmed"
+    assert outcome.activity is None, "a stop reflects through the payload, not an activity"
+    assert outcome.payload == "map_saving"
+    method, url, _ = session.requests[0]
+    assert (method, url.endswith(f"/v1/mowers/{MOWER_ID}/commands/stop")) == ("POST", True)
+    assert len(session.requests) == 1
+
+
+def test_command_outcome_keeps_a_stop_without_its_payload_uncertain() -> None:
+    answer = _outcome(command="stop", result="uncertain", stage="acknowledged", end="timed_out", activity=None)
+    outcome = parse_command_outcome(answer, MOWER_ID, "stop")
+    assert (outcome.result, outcome.activity, outcome.payload) == ("uncertain", None, None)
+    with pytest.raises(BridgeClientError, match="invalid_document"):
+        parse_command_outcome(_outcome(command="stop", activity=None), MOWER_ID, "stop")
 
 
 def test_client_validates_the_command_answer_against_the_sent_command() -> None:

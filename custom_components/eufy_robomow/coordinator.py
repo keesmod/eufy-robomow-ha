@@ -50,6 +50,13 @@ _LOGGER = logging.getLogger(__name__)
 _MAX_CONSECUTIVE_ERRORS = 5
 
 
+# The bridge command class behind each mower entity action. Dock is the bridge's
+# ``stop`` class: on the owned E15 a stop over DP 1 false ends the task and the
+# mower returns to the dock by itself, and the library's return over DP 3 is
+# ignored by the firmware.
+BRIDGE_COMMAND_CLASSES = {"start": "start", "resume": "resume", "pause": "pause", "dock": "stop"}
+
+
 class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
     """Polls the Eufy E15 via Tuya local protocol every POLL_INTERVAL seconds.
 
@@ -62,8 +69,8 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
 
     With ``backend=BACKEND_BRIDGE`` the coordinator instead reads one typed state
     document per poll from the dedicated mower bridge and owns no local socket.
-    Start, pause and resume then go through the bridge's opt-in command routes,
-    each sent exactly once, while settings writes have no bridge route.
+    Start, pause, resume and dock then go through the bridge's opt-in command
+    routes, each sent exactly once, while settings writes have no bridge route.
     """
 
     # Defaults so a coordinator created without __init__ (as in unit tests) is local.
@@ -161,7 +168,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
     def commands_available(self) -> bool:
         """Mower commands need explicit control and a backend that routes them.
 
-        The local backend writes them itself. The bridge backend routes start,
+        The local backend writes them itself. The bridge backend routes start, dock,
         pause and resume only while its last state answer reported
         ``routes.control``, which is the bridge's own control opt-in.
         """
@@ -516,23 +523,22 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             self.command.finish("superseded")
 
     async def _async_send_bridge_command(self, action: str) -> None:
-        """Route start, pause or resume through the bridge exactly once.
+        """Route start, pause, resume or dock through the bridge exactly once.
 
-        The bridge checks mode, class, mower, ownership and telemetry age before
-        any write and answers the library's confirmed, failed or uncertain
-        outcome. A refusal known to precede the write ends as ``failed`` with its
-        code, every other failure ends as ``uncertain`` because the frame may
-        have been written. Nothing is retried and a superseded command that has
-        not been sent yet is never sent.
+        Dock goes to the bridge's ``stop`` class. On the owned E15 firmware a stop
+        over DP 1 false ends the task and the mower returns to the dock by
+        itself, while the library's return over DP 3 is ignored, so the bridge
+        has no return route. The bridge checks mode, class, mower, ownership and
+        telemetry age before any write and answers the library's confirmed,
+        failed or uncertain outcome. A refusal known to precede the write ends as
+        ``failed`` with its code, every other failure ends as ``uncertain``
+        because the frame may have been written. Nothing is retried and a
+        superseded command that has not been sent yet is never sent.
         """
         self._require_commands_available()
         if action not in ("start", "resume", "pause", "dock"):
             raise HomeAssistantError("Unsupported mower command")
-        if action == "dock":
-            raise HomeAssistantError(
-                "The mower bridge has no return route: the owned E15 firmware ignores "
-                "the library's return command. Send the mower home from the app."
-            )
+        kind = BRIDGE_COMMAND_CLASSES[action]
         self._supersede_pending(action)
         assert self.bridge is not None and self.bridge_mower_id is not None
         operation = MowerCommand(action, self.local_generation)
@@ -546,7 +552,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
                 operation.sent_monotonic = time.monotonic()
                 operation.state = "pending"
                 self.async_update_listeners()
-                outcome = await self.bridge.async_send_command(self.bridge_mower_id, action)
+                outcome = await self.bridge.async_send_command(self.bridge_mower_id, kind)
             if operation.state == "superseded":
                 raise HomeAssistantError("Command superseded by a later safety command")
             self._finish_bridge_command(operation, outcome)
@@ -575,9 +581,14 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             self.async_update_listeners()
 
     def _finish_bridge_command(self, operation: MowerCommand, outcome: BridgeCommandOutcome) -> None:
-        """Map the bridge's outcome onto the command states the entity exposes."""
+        """Map the bridge's outcome onto the command states the entity exposes.
+
+        A confirmed dock carries the map-saving payload instead of an activity:
+        the evidence ``bridge:map_saving`` is the dock arrival the library
+        observed, never an inference.
+        """
         if outcome.result == "confirmed":
-            operation.finish("confirmed", f"bridge:{outcome.activity}")
+            operation.finish("confirmed", f"bridge:{outcome.activity or outcome.payload}")
             return
         if outcome.result == "failed":
             operation.finish("rejected", f"bridge:{outcome.end}")

@@ -100,9 +100,26 @@ type CommandAnswer = (request: MowerCommandRequest, signal: AbortSignal) => Prom
  * private raw data point that must never reach a response.
  */
 function outcome(kind: MowerCommandKind, end: MowerCommandEnd, at: string): MowerCommandOutcome {
-  const write = kind === 'start' ? { dp: '1', code: 'switch_go', value: true } : { dp: '2', code: 'pause', value: kind === 'pause' };
+  const write =
+    kind === 'start' || kind === 'stop'
+      ? { dp: '1', code: 'switch_go', value: kind === 'start' }
+      : { dp: '2', code: 'pause', value: kind === 'pause' };
   const snapshot = { source: 'local-tuya-3.5' as const, observedAt: at, dps: { '1': false, '118': 100, '155': 'PRIVATE-BLOB' } };
   const base = { command: kind, write, before: snapshot, sentAt: at, reply: { observedAt: at, returnCodeZero: true, rejected: false } };
+  if (end === 'reflected' && kind === 'stop') {
+    // The library reflects a stop through the map-saving DP 107 payload, not through an activity.
+    return {
+      ...base,
+      stage: 'reflected',
+      end,
+      acknowledgement: { observedAt: at, sequence: 11, dp: write.dp },
+      payload: { observedAt: at, sequence: 12, name: 'map_saving' },
+      reports: [
+        { ...snapshot, kind: 'device-report', sequence: 11, dps: { [write.dp]: write.value } },
+        { ...snapshot, kind: 'device-report', sequence: 12, dps: { '107': 'PRIVATE-BLOB' } },
+      ],
+    };
+  }
   if (end === 'reflected') {
     const activity = kind === 'pause' ? ('paused' as const) : ('mowing' as const);
     return {
@@ -510,7 +527,7 @@ test('observe_only answers every command route with 403 before discovery, the li
   assert.equal(state.operating_mode, 'observe_only');
   assert.deepEqual(state.routes, { discovery: true, state: true, control: false, maps: false });
   assert.equal(state.control, null);
-  for (const kind of ['start', 'pause', 'resume', 'return', 'jump']) {
+  for (const kind of ['start', 'pause', 'resume', 'stop', 'return', 'jump']) {
     const refused = await f.post(commandPath(ID_A, kind));
     assert.equal(refused.status, 403, kind);
     assert.deepEqual(refused.json, { error: 'control_disabled' });
@@ -537,7 +554,7 @@ test('control mode routes start, pause and resume behind a fresh observation, se
   const state = (await f.get(STATE_PATH)).json as BridgeState;
   assert.equal(state.operating_mode, 'control');
   assert.deepEqual(state.routes, { discovery: true, state: true, control: true, maps: false });
-  assert.deepEqual(state.control, { classes: ['start', 'pause', 'resume'], max_state_age_ms: 30_000, read_back_ms: 20_000 });
+  assert.deepEqual(state.control, { classes: ['start', 'pause', 'resume', 'stop'], max_state_age_ms: 30_000, read_back_ms: 20_000 });
   assertNoSecrets(JSON.stringify(state));
   // Without a successful observation nothing is written.
   const unknownState = await f.post(commandPath(ID_A, 'start'));
@@ -564,6 +581,7 @@ test('control mode routes start, pause and resume behind a fresh observation, se
     reply: { observed_at: at, return_code_zero: true, rejected: false },
     acknowledgement: { observed_at: at, sequence: 11, dp: '1' },
     activity: { observed_at: at, sequence: 12, value: 'mowing' },
+    payload: null,
     reports: 2,
   });
   assert.deepEqual(log.commands, [{ kind: 'start' }]);
@@ -622,6 +640,57 @@ test('control mode routes start, pause and resume behind a fresh observation, se
   assert.equal(unexpected.status, 503);
   assert.deepEqual(unexpected.json, { error: 'internal_error' });
   assert.ok(!unexpected.text.includes('unexpected detail'));
+  await f.bridge.stop();
+  assert.deepEqual(await settledHandles(handles), handles);
+});
+
+test('control mode routes stop, serves the map-saving payload as its reflection and keeps return unsupported', async (t) => {
+  const handles = await baselineHandles();
+  const log = sessionLog();
+  let end: MowerCommandEnd = 'reflected';
+  const f = await fixture(t, { host: HOST_A, ...CONTROL_MODE }, {
+    openLocalSession: sessions(log, async () => telemetry(new Date(T0 - 1_000).toISOString()), undefined, async (request) =>
+      outcome(request.kind, end, new Date(T0 + 5_000).toISOString()),
+    ),
+  });
+  await f.bridge.connect();
+  assert.equal((await f.get(`${MOWERS_PATH}/${ID_A}/state`)).status, 200);
+  f.clock.now = T0 + 5_000;
+  const stopped = await f.post(commandPath(ID_A, 'stop'));
+  assert.equal(stopped.status, 200, stopped.text);
+  assertNoSecrets(stopped.text);
+  assert.ok(!stopped.text.includes(HOST_A) && !stopped.text.includes('"dps"') && !stopped.text.includes('PRIVATE-BLOB'), 'raw data points, reports and the host are absent');
+  const at = new Date(T0 + 5_000).toISOString();
+  assert.deepEqual(stopped.json, {
+    contract: 1,
+    id: ID_A,
+    command: 'stop',
+    result: 'confirmed',
+    write: { dp: '1', code: 'switch_go', value: false },
+    sent_at: at,
+    stage: 'reflected',
+    end: 'reflected',
+    before_observed_at: at,
+    reply: { observed_at: at, return_code_zero: true, rejected: false },
+    acknowledgement: { observed_at: at, sequence: 11, dp: '1' },
+    activity: null,
+    payload: { observed_at: at, sequence: 12, name: 'map_saving' },
+    reports: 2,
+  });
+  assert.deepEqual(log.commands, [{ kind: 'stop' }]);
+  assert.equal(log.disconnects, log.opened.length, 'the stop session is closed');
+  // A stop whose read-back passed without the payload is uncertain, like every other class.
+  end = 'timed_out';
+  const uncertain = (await f.post(commandPath(ID_A, 'stop'))).json as MowerCommandDocument;
+  assert.equal(uncertain.result, 'uncertain');
+  assert.equal(uncertain.end, 'timed_out');
+  assert.equal(uncertain.activity, null);
+  assert.equal(uncertain.payload, null);
+  // Return stays unsupported: the owned firmware ignored DP 3 from paused and from the stopped task.
+  const unsupported = await f.post(commandPath(ID_A, 'return'));
+  assert.equal(unsupported.status, 409);
+  assert.deepEqual(unsupported.json, { error: 'command_unsupported' });
+  assert.equal(log.commands.length, 2, 'return reached no session');
   await f.bridge.stop();
   assert.deepEqual(await settledHandles(handles), handles);
 });

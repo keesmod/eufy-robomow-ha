@@ -1,6 +1,6 @@
 {
   "name": "eufy-robomow-bridge",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "description": "Dedicated Node 24 mower bridge foundation for the Eufy Robomow Home Assistant integration",
   "type": "module",
@@ -14,7 +14,7 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "@keesmod/eufy-mega-client": "https://github.com/keesmod/eufy-mega-client/releases/download/v0.16.0/keesmod-eufy-mega-client-0.16.0.tgz"
+    "@keesmod/eufy-mega-client": "https://github.com/keesmod/eufy-mega-client/releases/download/v0.17.0/keesmod-eufy-mega-client-0.17.0.tgz"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

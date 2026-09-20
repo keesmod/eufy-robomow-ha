@@ -3,10 +3,11 @@
 How to run the dedicated mower bridge from `bridge/` as a container or as a
 local Home Assistant app, and how to upgrade, restart, back up and roll it
 back. Everything here is local: no image is published and no app repository is
-listed. Version 0.5.0 serves state routes and, only behind the explicit
-`operating_mode: control` opt-in with a stop route, the start, pause and resume
-routes. It pins library 0.16.0, which confirms the E15 activities mowing,
-paused and returning and the start, pause and resume commands.
+listed. Version 0.6.0 serves state routes and, only behind the explicit
+`operating_mode: control` opt-in with a stop route, the start, pause, resume
+and stop routes. It pins library 0.17.0, which confirms the E15 activities
+mowing, paused and returning and the start, pause, resume and stop commands.
+On the owned E15 a stop ends the task and returns the mower to the dock.
 
 ## What is separate from a camera installation
 
@@ -46,7 +47,7 @@ in `ha_app/` (run `python3 scripts/prepare_ha_app.py`).
 ## Install with Docker
 
 ```bash
-docker build -t eufy-mower-bridge:0.5.0 ./bridge
+docker build -t eufy-mower-bridge:0.6.0 ./bridge
 ```
 
 ```bash
@@ -58,7 +59,7 @@ docker run -d --name eufy-mower-bridge --restart unless-stopped \
   -e EUFY_MOWER_PASSWORD=<eufy account password> \
   -e EUFY_MOWER_COUNTRY=NL \
   -e EUFY_MOWER_HOST=<mower LAN address> \
-  eufy-mower-bridge:0.5.0
+  eufy-mower-bridge:0.6.0
 ```
 
 Bind the published port to an address that only Home Assistant can reach, or
@@ -166,19 +167,24 @@ Nothing else needs a backup. Discovery results and telemetry are not stored.
 
 Bridge mode in the integration reads state and, since integration 0.9.0,
 routes start, pause and resume through the bridge's opt-in command routes.
+Since integration 0.10.0 dock goes through the bridge's stop route as well.
 Activity reports mowing, paused and returning from the E15 payloads confirmed
-in library 0.16.0, see [DP 107 activity](protocol-provenance.md#dp-107-activity).
+in library 0.17.0, see [DP 107 activity](protocol-provenance.md#dp-107-activity).
 Docked, charging, idle and error have no confirmed payload and are never
 inferred, mowing progress stays unconfirmed and a bridge-mode session cannot
 observe its end. Commands need two opt-ins: the integration's operating mode
 `control` and the bridge's `operating_mode: control` with its required
 `control_stop_route`. The integration reads `routes.control` from the bridge
-state on every poll and exposes start and pause only while it is true. Each
-command is sent once, the bridge's confirmed, failed or uncertain answer is the
-result, and an uncertain command is never repeated automatically. Leave the
-bridge at `observe_only` unless a supervised test with the app at hand is
-planned, the bridge has not yet run in control mode against the mower, see
-keesmod/eufy-robomow-ha#8. `return` stays unavailable in the integration until
-the library has a route the owned firmware honours. Settings and map routes
-follow in later steps. Physical control keeps its explicit opt-in and
-supervised validation.
+state on every poll and exposes start, pause and dock only while it is true.
+Each command is sent once, the bridge's confirmed, failed or uncertain answer
+is the result, and an uncertain command is never repeated automatically. Dock
+is the bridge's `stop` class: on the owned E15 a stop over DP 1 false ends the
+task and the mower returns to the dock by itself, and a confirmed dock carries
+the map-saving payload the library received at dock arrival. The library's
+`return` over DP 3 is ignored by the owned firmware from paused and from the
+stopped task, so the bridge has no return route and cannot stop the mower in
+place. Leave the bridge at `observe_only` unless a supervised test with the
+app at hand is planned, the bridge has not yet run in control mode against
+the mower, see keesmod/eufy-robomow-ha#8. Settings and map routes follow in
+later steps. Physical control keeps its explicit opt-in and supervised
+validation.
