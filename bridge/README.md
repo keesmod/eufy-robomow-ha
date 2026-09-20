@@ -17,7 +17,10 @@ activities `mowing`, `paused` and `returning`, so the state route reports
 opt-in control routes from issue #19: `operating_mode: control` with a
 required stop route, and `POST /v1/mowers/{id}/commands/{class}` for `start`,
 `pause` and `resume`. In the default `observe_only` mode nothing changed and
-every command route answers `403`.
+every command route answers `403`. Version 0.6.0 pins library 0.17.0 and adds
+the `stop` route from issue #31: on the owned E15 a stop over DP 1 false ends
+the task and the mower returns to the dock by itself, so `stop` is the route
+that brings the mower home. `return` stays unsupported.
 
 ## What it does
 
@@ -57,12 +60,17 @@ every command route answers `403`.
   route answers `403 control_disabled` there and never reaches the library.
   `control` mode needs the explicit stop route opt-in at startup.
 - No `return` route. The library declares `return` over DP 3 `switch_charge`,
-  but the owned E15 on firmware 6.9.28 ignored that write in the library's
-  [command window receipt](https://github.com/keesmod/eufy-mega-client/blob/main/docs/research/E15_COMMAND_WINDOW_2026-09-19.md),
-  so `POST …/commands/return` answers `409 command_unsupported` until the
-  library has a working return route (keesmod/eufy-mega-client#173). The
-  official app remains the return route.
-- No stop, settings, zone or scheduling command.
+  but the owned E15 on firmware 6.9.28 ignored that write from `paused` in the
+  library's
+  [command window receipt](https://github.com/keesmod/eufy-mega-client/blob/main/docs/research/E15_COMMAND_WINDOW_2026-09-19.md)
+  and from the stopped task in its
+  [stop and return receipt](https://github.com/keesmod/eufy-mega-client/blob/19d47a7144e505702e1ef98dfc7d84dfeb956cd6/docs/research/E15_STOP_RETURN_WINDOW_2026-09-20.md),
+  so `POST …/commands/return` answers `409 command_unsupported`. The library
+  has no DP 3 return route on this firmware. `stop` brings the mower home and
+  the official app remains the only way back from a task stopped in place.
+- No stop in place. The library's `stop` ends the task and the mower returns
+  to the dock by itself, it never keeps the mower where it stands. No
+  settings, zone or scheduling command.
 - No polling, reconnect or spontaneous report stream. Every LAN session is
   opened by a request and closed after its query.
 - `status` reports only the three confirmed E15 activities. No E15 payload
@@ -131,12 +139,12 @@ Bridge state, for example:
 {
   "protocol": 1,
   "bridge": "eufy-robomow-bridge",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "bridge_id": "00000000-0000-4000-8000-000000000000",
   "lifecycle": "running",
   "operating_mode": "observe_only",
   "auth": { "state": "disconnected", "last_error": "authentication_failed", "attempted_at": "2026-09-19T10:00:00.000Z" },
-  "client": { "package": "@keesmod/eufy-mega-client", "version": "0.16.0", "module": "mowers", "lifecycle": "open", "connected": false },
+  "client": { "package": "@keesmod/eufy-mega-client", "version": "0.17.0", "module": "mowers", "lifecycle": "open", "connected": false },
   "mowers": { "count": null, "discovered_at": null, "error": "authentication_required" },
   "routes": { "discovery": true, "state": true, "control": false, "maps": false },
   "control": null
@@ -202,7 +210,7 @@ DP 107 payload itself is never served.
 
 #### E15 activity
 
-`status` is whatever library 0.16.0 reports, unchanged. The library is pinned
+`status` is whatever library 0.17.0 reports, unchanged. The library is pinned
 to the release tarball with SHA-256 `021186b38ff4d4c058e7e0f8406214737a61e5b9248235556bf6affd3180d184`
 (source commit `f29df02e`). Its E15 registry confirms three DP 107
 `robot_status` payloads on the owned E15 (T2880, firmware 6.9.28, Anker eufy
@@ -240,14 +248,14 @@ Library codes include `authentication_required`, `mower_protocol_unavailable`,
 ### `POST /v1/mowers/{id}/commands/{class}`
 
 Contract 1. One opt-in command, `control` mode only. The class is `start`,
-`pause` or `resume` in the path. Request bodies are ignored. Every check below
+`pause`, `resume` or `stop` in the path. Request bodies are ignored. Every check below
 runs on the bridge before the library is touched, in this order:
 
 | Status | Code                       | Reason                                                                                              |
 | ------ | -------------------------- | --------------------------------------------------------------------------------------------------- |
 | `403`  | `control_disabled`         | The bridge runs in `observe_only`. Nothing else is checked                                          |
 | `404`  | `not_found`                | The class is not one the library declares                                                           |
-| `409`  | `command_unsupported`      | `return`, which the owned firmware does not honour, or a mower that is not an E15                   |
+| `409`  | `command_unsupported`      | `return`, whose DP 3 write the owned firmware ignores from `paused` and from the stopped task, or a mower that is not an E15 |
 | `400`  | `invalid_mower_id`         | Not a 64-character id                                                                               |
 | `409`  | `command_in_progress`      | Another command owns this mower. One command per mower at a time                                    |
 | `404`  | `unknown_mower`            | Discovery did not return the id                                                                     |
@@ -275,6 +283,7 @@ A `200` carries the library's outcome:
   "reply": { "observed_at": "2026-09-19T16:42:38.202Z", "return_code_zero": true, "rejected": false },
   "acknowledgement": { "observed_at": "2026-09-19T16:42:39.150Z", "sequence": 63859, "dp": "1" },
   "activity": { "observed_at": "2026-09-19T16:42:39.351Z", "sequence": 63860, "value": "mowing" },
+  "payload": null,
   "reports": 3
 }
 ```
@@ -288,13 +297,28 @@ automatically. `stage` is the furthest stage evidenced by fresh reports,
 `sent`, `acknowledged` or `reflected`, and the frame `reply` is not an
 acknowledgement. Raw data points and the reports themselves are never served,
 only their count. The bridge never retries, replays or reconnects, and never
-touches rain or child protection. Dock arrival is not part of any command.
+touches rain or child protection.
+
+`stop` is reflected by the map-saving DP 107 payload instead of an activity,
+served in `payload` as `{ "observed_at", "sequence", "name": "map_saving" }`
+with `activity` null. On the owned E15 the write of DP 1 false ends the task,
+the mower reports `returning` within a second and drives to the dock by
+itself, and the map-saving payload is the dock arrival about 30 seconds after
+the write, followed by the map save, DP 1 false and the default payload. A
+confirmed `stop` therefore means the mower reached the dock, never a stop in
+place. A `stop` whose read-back passed without that payload is `uncertain` and
+was written. Dock arrival is not inferred from anything else and is not part
+of any other command.
 
 Evidence: the library's
 [command window receipt](https://github.com/keesmod/eufy-mega-client/blob/main/docs/research/E15_COMMAND_WINDOW_2026-09-19.md)
 recorded `start`, `pause` and `resume` reflected within 1.2 seconds on the
-owned E15 (firmware 6.9.28, app 6.1.00). The bridge itself has not been run
-against the mower in `control` mode, that is the hardware acceptance in
+owned E15 (firmware 6.9.28, app 6.1.00), and its
+[stop and return receipt](https://github.com/keesmod/eufy-mega-client/blob/19d47a7144e505702e1ef98dfc7d84dfeb956cd6/docs/research/E15_STOP_RETURN_WINDOW_2026-09-20.md)
+recorded `stop` with `returning` 0.28 seconds after the write and the
+map-saving payload at dock arrival 29.8 seconds after it, and `return` ignored
+from the stopped task. The bridge itself has not been run against the mower
+in `control` mode, that is the hardware acceptance in
 keesmod/eufy-robomow-ha#8.
 
 ## Data directory

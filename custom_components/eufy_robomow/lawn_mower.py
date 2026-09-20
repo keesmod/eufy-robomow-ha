@@ -65,10 +65,11 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
         | LawnMowerEntityFeature.PAUSE
         | LawnMowerEntityFeature.DOCK
     )
-    # The bridge routes start, pause and resume. It has no return route because
-    # the owned E15 firmware ignores the library's return write, so dock stays
-    # unavailable in bridge mode.
-    _BRIDGE_FEATURES = LawnMowerEntityFeature.START_MOWING | LawnMowerEntityFeature.PAUSE
+    # The bridge routes start, pause, resume and stop. Dock goes through the stop
+    # route: on the owned E15 firmware a stop over DP 1 false ends the task and
+    # the mower returns to the dock by itself, while the library's return over
+    # DP 3 is ignored. The same three entity features as the local backend.
+    _BRIDGE_FEATURES = _CONTROL_FEATURES
 
     def __init__(
         self,
@@ -89,8 +90,8 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
     def supported_features(self) -> LawnMowerEntityFeature:
         """Expose controls only after the user explicitly opts in.
 
-        The bridge backend exposes start and pause only while the bridge itself
-        reports its control opt-in, and never exposes dock.
+        The bridge backend exposes start, pause and dock only while the bridge
+        itself reports its control opt-in.
         """
         if not self.coordinator.commands_available:
             return LawnMowerEntityFeature(0)
