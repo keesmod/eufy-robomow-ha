@@ -32,7 +32,7 @@
     "step": {
       "init": {
         "title": "Eufy Robomow options",
-        "description": "Observe-only disables mower and settings writes. The local backend polls the mower itself. The bridge backend reads state from the dedicated mower bridge and routes start, pause and resume through it while the bridge runs in control mode. Return and settings have no bridge route. The optional map source is always read-only; leave its URL empty to disable the map entity.",
+        "description": "Observe-only disables mower and settings writes. The local backend polls the mower itself. The bridge backend reads state from the dedicated mower bridge and routes start, pause, resume and dock through it while the bridge runs in control mode. Dock uses the bridge's stop route, which returns the owned E15 to the dock. Settings have no bridge route. The optional map source is always read-only; leave its URL empty to disable the map entity.",
         "data": {
           "operating_mode": "Operating mode",
           "backend": "Mower backend",
@@ -45,7 +45,7 @@
         },
         "data_description": {
           "operating_mode": "observe_only is the safe default; control enables physical mower commands and setting changes.",
-          "backend": "local keeps this integration's own polling and cloud client. bridge reads state from the mower bridge, routes start, pause and resume through it and creates no local connection.",
+          "backend": "local keeps this integration's own polling and cloud client. bridge reads state from the mower bridge, routes start, pause, resume and dock through it and creates no local connection.",
           "bridge_url": "http or https base URL of the mower bridge, for example http://127.0.0.1:8090.",
           "bridge_token": "The bridge's bearer token. It is stored in this entry's options.",
           "bridge_mower_id": "The mower id from the bridge's discovery. Leave empty when the bridge discovers exactly one mower.",

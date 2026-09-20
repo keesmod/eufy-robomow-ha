@@ -45,8 +45,8 @@ TOKEN = "synthetic-bridge-token-0123456789abcdef"
 MOWER_ID = "c" * 64
 OBSERVED_AT = "2026-09-19T10:00:01.250Z"
 STATUS_DP = ["107", "107", "107"]
-# The control opt-in bridge 0.5.0 reports in control mode. The stop route text is never served.
-CONTROL_BLOCK = {"classes": ["start", "pause", "resume"], "max_state_age_ms": 30000, "read_back_ms": 20000}
+# The control opt-in bridge 0.6.0 reports in control mode. The stop route text is never served.
+CONTROL_BLOCK = {"classes": ["start", "pause", "resume", "stop"], "max_state_age_ms": 30000, "read_back_ms": 20000}
 START_AND_PAUSE = LawnMowerEntityFeature.START_MOWING | LawnMowerEntityFeature.PAUSE
 ALL_CONTROLS = START_AND_PAUSE | LawnMowerEntityFeature.DOCK
 
@@ -60,12 +60,12 @@ def _bridge_state(**overrides: Any) -> dict[str, Any]:
     state: dict[str, Any] = {
         "protocol": 1,
         "bridge": "eufy-robomow-bridge",
-        "version": "0.5.0",
+        "version": "0.6.0",
         "bridge_id": "00000000-0000-4000-8000-000000000000",
         "lifecycle": "running",
         "operating_mode": "observe_only",
         "auth": {"state": "authenticated", "last_error": None, "attempted_at": OBSERVED_AT},
-        "client": {"package": "@keesmod/eufy-mega-client", "version": "0.16.0", "module": "mowers", "lifecycle": "open", "connected": True},
+        "client": {"package": "@keesmod/eufy-mega-client", "version": "0.17.0", "module": "mowers", "lifecycle": "open", "connected": True},
         "mowers": {"count": 1, "discovered_at": OBSERVED_AT, "error": None},
         "routes": {"discovery": True, "state": True, "control": False, "maps": False},
         "control": None,
@@ -82,14 +82,25 @@ def _control_state() -> dict[str, Any]:
     )
 
 
-def _outcome(command: str, result: str = "confirmed", activity: str | None = "mowing", stage: str = "reflected", end: str = "reflected") -> dict[str, Any]:
-    """A contract 1 command answer. Raw data points are never part of it."""
+def _outcome(
+    command: str,
+    result: str = "confirmed",
+    activity: str | None = "mowing",
+    stage: str = "reflected",
+    end: str = "reflected",
+    payload: str | None = None,
+) -> dict[str, Any]:
+    """A contract 1 command answer. Raw data points are never part of it.
+
+    A stop carries the map-saving ``payload`` instead of an activity: the library
+    received it at the dock arrival about 30 seconds after the write.
+    """
     return {
         "contract": 1,
         "id": MOWER_ID,
         "command": command,
         "result": result,
-        "write": {"dp": "1", "code": "switch_go", "value": True},
+        "write": {"dp": "1", "code": "switch_go", "value": command != "stop"},
         "sent_at": "2026-09-19T16:42:38.199Z",
         "stage": stage,
         "end": end,
@@ -97,6 +108,7 @@ def _outcome(command: str, result: str = "confirmed", activity: str | None = "mo
         "reply": {"observed_at": "2026-09-19T16:42:38.202Z", "return_code_zero": True, "rejected": result == "failed"},
         "acknowledgement": {"observed_at": "2026-09-19T16:42:39.150Z", "sequence": 63859, "dp": "1"},
         "activity": {"observed_at": "2026-09-19T16:42:39.351Z", "sequence": 63860, "value": activity} if activity else None,
+        "payload": {"observed_at": "2026-09-20T10:58:18.236Z", "sequence": 47724, "name": payload} if payload else None,
         "reports": 3,
     }
 
@@ -274,8 +286,8 @@ def test_bridge_backend_reads_routes_control_from_the_bridge_state(tmp_path: Pat
         assert coordinator.bridge_control == CONTROL_BLOCK
         assert coordinator.commands_available is True
         assert coordinator.writes_available is False, "settings still have no bridge route"
-        assert entity.supported_features == START_AND_PAUSE
-        assert not entity.supported_features & LawnMowerEntityFeature.DOCK, "the bridge has no return route"
+        assert entity.supported_features == ALL_CONTROLS
+        assert entity.supported_features & LawnMowerEntityFeature.DOCK, "dock goes through the bridge's stop route"
         assert entity.extra_state_attributes["bridge_control"] == CONTROL_BLOCK
 
         bridge.state = BridgeClientError("cannot_connect")
@@ -322,12 +334,9 @@ def test_bridge_commands_refuse_before_any_transport(tmp_path: Path) -> None:
 
         coordinator.operating_mode = OPERATING_MODE_CONTROL
         assert coordinator.commands_available is True
-        with pytest.raises(HomeAssistantError, match="no return route"):
-            await coordinator.async_send_mower_command("dock")
-        with pytest.raises(HomeAssistantError, match="no return route"):
-            await entity.async_dock()
-        with pytest.raises(HomeAssistantError, match="Unsupported"):
-            await coordinator.async_send_mower_command("stop")
+        for action in ("stop", "return"):
+            with pytest.raises(HomeAssistantError, match="Unsupported"):
+                await coordinator.async_send_mower_command(action)
 
         assert bridge.commands == [], "no refusal reached the bridge"
         assert coordinator.command is None
@@ -384,6 +393,40 @@ def test_bridge_commands_route_start_pause_and_resume_with_each_outcome(tmp_path
         assert bridge.commands == [(MOWER_ID, "start"), (MOWER_ID, "pause"), (MOWER_ID, "resume"), (MOWER_ID, "resume")]
         assert refresh.await_count == 4
         assert coordinator.local_dps == {}, "no raw data point was invented for the confirmation"
+
+    _run(scenario, tmp_path)
+
+
+def test_bridge_dock_goes_through_the_stop_route_and_reports_the_dock_arrival(tmp_path: Path) -> None:
+    async def scenario(hass: HomeAssistant) -> None:
+        bridge = _FakeBridge(
+            [_document(status=_reported_status("mowing"))],
+            state=_control_state(),
+            command_answers=[
+                _outcome("stop", activity=None, payload="map_saving"),
+                _outcome("stop", result="uncertain", activity=None, stage="acknowledged", end="timed_out"),
+            ],
+        )
+        coordinator = _coordinator(hass, bridge)
+        entity = EufyRobomowEntity(coordinator, cast(Any, _entry(**{CONF_BACKEND: BACKEND_BRIDGE})))
+        await coordinator._async_update_data()
+        assert entity.supported_features & LawnMowerEntityFeature.DOCK
+
+        await entity.async_dock()
+        command = coordinator.command
+        assert command is not None
+        assert (command.action, command.state) == ("dock", "confirmed"), "the entity action stays dock"
+        assert command.evidence == "bridge:map_saving", "the map-saving payload is the observed dock arrival"
+        assert bridge.commands == [(MOWER_ID, "stop")], "dock is the bridge's stop class"
+        assert entity.extra_state_attributes["command"]["evidence"] == "bridge:map_saving"
+
+        with pytest.raises(HomeAssistantError, match="did not confirm it"):
+            await coordinator.async_send_mower_command("dock")
+        assert coordinator.command is not None
+        assert (coordinator.command.action, coordinator.command.state) == ("dock", "uncertain")
+        assert coordinator.command.evidence == "bridge:timed_out"
+        assert bridge.commands == [(MOWER_ID, "stop"), (MOWER_ID, "stop")], "an uncertain dock is never repeated by the integration"
+        assert cast(AsyncMock, coordinator.async_request_refresh).await_count == 2
 
     _run(scenario, tmp_path)
 
@@ -725,7 +768,7 @@ def _bridge_coordinator(**attributes: Any) -> EufyMowerCoordinator:
     return coordinator
 
 
-def test_mower_entity_keeps_its_identity_and_exposes_start_and_pause_only_with_the_bridge_opt_in() -> None:
+def test_mower_entity_keeps_its_identity_and_exposes_every_control_only_with_the_bridge_opt_in() -> None:
     entry = _entry(**{CONF_BACKEND: BACKEND_BRIDGE})
     coordinator = _bridge_coordinator(bridge_status="missing", bridge_activity=None, bridge_error=None)
     entity = EufyRobomowEntity(coordinator, cast(Any, entry))
@@ -742,7 +785,7 @@ def test_mower_entity_keeps_its_identity_and_exposes_start_and_pause_only_with_t
 
     coordinator.bridge_routes_control = True
     coordinator.bridge_control = dict(CONTROL_BLOCK)
-    assert entity.supported_features == START_AND_PAUSE, "start, pause and resume have a route, return has none"
+    assert entity.supported_features == ALL_CONTROLS, "start, pause, resume and dock have a route, dock through stop"
     assert entity.extra_state_attributes["bridge_control"] == CONTROL_BLOCK
     coordinator.operating_mode = OPERATING_MODE_OBSERVE_ONLY
     assert entity.supported_features == LawnMowerEntityFeature(0), "observe-only hides every control"

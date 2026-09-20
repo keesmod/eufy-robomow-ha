@@ -10,6 +10,7 @@ and an optional Home Assistant planning package. Version 0.8.0 adds an optional
 mower backend that reads state from the dedicated mower bridge. Version 0.8.1
 corrects the Signal Strength sensor to the percentage the mower declares.
 Version 0.9.0 routes start, pause and resume through the mower bridge in bridge mode.
+Version 0.10.0 routes dock through the bridge's stop route on library 0.17.0.
 
 ---
 
@@ -118,15 +119,22 @@ observation time, not the poll time. When the bridge reports stale data, an
 error or is unreachable, the entities become unavailable, exactly as after a
 failed local poll. Nothing is carried forward.
 
-Bridge mode routes start, pause and resume through the bridge's opt-in command
-routes when two opt-ins meet: this integration's operating mode is `control`
+Bridge mode routes start, pause, resume and dock through the bridge's opt-in
+command routes when two opt-ins meet: this integration's operating mode is `control`
 and the bridge itself runs in `control` mode, which it reports as
 `routes.control` in its state. The integration reads that state on every poll,
-so the mower entity exposes start and pause only while both hold and exposes
-nothing in `observe_only`, where every write still raises before any transport.
-Dock stays unavailable in bridge mode: the bridge has no return route because
-the owned E15 firmware ignores the library's return write. No number, select or
-switch entity exists in bridge mode, the bridge has no settings route.
+so the mower entity exposes start, pause and dock only while both hold and
+exposes nothing in `observe_only`, where every write still raises before any
+transport. Dock goes through the bridge's `stop` route: on the owned E15
+firmware a stop over DP 1 false ends the task and the mower returns to the
+dock by itself, while the library's return over DP 3 is ignored from paused
+and from the stopped task, so there is no return route and no stop in place.
+A confirmed dock carries the evidence `bridge:map_saving`, the map-saving
+payload the library received at dock arrival about 30 seconds after the write,
+see the library's
+[stop and return receipt](https://github.com/keesmod/eufy-mega-client/blob/19d47a7144e505702e1ef98dfc7d84dfeb956cd6/docs/research/E15_STOP_RETURN_WINDOW_2026-09-20.md).
+No number, select or switch entity exists in bridge mode, the bridge has no
+settings route.
 
 Each command is one `POST` to the bridge, sent exactly once, and the bridge's
 answer is the confirmation. The `command` attribute goes `sending`, `pending`
@@ -144,8 +152,8 @@ retry. Nothing is replayed on reload, on a backend switch or after a bridge
 reconnect, a new coordinator starts without a command. The `bridge_control`
 attribute shows the opt-in the bridge reports, its classes and time bounds.
 
-Activity comes from the library's typed status. With bridge 0.5.0 on library
-0.16.0 the mower entity reports mowing, paused and returning from the confirmed
+Activity comes from the library's typed status. With bridge 0.6.0 on library
+0.17.0 the mower entity reports mowing, paused and returning from the confirmed
 DP 107 payloads, with `telemetry_updated_at` as the observation time. The
 `bridge_status` attribute shows the library's status state: `reported`,
 `missing` when the query carried no DP 107, `invalid` for a withheld payload,
@@ -247,11 +255,11 @@ issue or include them in diagnostics.
 [`bridge/`](bridge/README.md) contains the dedicated Node 24 mower bridge that
 later steps connect to this integration. It consumes
 [`@keesmod/eufy-mega-client`](https://github.com/keesmod/eufy-mega-client)
-0.16.0 as a library, pinned to the exact release tarball, and instantiates only
+0.17.0 as a library, pinned to the exact release tarball, and instantiates only
 the library's mower module. It has its own token, credentials, session file,
 data directory, port and lifecycle, and runs with no camera bridge present.
 
-Version 0.5.0 validates its configuration, keeps one private session, makes one
+Version 0.6.0 validates its configuration, keeps one private session, makes one
 explicit authentication attempt without retries and stops cleanly on `SIGTERM`.
 Its read-only routes are `GET /v1/state`, `GET /v1/mowers` for the discovered
 E15 mowers and `GET /v1/mowers/{id}/state` for one typed local query over the
@@ -261,14 +269,15 @@ the library today, see [DP 107 activity](docs/protocol-provenance.md#dp-107-acti
 No E15 payload identifies docked, charging, idle or error and mowing progress
 stays unconfirmed. It starts in `observe_only` by default, where every command
 route answers `403`. With `operating_mode: control` and a required stop route
-it adds `POST /v1/mowers/{id}/commands/{start|pause|resume}`, each checked on
+it adds `POST /v1/mowers/{id}/commands/{start|pause|resume|stop}`, each checked on
 the bridge for mode, class, mower, host, exclusive ownership and the age of the
 last state observation, and served as the library's confirmed, failed or
-uncertain outcome without retry or replay. `return` stays unsupported until
-the library has a route the owned firmware honours. No settings or map routes.
-The Python integration consumes it through the optional **bridge** mower
-backend described above, for state and, behind both control opt-ins, for
-start, pause and resume. It ships as a reproducible container image and as a
+uncertain outcome without retry or replay. `return` stays unsupported, the
+owned firmware ignores its DP 3 write from paused and from the stopped task,
+and `stop` is the route that returns the mower to the dock. No settings or map
+routes. The Python integration consumes it through the optional **bridge**
+mower backend described above, for state and, behind both control opt-ins, for
+start, pause, resume and dock. It ships as a reproducible container image and as a
 local Home Assistant app candidate with a health check, see the
 [deployment guide](docs/bridge-deployment.md). The follow-up order is recorded
 in [issue #12](https://github.com/keesmod/eufy-robomow-ha/issues/12). See
@@ -280,7 +289,7 @@ in [issue #12](https://github.com/keesmod/eufy-robomow-ha/issues/12). See
 
 - **Local polling** (every 10 s) via the [Tuya local protocol](https://github.com/jasonacox/tinytuya) for real-time status (battery, activity state, etc.). With the **bridge** backend the mower bridge polls the mower instead and Home Assistant reads its typed state every 10 s over an authenticated private HTTP connection.
 - **Cloud polling** (every 5 min) via the Tuya mobile API for settings stored as protobuf blobs in DP155.
-- **Writes**, when control is explicitly enabled, go to either the local mower or the cloud API depending on the setting. With the **bridge** backend start, pause and resume go through the bridge's command routes instead, once each, and settings have no route.
+- **Writes**, when control is explicitly enabled, go to either the local mower or the cloud API depending on the setting. With the **bridge** backend start, pause, resume and dock go through the bridge's command routes instead, once each, dock through the bridge's stop route, and settings have no route.
 - **Optional map acquisition** uses five-minute idle snapshots and two-second
   `ETag`-aware live pulls while mowing, then renders the validated geometry
   locally as a script-free SVG.
@@ -294,6 +303,16 @@ protocol tests.
 
 ## Upgrade notes
 
+- **0.10.0, dock through the bridge.** With mower bridge 0.6.0 on library
+  0.17.0 the bridge backend exposes dock next to start and pause in control
+  mode and routes it through the bridge's `stop` class. On the owned E15
+  firmware a stop over DP 1 false ends the task and the mower returns to the
+  dock by itself, the library's return over DP 3 is ignored, so dock is the
+  only way home through the bridge and there is no stop in place. A confirmed
+  dock carries the evidence `bridge:map_saving`, the dock arrival the library
+  observed, an uncertain dock was written and is never repeated by the
+  integration. The local backend is unchanged. No live test has run against
+  the mower in bridge control mode, that acceptance is issue #8.
 - **0.9.0, bridge commands.** With mower bridge 0.5.0 on library 0.16.0 the
   bridge backend routes start, pause and resume through the bridge's opt-in
   command routes when both this integration and the bridge run in `control`
