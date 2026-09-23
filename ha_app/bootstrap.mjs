@@ -19,6 +19,8 @@ const ENVIRONMENT = {
   control_stop_route: 'EUFY_MOWER_CONTROL_STOP_ROUTE',
   control_max_state_age_ms: 'EUFY_MOWER_CONTROL_MAX_STATE_AGE_MS',
   control_read_back_ms: 'EUFY_MOWER_CONTROL_READ_BACK_MS',
+  map_provisioning_file: 'EUFY_MOWER_MAP_PROVISIONING_FILE',
+  map_mower_id: 'EUFY_MOWER_MAP_MOWER_ID',
 };
 
 let options;

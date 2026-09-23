@@ -23,7 +23,20 @@ import {
 } from '@keesmod/eufy-mega-client';
 import { MOWER_ID, type BridgeConfig, type ControlConfig } from './config.ts';
 import { ApiError, BridgeError } from './errors.ts';
-import { createPrivateServer } from './server.ts';
+import {
+  DEFAULT_MAP_DEMAND_MS,
+  DEFAULT_MAP_IDLE_INTERVAL_MS,
+  DEFAULT_MAP_RETRY_INTERVAL_MS,
+  DEFAULT_MAP_STREAM_LEASE_MS,
+  DEFAULT_MAP_WATCH_INTERVAL_MS,
+  MowerMaps,
+  libraryMapAcquisition,
+  mapMode,
+  type CreateMapAcquisition,
+  type MapMode,
+  type MapStatus,
+} from './maps.ts';
+import { createPrivateServer, type MapRequest, type RawReply } from './server.ts';
 import { MowerSessionFile, PrivateDirectory, bridgeIdentity } from './storage.ts';
 import { BRIDGE_NAME, BRIDGE_VERSION, CLIENT_PACKAGE, CLIENT_VERSION, PROTOCOL_VERSION } from './version.ts';
 
@@ -62,12 +75,19 @@ export interface BridgeDependencies {
   fetch?: typeof fetch;
   /** Replaces `mowers.openLocalSession` so route tests need no LAN peer. */
   openLocalSession?: OpenLocalSession;
+  /** Replaces `new PortableMapAcquisition(provisioning)` so map tests need no relay peer. */
+  mapAcquisition?: CreateMapAcquisition;
   startupTimeoutMs?: number;
   connectTimeoutMs?: number;
   shutdownTimeoutMs?: number;
   discoveryTimeoutMs?: number;
   discoveryCacheMs?: number;
   discoveryIntervalMs?: number;
+  mapDemandMs?: number;
+  mapStreamLeaseMs?: number;
+  mapIdleIntervalMs?: number;
+  mapRetryIntervalMs?: number;
+  mapWatchIntervalMs?: number;
   now?: () => number;
 }
 
@@ -170,10 +190,12 @@ export interface BridgeState {
     connected: boolean;
   };
   mowers: { count: number | null; discovered_at: string | null; error: string | null };
-  /** `control` is true only in `control` mode. Map routes arrive in a later step. */
-  routes: { discovery: true; state: true; control: boolean; maps: false };
+  /** `control` is true only in `control` mode, `maps` only with a map provisioning file. */
+  routes: { discovery: true; state: true; control: boolean; maps: boolean };
   /** The command opt-in in effect, or null in `observe_only`. The stop route text is not served. */
   control: { classes: RoutedCommandClass[]; max_state_age_ms: number; read_back_ms: number } | null;
+  /** Map acquisition status without any geometry, or null without map provisioning. */
+  maps: MapStatus | null;
 }
 
 interface Deadline {
@@ -297,12 +319,29 @@ export class MowerBridge {
   #staleIds = new Set<string>();
   #queries = new Map<string, Promise<MowerStateDocument>>();
   #commands = new Map<string, Promise<MowerCommandDocument>>();
+  /** Present only with map provisioning. Construction does no I/O. */
+  readonly #maps: MowerMaps | undefined;
 
   constructor(config: BridgeConfig, dependencies: BridgeDependencies = {}) {
     this.#config = config;
     this.#dependencies = dependencies;
     this.#directory = new PrivateDirectory(config.dataDir);
     this.#sessions = new MowerSessionFile(this.#directory);
+    this.#maps = config.maps
+      ? new MowerMaps({
+          provisioningFile: config.maps.provisioningFile,
+          create: dependencies.mapAcquisition ?? libraryMapAcquisition,
+          timings: {
+            demandMs: dependencies.mapDemandMs ?? DEFAULT_MAP_DEMAND_MS,
+            streamLeaseMs: dependencies.mapStreamLeaseMs ?? DEFAULT_MAP_STREAM_LEASE_MS,
+            idleIntervalMs: dependencies.mapIdleIntervalMs ?? DEFAULT_MAP_IDLE_INTERVAL_MS,
+            retryIntervalMs: dependencies.mapRetryIntervalMs ?? DEFAULT_MAP_RETRY_INTERVAL_MS,
+            watchIntervalMs: dependencies.mapWatchIntervalMs ?? DEFAULT_MAP_WATCH_INTERVAL_MS,
+          },
+          now: () => this.#now(),
+          lifetime: this.#lifetime.signal,
+        })
+      : undefined;
   }
 
   get lifecycle(): BridgeLifecycle {
@@ -342,7 +381,7 @@ export class MowerBridge {
         discovered_at: this.#discovery ? new Date(this.#discovery.at).toISOString() : null,
         error: this.#discoveryError,
       },
-      routes: { discovery: true, state: true, control: this.#config.control !== null, maps: false },
+      routes: { discovery: true, state: true, control: this.#config.control !== null, maps: this.#maps !== undefined },
       control: this.#config.control
         ? {
             classes: [...ROUTED_COMMAND_CLASSES],
@@ -350,6 +389,7 @@ export class MowerBridge {
             read_back_ms: this.#config.control.readBackMs,
           }
         : null,
+      maps: this.#maps?.status() ?? null,
     };
   }
 
@@ -564,6 +604,46 @@ export class MowerBridge {
     return commandDocument(id, outcome);
   }
 
+  /**
+   * The read-only map bundle of the mower the provisioning belongs to, `GET /v1/mowers/{id}/map`.
+   * The request may start one acquisition demand in the background and is answered at once with
+   * the last good bundle, its entity tag and age, or `304` when the client's tag still matches.
+   * Without any bundle the answer is `503` with the last failure code. Nothing is written to the
+   * mower and nothing about the map is logged.
+   */
+  map(id: string, request: MapRequest): Promise<RawReply> {
+    let mowers: MowerModule;
+    let mode: MapMode;
+    try {
+      mowers = this.#running();
+      if (!this.#maps) throw new ApiError(404, 'map_unconfigured');
+      if (!MOWER_ID.test(id)) throw new ApiError(400, 'invalid_mower_id');
+      mode = mapMode(request.mode);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    return this.#serveMap(mowers, this.#maps, id, mode, request.ifNoneMatch);
+  }
+
+  async #serveMap(mowers: MowerModule, maps: MowerMaps, id: string, mode: MapMode, ifNoneMatch: string | undefined): Promise<RawReply> {
+    if (!this.#discovery) await this.#refreshDiscovery(mowers);
+    if (!this.#discovery) throw new ApiError(503, this.#discoveryError ?? 'mower_request_failed');
+    if (!this.#discovery.mowers.some((mower) => mower.id === id)) throw new ApiError(404, 'unknown_mower');
+    const owner = this.#mapMower();
+    if (owner === null) throw new ApiError(409, 'map_mower_unresolved');
+    if (owner !== id) throw new ApiError(404, 'map_unconfigured');
+    maps.request(id, mode);
+    return maps.reply(id, ifNoneMatch);
+  }
+
+  /** The mower the map provisioning belongs to: the configured id, otherwise the sole discovered mower. */
+  #mapMower(): string | null {
+    const configured = this.#config.maps?.mowerId;
+    if (configured) return configured;
+    const mowers = this.#discovery?.mowers;
+    return mowers?.length === 1 ? (mowers[0]?.id ?? null) : null;
+  }
+
   /** Prepares private storage, constructs the mower-only client and starts listening. Bounded. */
   async start(): Promise<void> {
     if (this.#lifecycle !== 'created') throw new BridgeError('bridge_not_restartable');
@@ -591,6 +671,7 @@ export class MowerBridge {
         discover: () => this.discover(),
         mowerState: (id) => this.mowerState(id),
         command: (id, kind) => this.command(id, kind),
+        map: (id, request) => this.map(id, request),
       });
       await listen(this.#server, this.#config.port, this.#config.bindAddress, bound.signal);
       this.#lifecycle = 'running';
@@ -664,7 +745,7 @@ export class MowerBridge {
     this.#lifetime.abort();
     this.#connecting?.controller.abort();
     await this.#connecting?.done;
-    await Promise.allSettled([this.#discovering, ...this.#queries.values(), ...this.#commands.values()]);
+    await Promise.allSettled([this.#discovering, ...this.#queries.values(), ...this.#commands.values(), this.#maps?.close()]);
     const server = this.#server;
     const client = this.#client;
     this.#server = undefined;

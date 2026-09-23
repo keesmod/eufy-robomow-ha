@@ -54,6 +54,12 @@ async function main(): Promise<number> {
       ? `operating mode ${config.operatingMode}: start, pause and resume routes enabled, read-back ${config.control.readBackMs} ms, state older than ${config.control.maxStateAgeMs} ms refuses a command`
       : `operating mode ${config.operatingMode}: every command route answers 403`,
   );
+  log(
+    'info',
+    config.maps
+      ? 'read-only map route enabled: requests start at most one acquisition at a time, provisioning is read for each acquisition'
+      : 'map route disabled: no map provisioning file configured',
+  );
   const auth = await bridge.connect();
   if (auth.state === 'connected') {
     log('info', 'mower cloud session connected');

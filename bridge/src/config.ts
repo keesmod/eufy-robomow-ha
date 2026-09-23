@@ -45,12 +45,24 @@ export interface BridgeConfig {
   host: string | null;
   /** Present only in `control` mode. The stop route is the operator's own words, passed to the library opt-in. */
   control: ControlConfig | null;
+  /** Present only when the operator supplies map provisioning. Enables the read-only map route. */
+  maps: MapConfig | null;
 }
 
 export interface ControlConfig {
   stopRoute: string;
   maxStateAgeMs: number;
   readBackMs: number;
+}
+
+export interface MapConfig {
+  /**
+   * Absolute path of the operator's private provisioning file, the library's
+   * `MapSessionProvisioning` as JSON. Read afresh for every acquisition, never logged or served.
+   */
+  provisioningFile: string;
+  /** The mower the provisioning belongs to. Null means the sole discovered mower. */
+  mowerId: string | null;
 }
 
 export class ConfigError extends Error {
@@ -81,6 +93,8 @@ export const ENV = {
   control_stop_route: 'EUFY_MOWER_CONTROL_STOP_ROUTE',
   control_max_state_age_ms: 'EUFY_MOWER_CONTROL_MAX_STATE_AGE_MS',
   control_read_back_ms: 'EUFY_MOWER_CONTROL_READ_BACK_MS',
+  map_provisioning_file: 'EUFY_MOWER_MAP_PROVISIONING_FILE',
+  map_mower_id: 'EUFY_MOWER_MAP_MOWER_ID',
   options_file: 'EUFY_MOWER_OPTIONS_FILE',
 } as const;
 
@@ -102,6 +116,8 @@ const OPTION_KEYS: readonly OptionKey[] = [
   'control_stop_route',
   'control_max_state_age_ms',
   'control_read_back_ms',
+  'map_provisioning_file',
+  'map_mower_id',
 ];
 
 /** `hosts` is `id=host` pairs separated by commas, or an object of id to host in the options file. */
@@ -197,7 +213,25 @@ export function resolveConfig(values: OptionValues): BridgeConfig {
     hosts: hosts(values.hosts),
     host: single ? host('host', single) : null,
     control: operatingMode === OPERATING_MODE_CONTROL ? control(values) : null,
+    maps: maps(values),
   };
+}
+
+/**
+ * The read-only map route. It exists only when the operator names a provisioning file, because
+ * the library's acquisition needs private provisioning that this bridge cannot obtain itself.
+ */
+function maps(values: OptionValues): MapConfig | null {
+  const provisioningFile = text(values, 'map_provisioning_file') ?? '';
+  const mowerId = text(values, 'map_mower_id') ?? '';
+  if (!provisioningFile) {
+    if (mowerId) throw new ConfigError('map_mower_id', 'requires map_provisioning_file');
+    return null;
+  }
+  if (!isAbsolute(provisioningFile) || provisioningFile.includes('\0'))
+    throw new ConfigError('map_provisioning_file', 'must be an absolute path');
+  if (mowerId && !MOWER_ID.test(mowerId)) throw new ConfigError('map_mower_id', 'must be a 64-character mower id');
+  return { provisioningFile, mowerId: mowerId || null };
 }
 
 /**
@@ -288,6 +322,7 @@ export function describeConfig(config: BridgeConfig): Record<string, string | nu
     cloud_timeout_ms: config.cloudTimeoutMs,
     local_timeout_ms: config.localTimeoutMs,
     configured_hosts: Object.keys(config.hosts).length + (config.host ? 1 : 0),
+    maps: config.maps ? 'enabled' : 'disabled',
     ...(config.control
       ? { control_max_state_age_ms: config.control.maxStateAgeMs, control_read_back_ms: config.control.readBackMs }
       : {}),

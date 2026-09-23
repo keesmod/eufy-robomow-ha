@@ -3,11 +3,13 @@
 How to run the dedicated mower bridge from `bridge/` as a container or as a
 local Home Assistant app, and how to upgrade, restart, back up and roll it
 back. Everything here is local: no image is published and no app repository is
-listed. Version 0.6.0 serves state routes and, only behind the explicit
+listed. Version 0.7.0 serves state routes and, only behind the explicit
 `operating_mode: control` opt-in with a stop route, the start, pause, resume
-and stop routes. It pins library 0.17.0, which confirms the E15 activities
+and stop routes. It pins library 0.18.0, which confirms the E15 activities
 mowing, paused and returning and the start, pause, resume and stop commands.
-On the owned E15 a stop ends the task and returns the mower to the dock.
+On the owned E15 a stop ends the task and returns the mower to the dock. With
+an operator-supplied map provisioning file it also serves the read-only map
+route, see [Map provisioning](#map-provisioning-optional).
 
 ## What is separate from a camera installation
 
@@ -47,7 +49,7 @@ in `ha_app/` (run `python3 scripts/prepare_ha_app.py`).
 ## Install with Docker
 
 ```bash
-docker build -t eufy-mower-bridge:0.6.0 ./bridge
+docker build -t eufy-mower-bridge:0.7.0 ./bridge
 ```
 
 ```bash
@@ -59,7 +61,7 @@ docker run -d --name eufy-mower-bridge --restart unless-stopped \
   -e EUFY_MOWER_PASSWORD=<eufy account password> \
   -e EUFY_MOWER_COUNTRY=NL \
   -e EUFY_MOWER_HOST=<mower LAN address> \
-  eufy-mower-bridge:0.6.0
+  eufy-mower-bridge:0.7.0
 ```
 
 Bind the published port to an address that only Home Assistant can reach, or
@@ -110,6 +112,49 @@ permissions and drops root before the bridge starts.
 
 The app data lives in the app's `/data`, which Home Assistant backups include.
 
+## Map provisioning (optional)
+
+The read-only map route needs a private provisioning file that the operator
+supplies and keeps fresh, see
+[Map provisioning](../bridge/README.md#map-provisioning) in the bridge README
+for its content, expiry and rules. The bridge reads it for every acquisition
+demand and never obtains, stores or logs it. Without the file the route
+answers `404` and `routes.maps` stays `false`.
+
+Docker: keep the file in a private directory on the host, owned by uid 1000
+(the image's `node` user) with mode `0600`, and mount it read-only:
+
+```bash
+docker run -d --name eufy-mower-bridge --restart unless-stopped \
+  -p 127.0.0.1:8090:8090 \
+  -v eufy-mower-data:/data \
+  -v /private/eufy-mower-map:/run/eufy-mower-map:ro \
+  -e EUFY_MOWER_MAP_PROVISIONING_FILE=/run/eufy-mower-map/map-provisioning.json \
+  -e EUFY_MOWER_BRIDGE_TOKEN=<random secret of at least 32 characters> \
+  -e EUFY_MOWER_EMAIL=<eufy account email> \
+  -e EUFY_MOWER_PASSWORD=<eufy account password> \
+  -e EUFY_MOWER_COUNTRY=NL \
+  -e EUFY_MOWER_HOST=<mower LAN address> \
+  eufy-mower-bridge:0.7.0
+```
+
+Mount the directory rather than the file, so a file replaced by renaming
+reaches the container. Add `EUFY_MOWER_MAP_MOWER_ID` when the account has more
+than one mower.
+
+App: the candidate maps its own configuration folder read-only at `/config`.
+Put the file in `/addon_configs/local_eufy_mower_bridge/` on the Home
+Assistant OS machine, give it to uid 1000 with mode `0600` (for example
+`chown 1000:1000` and `chmod 600` from the SSH app), and set
+`map_provisioning_file` to `/config/map-provisioning.json`. This mapping
+follows the documented Supervisor syntax and has not been exercised on a
+Supervisor yet.
+
+Then choose the map source `bridge` in the integration's options. The
+integration refuses it while the bridge does not report `routes.maps`. The
+map source URL stays stored, switching the map source back to `external` is
+the manual recovery path.
+
 ## Upgrade
 
 1. Read the release notes and the bridge version in `bridge/package.json`.
@@ -148,7 +193,9 @@ integration. Both are `0600`.
 - Keep the token and the configuration with the backup. The integration's
   options hold the same token and the mower id.
 
-Nothing else needs a backup. Discovery results and telemetry are not stored.
+Nothing else needs a backup. Discovery results, telemetry and map bundles
+are not stored. The map provisioning file is the operator's material and
+expires quickly, so it is not part of the bridge backup.
 
 ## Rollback
 
@@ -163,13 +210,18 @@ Nothing else needs a backup. Discovery results and telemetry are not stored.
 4. Verify with the health check. The integration's entities recover on the
    next poll, no command is replayed.
 
+Before rolling back to a version without the map route (0.6.0 and older),
+switch the integration's map source back to `external`. Otherwise the map
+entity keeps its last good map and reports the refused request.
+
 ## Where the limits are
 
 Bridge mode in the integration reads state and, since integration 0.9.0,
 routes start, pause and resume through the bridge's opt-in command routes.
-Since integration 0.10.0 dock goes through the bridge's stop route as well.
+Since integration 0.10.0 dock goes through the bridge's stop route as well,
+and since integration 0.11.0 the map entity can read the bridge's map route.
 Activity reports mowing, paused and returning from the E15 payloads confirmed
-in library 0.17.0, see [DP 107 activity](protocol-provenance.md#dp-107-activity).
+in library 0.18.0, see [DP 107 activity](protocol-provenance.md#dp-107-activity).
 Docked, charging, idle and error have no confirmed payload and are never
 inferred, mowing progress stays unconfirmed and a bridge-mode session cannot
 observe its end. Commands need two opt-ins: the integration's operating mode
@@ -185,6 +237,8 @@ the map-saving payload the library received at dock arrival. The library's
 stopped task, so the bridge has no return route and cannot stop the mower in
 place. Leave the bridge at `observe_only` unless a supervised test with the
 app at hand is planned, the bridge has not yet run in control mode against
-the mower, see keesmod/eufy-robomow-ha#8. Settings and map routes follow in
-later steps. Physical control keeps its explicit opt-in and supervised
-validation.
+the mower, see keesmod/eufy-robomow-ha#8. Settings have no route. The map
+route is read-only, needs the operator's provisioning and has not acquired a
+live map through the bridge yet, that map acceptance is part of
+keesmod/eufy-robomow-ha#8 as well. Physical control keeps its explicit opt-in
+and supervised validation.

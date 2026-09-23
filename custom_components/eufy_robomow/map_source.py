@@ -1,8 +1,13 @@
-"""Validated HTTPS source and latest-good cache for Eufy E15 maps."""
+"""Validated map source and latest-good cache for Eufy E15 maps.
+
+The source is either a compatible HTTPS map source configured by URL or the
+read-only map route of the dedicated mower bridge. Both serve the same bundle.
+"""
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import hashlib
@@ -22,15 +27,27 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .bridge_client import BridgeSettings
 from .map import MapDecodeError, MapSnapshot, parse_map_snapshot
 
 MAP_BUNDLE_CONTENT_TYPE = "application/vnd.eufy-robomow-map+zip"
 MAP_CACHE_DIRECTORY = "eufy_robomow_maps"
 MAP_REFRESH_INTERVAL = timedelta(minutes=5)
 MAP_STREAM_REFRESH_INTERVAL = timedelta(seconds=2)
+# The mower bridge answers from memory and paces its own acquisitions (at most one
+# idle acquisition per five minutes), so its idle map is checked every minute with
+# ETag. An unchanged map costs one 304.
+BRIDGE_MAP_REFRESH_INTERVAL = timedelta(minutes=1)
+MAP_PATH = "/v1/map"
 MAP_MODE_HEADER = "X-Eufy-Map-Mode"
 MAP_MODE_IDLE = "idle"
 MAP_MODE_STREAM = "stream"
+# Optional response headers of a source that serves a last good map after a failed
+# acquisition, as the mower bridge does. Sources without them are unaffected.
+MAP_STALE_HEADER = "X-Eufy-Map-Stale"
+MAP_ERROR_HEADER = "X-Eufy-Map-Error"
+BRIDGE_CACHE_FILENAME = "bridge.mapbundle"
+EXTERNAL_CACHE_FILENAME = "latest.mapbundle"
 
 _MAP_FILENAME = "map.bin.stream"
 _CLEAN_PATH_FILENAME = "cleanPath.bin.stream"
@@ -46,6 +63,9 @@ _MAX_MAP_FILE_SIZE = 5 * 1024 * 1024
 _MAX_BUNDLE_SIZE = 16 * 1024 * 1024
 _SCHEMA_VERSION = 1
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_MOWER_ID_PATTERN = re.compile(r"^[a-f0-9]{64}$")
+_ERROR_CODE_PATTERN = re.compile(r"^[a-z0-9_]{1,64}$")
+_MAX_ERROR_BODY = 4096
 _TOKEN_CONTEXT = b"eufy-robomow-map-helper-v1"
 _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30, connect=5)
 
@@ -61,6 +81,30 @@ class MapSourceSettings:
     base_url: str
     access_token: str
     certificate_fingerprint: bytes | None
+    map_path: str = MAP_PATH
+    idle_interval: timedelta = MAP_REFRESH_INTERVAL
+
+    @property
+    def map_url(self) -> str:
+        """The URL of the map bundle."""
+        return f"{self.base_url}{self.map_path}"
+
+    @classmethod
+    def for_bridge(cls, bridge: BridgeSettings, mower_id: str) -> MapSourceSettings:
+        """The mower bridge's read-only map route for one mower.
+
+        It uses the bridge's own URL, bearer token and optional certificate pin.
+        No token is derived from the local key.
+        """
+        if not _MOWER_ID_PATTERN.fullmatch(mower_id):
+            raise MapSourceError("Bridge mower id must be 64 hexadecimal characters")
+        return cls(
+            base_url=bridge.base_url,
+            access_token=bridge.token,
+            certificate_fingerprint=bridge.certificate_fingerprint,
+            map_path=f"/v1/mowers/{mower_id}/map",
+            idle_interval=BRIDGE_MAP_REFRESH_INTERVAL,
+        )
 
     @classmethod
     def from_values(
@@ -143,6 +187,9 @@ class MapSourceStatus:
 class _MapFetch:
     encoded: bytes | None
     etag: str | None = None
+    # Stable code of the source's own failed acquisition while it serves its last
+    # good map, from the optional stale headers. ``None`` when the map is current.
+    source_error: str | None = None
 
 
 class MapSource:
@@ -168,13 +215,21 @@ class MapSource:
         self._consecutive_failures = 0
         self._streaming = False
         self._etags: dict[bool, str] = {}
+        self._source_error: str | None = None
 
     @property
     def status(self) -> MapSourceStatus:
-        """Return acquisition health without exposing connection details."""
+        """Return acquisition health without exposing connection details.
+
+        A source that reports its own failed acquisition while it serves its last
+        good map makes the status ``stale`` with that code.
+        """
+        last_error = self._last_error
+        if last_error is None and self._source_error is not None:
+            last_error = f"Map source serves its last good map: {self._source_error}"
         if self._current is None:
-            state = "error" if self._last_error else "starting"
-        elif self._last_error:
+            state = "error" if last_error else "starting"
+        elif last_error:
             state = "stale"
         else:
             state = "healthy"
@@ -183,7 +238,7 @@ class MapSource:
             last_success=(
                 self._current.captured_at if self._current is not None else None
             ),
-            last_error=self._last_error,
+            last_error=last_error,
         )
 
     async def async_refresh(self, *, streaming: bool = False) -> LoadedMap:
@@ -205,6 +260,7 @@ class MapSource:
 
         try:
             fetched = await self._async_fetch(streaming=streaming)
+            self._source_error = fetched.source_error
             encoded = fetched.encoded
             if encoded is None:
                 if self._current is None:
@@ -264,7 +320,7 @@ class MapSource:
 
     def _next_refresh_delay(self, streaming: bool) -> float:
         interval = (
-            MAP_STREAM_REFRESH_INTERVAL if streaming else MAP_REFRESH_INTERVAL
+            MAP_STREAM_REFRESH_INTERVAL if streaming else self._settings.idle_interval
         ).total_seconds()
         if not self._consecutive_failures:
             return interval
@@ -284,19 +340,25 @@ class MapSource:
         if etag := self._etags.get(streaming):
             headers["If-None-Match"] = etag
         async with session.get(
-            f"{self._settings.base_url}/v1/map",
+            self._settings.map_url,
             headers=headers,
             ssl=ssl,
             timeout=_REQUEST_TIMEOUT,
         ) as response:
             if response.status == 304:
-                return _MapFetch(None)
+                return _MapFetch(None, source_error=_source_error(response.headers))
             if response.status == 401:
                 raise MapSourceError("Map source rejected authentication")
             if response.status == 503:
-                raise MapSourceError("Map source has no complete snapshot")
+                raise MapSourceError(
+                    "Map source has no complete snapshot"
+                    + await _error_suffix(response)
+                )
             if response.status != 200:
-                raise MapSourceError(f"Map source returned HTTP {response.status}")
+                raise MapSourceError(
+                    f"Map source returned HTTP {response.status}"
+                    + await _error_suffix(response)
+                )
 
             content_type = response.headers.get("Content-Type", "").split(
                 ";",
@@ -322,7 +384,32 @@ class MapSource:
                 and "\r" not in etag
                 else None
             )
-            return _MapFetch(encoded, valid_etag)
+            return _MapFetch(
+                encoded, valid_etag, source_error=_source_error(response.headers)
+            )
+
+
+def _source_error(headers: Mapping[str, str]) -> str | None:
+    """The source's own failure code while it serves its last good map, if it says so."""
+    if headers.get(MAP_STALE_HEADER, "").strip().lower() != "true":
+        return None
+    code = headers.get(MAP_ERROR_HEADER, "").strip()
+    return code if _ERROR_CODE_PATTERN.fullmatch(code) else "stale"
+
+
+async def _error_suffix(response: aiohttp.ClientResponse) -> str:
+    """A stable error code from a bounded JSON error body, never other upstream text."""
+    content_type = response.headers.get("Content-Type", "").split(";", maxsplit=1)[0]
+    if content_type.strip() != "application/json":
+        return ""
+    try:
+        document = json.loads(await response.content.read(_MAX_ERROR_BODY))
+    except (aiohttp.ClientError, asyncio.TimeoutError, UnicodeDecodeError, ValueError):
+        return ""
+    code = document.get("error") if isinstance(document, dict) else None
+    if isinstance(code, str) and _ERROR_CODE_PATTERN.fullmatch(code):
+        return f": {code}"
+    return ""
 
 
 def decode_map_bundle(data: bytes, expected_device_id: str) -> LoadedMap:
