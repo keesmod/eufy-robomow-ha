@@ -13,17 +13,24 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    BACKEND_BRIDGE,
+    BACKEND_LOCAL,
     CONF_DEVICE_ID,
     CONF_LOCAL_KEY,
     CONF_MAP_CERTIFICATE_FINGERPRINT,
+    CONF_MAP_SOURCE,
     CONF_MAP_SOURCE_URL,
+    DEFAULT_MAP_SOURCE,
     DOMAIN,
     DP_TASK_ACTIVE,
+    MAP_SOURCE_BRIDGE,
 )
 from .coordinator import EufyMowerCoordinator
 from .map import MapSnapshot, merge_live_snapshots
 from .map_renderer import MAP_CONTENT_TYPE, render_map_svg
 from .map_source import (
+    BRIDGE_CACHE_FILENAME,
+    EXTERNAL_CACHE_FILENAME,
     MAP_CACHE_DIRECTORY,
     MAP_STREAM_REFRESH_INTERVAL,
     MapSource,
@@ -40,7 +47,47 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the map only when an optional source is configured."""
+    """Set up the map only when a source is selected and configured."""
+    coordinator: EufyMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    source = map_source_for_entry(
+        hass, entry, coordinator, Path(hass.config.path(MAP_CACHE_DIRECTORY))
+    )
+    if source is None:
+        return
+    async_add_entities(
+        [EufyRobomowMapImage(hass, coordinator, source, entry)],
+        update_before_add=True,
+    )
+
+
+def map_source_for_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: EufyMowerCoordinator,
+    cache_root: Path,
+) -> MapSource | None:
+    """The one map source this entry selects, or ``None`` without a map.
+
+    ``external`` is the map source URL, unchanged and the manual recovery path.
+    ``bridge`` is the mower bridge's read-only map route and needs the bridge
+    backend. Each source binds its bundles to its own mower id and keeps its own
+    last-good cache file, so switching never mixes or discards the other's map.
+    """
+    if entry.options.get(CONF_MAP_SOURCE, DEFAULT_MAP_SOURCE) == MAP_SOURCE_BRIDGE:
+        bridge = coordinator.bridge
+        mower_id = coordinator.bridge_mower_id
+        if coordinator.backend != BACKEND_BRIDGE or bridge is None or mower_id is None:
+            _LOGGER.warning(
+                "The bridge map source needs the bridge backend, so no map entity is created"
+            )
+            return None
+        return MapSource(
+            hass,
+            settings=MapSourceSettings.for_bridge(bridge.settings, mower_id),
+            device_id=mower_id,
+            cache_file=cache_root / entry.entry_id / BRIDGE_CACHE_FILENAME,
+            cache_root=cache_root,
+        )
     settings = MapSourceSettings.from_values(
         base_url=entry.options.get(CONF_MAP_SOURCE_URL, ""),
         certificate_fingerprint=entry.options.get(
@@ -50,27 +97,13 @@ async def async_setup_entry(
         local_key=entry.data[CONF_LOCAL_KEY],
     )
     if settings is None:
-        return
-
-    coordinator: EufyMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
-    cache_root = Path(hass.config.path(MAP_CACHE_DIRECTORY))
-    cache_file = cache_root / entry.entry_id / "latest.mapbundle"
-    async_add_entities(
-        [
-            EufyRobomowMapImage(
-                hass,
-                coordinator,
-                MapSource(
-                    hass,
-                    settings=settings,
-                    device_id=entry.data[CONF_DEVICE_ID],
-                    cache_file=cache_file,
-                    cache_root=cache_root,
-                ),
-                entry,
-            )
-        ],
-        update_before_add=True,
+        return None
+    return MapSource(
+        hass,
+        settings=settings,
+        device_id=entry.data[CONF_DEVICE_ID],
+        cache_file=cache_root / entry.entry_id / EXTERNAL_CACHE_FILENAME,
+        cache_root=cache_root,
     )
 
 
@@ -125,9 +158,19 @@ class EufyRobomowMapImage(ImageEntity):
             "acquisition_last_error": status.last_error,
         }
 
+    def _task_active(self) -> bool:
+        """Whether a mowing task runs, so the map follows it live.
+
+        The local backend reads DP 1. The bridge backend has no DP 1 and uses the
+        bridge's reported activity instead, never its age or absence.
+        """
+        if getattr(self._coordinator, "backend", BACKEND_LOCAL) == BACKEND_BRIDGE:
+            return self._coordinator.bridge_task_active
+        return bool(self._coordinator.data.get(DP_TASK_ACTIVE, False))
+
     async def async_update(self) -> None:
         """Fetch and render the latest valid map."""
-        include_cleaned_paths = bool(self._coordinator.data.get(DP_TASK_ACTIVE, False))
+        include_cleaned_paths = self._task_active()
         try:
             loaded = await self._source.async_refresh(
                 streaming=include_cleaned_paths,

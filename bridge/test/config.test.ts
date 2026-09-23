@@ -35,6 +35,7 @@ test('minimal values resolve to observe-only defaults with a separate mower data
     hosts: {},
     host: null,
     control: null,
+    maps: null,
   });
   assert.equal(config.bindAddress, '127.0.0.1', 'the private API binds to loopback unless configured otherwise');
   assert.notEqual(config.dataDir, '/data', 'the mower keeps its own data path');
@@ -132,7 +133,8 @@ test('options file rejects unknown keys, nested values, non-objects and oversize
 test('the startup description never contains the token or credentials', () => {
   const description = describeConfig(resolveConfig(syntheticValues()));
   assertNoSecrets(JSON.stringify(description));
-  assert.deepEqual(Object.keys(description).sort(), ['bind_address', 'cloud_timeout_ms', 'configured_hosts', 'country', 'data_dir', 'local_timeout_ms', 'operating_mode', 'port']);
+  assert.deepEqual(Object.keys(description).sort(), ['bind_address', 'cloud_timeout_ms', 'configured_hosts', 'country', 'data_dir', 'local_timeout_ms', 'maps', 'operating_mode', 'port']);
+  assert.equal(description.maps, 'disabled');
   const withHosts = describeConfig(resolveConfig(syntheticValues({ host: '192.0.2.10', hosts: `${'a'.repeat(64)}=192.0.2.11` })));
   assert.equal(withHosts.configured_hosts, 2);
   assert.ok(!JSON.stringify(withHosts).includes('192.0.2.1'), 'hosts are counted, never listed');
@@ -155,4 +157,24 @@ test('LAN hosts are validated per 64-character mower id and the single host stay
   assert.deepEqual(parseOptions(`{"hosts":{"${idA}":"192.0.2.10"}}`), { hosts: { [idA]: '192.0.2.10' } });
   assert.throws(() => parseOptions('{"hosts":"x"}'), (error: unknown) => error instanceof ConfigError && error.key === 'hosts');
   assert.throws(() => parseOptions('{"hosts":{"a":1}}'), (error: unknown) => error instanceof ConfigError && error.key === 'hosts');
+});
+
+test('the map route needs an absolute provisioning file and optionally names its mower', async () => {
+  const id = 'c'.repeat(64);
+  const file = '/private/map-provisioning.json';
+  assert.deepEqual(resolveConfig(syntheticValues({ map_provisioning_file: file })).maps, { provisioningFile: file, mowerId: null });
+  assert.deepEqual(resolveConfig(syntheticValues({ map_provisioning_file: file, map_mower_id: id })).maps, { provisioningFile: file, mowerId: id });
+  assert.equal(resolveConfig(syntheticValues({ map_provisioning_file: '' })).maps, null);
+  rejects(syntheticValues({ map_provisioning_file: 'relative/provisioning.json' }), 'map_provisioning_file');
+  rejects(syntheticValues({ map_provisioning_file: file, map_mower_id: 'C'.repeat(64) }), 'map_mower_id');
+  rejects(syntheticValues({ map_provisioning_file: file, map_mower_id: 'not-an-id' }), 'map_mower_id');
+  rejects(syntheticValues({ map_mower_id: id }), 'map_mower_id');
+  const description = describeConfig(resolveConfig(syntheticValues({ map_provisioning_file: file, map_mower_id: id })));
+  assert.equal(description.maps, 'enabled');
+  assert.ok(!JSON.stringify(description).includes(file) && !JSON.stringify(description).includes(id), 'the file and the mower id are not logged');
+  const io = { readFile: async () => JSON.stringify({ map_provisioning_file: '/from/options.json', map_mower_id: id }) };
+  const merged = await loadConfig({ [ENV.options_file]: '/options.json', [ENV.token]: TOKEN, [ENV.email]: EMAIL, [ENV.password]: PASSWORD, [ENV.country]: 'nl', [ENV.map_provisioning_file]: file }, io);
+  assert.deepEqual(merged.maps, { provisioningFile: file, mowerId: id }, 'the environment overrides the options file');
+  assert.equal(ENV.map_provisioning_file, 'EUFY_MOWER_MAP_PROVISIONING_FILE');
+  assert.equal(ENV.map_mower_id, 'EUFY_MOWER_MAP_MOWER_ID');
 });

@@ -2,8 +2,11 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { test } from 'node:test';
 import { ApiError } from '../src/errors.ts';
-import { MOWERS_PATH, STATE_PATH, createPrivateServer, type PrivateApi } from '../src/server.ts';
+import { MOWERS_PATH, RawReply, STATE_PATH, createPrivateServer, type MapRequest, type PrivateApi } from '../src/server.ts';
 import { TOKEN, baselineHandles, call, settledHandles } from './helpers.ts';
+
+const maps: { id: string; request: MapRequest }[] = [];
+const BUNDLE = Buffer.from('synthetic bundle bytes');
 
 async function withServer(run: (base: string, calls: () => number) => Promise<void>): Promise<void> {
   let calls = 0;
@@ -21,6 +24,13 @@ async function withServer(run: (base: string, calls: () => number) => Promise<vo
     command: async (id: string, kind: string) => {
       if (id === 'observed') throw new ApiError(403, 'control_disabled');
       return { contract: 1, id, command: kind };
+    },
+    map: async (id: string, request: MapRequest) => {
+      maps.push({ id, request });
+      if (id === 'unconfigured') throw new ApiError(404, 'map_unconfigured');
+      const headers = { ETag: '"tag"', 'X-Eufy-Map-Age-Ms': '12' };
+      if (request.ifNoneMatch === '"tag"') return new RawReply(304, headers, null);
+      return new RawReply(200, { ...headers, 'Content-Type': 'application/vnd.eufy-robomow-map+zip' }, BUNDLE);
     },
   };
   const server = createPrivateServer(TOKEN, api);
@@ -109,5 +119,41 @@ test('route failures carry only their status and stable code', async () => {
     const forbidden = await call(base, `${MOWERS_PATH}/observed/commands/start`, { token: TOKEN, method: 'POST' });
     assert.equal(forbidden.status, 403);
     assert.deepEqual(forbidden.json, { error: 'control_disabled' });
+  });
+});
+
+test('the map route is GET only, passes its two headers and serves the bundle bytes or a 304', async () => {
+  await withServer(async (base) => {
+    maps.length = 0;
+    const bundle = await call(base, `${MOWERS_PATH}/abc/map`, { token: TOKEN, headers: { 'x-eufy-map-mode': 'stream' } });
+    assert.equal(bundle.status, 200);
+    assert.deepEqual(bundle.raw, BUNDLE);
+    assert.equal(bundle.headers['content-type'], 'application/vnd.eufy-robomow-map+zip');
+    assert.equal(bundle.headers['content-length'], String(BUNDLE.length));
+    assert.equal(bundle.headers['cache-control'], 'no-store');
+    assert.equal(bundle.headers.etag, '"tag"');
+    assert.equal(bundle.headers['x-eufy-map-age-ms'], '12');
+    const unchanged = await call(base, `${MOWERS_PATH}/abc/map`, { token: TOKEN, headers: { 'if-none-match': '"tag"' } });
+    assert.equal(unchanged.status, 304);
+    assert.equal(unchanged.raw.length, 0);
+    assert.equal(unchanged.headers.etag, '"tag"');
+    assert.equal(unchanged.headers['cache-control'], 'no-store');
+    assert.deepEqual(maps, [
+      { id: 'abc', request: { mode: 'stream', ifNoneMatch: undefined } },
+      { id: 'abc', request: { mode: undefined, ifNoneMatch: '"tag"' } },
+    ]);
+    const unconfigured = await call(base, `${MOWERS_PATH}/unconfigured/map`, { token: TOKEN });
+    assert.equal(unconfigured.status, 404);
+    assert.deepEqual(unconfigured.json, { error: 'map_unconfigured' });
+    for (const method of ['POST', 'PUT', 'DELETE']) {
+      const refused = await call(base, `${MOWERS_PATH}/abc/map`, { token: TOKEN, method });
+      assert.equal(refused.status, 405, method);
+      assert.equal(refused.headers.allow, 'GET');
+    }
+    for (const path of ['/v1/mowers/abc/map/', '/v1/mowers/abc/map/extra', '/v1/mowers/abc/maps', '/v1/map', '/v1/mowers/map']) {
+      assert.equal((await call(base, path, { token: TOKEN })).status, 404, path);
+    }
+    assert.equal((await call(base, `${MOWERS_PATH}/abc/map`)).status, 401, 'the bundle needs the token');
+    assert.equal(maps.length, 3, 'refused requests never reach the map');
   });
 });

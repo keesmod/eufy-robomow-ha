@@ -46,10 +46,14 @@ from .const import (
     CONF_EUFY_EMAIL,
     CONF_EUFY_PASSWORD,
     CONF_MAP_CERTIFICATE_FINGERPRINT,
+    CONF_MAP_SOURCE,
     CONF_MAP_SOURCE_URL,
     CONF_OPERATING_MODE,
     DEFAULT_BACKEND,
+    DEFAULT_MAP_SOURCE,
     DEFAULT_OPERATING_MODE,
+    MAP_SOURCE_BRIDGE,
+    MAP_SOURCES,
     OPERATING_MODES,
 )
 from .map_source import MapSourceError, MapSourceSettings
@@ -240,26 +244,41 @@ _BRIDGE_FLOW_ERRORS = {
 }
 
 
-async def _async_validate_bridge(hass: HomeAssistant, settings: BridgeSettings) -> str:
+async def _async_validate_bridge(
+    hass: HomeAssistant, settings: BridgeSettings
+) -> tuple[dict[str, Any], str]:
     """Prove the token against the bridge and resolve the mower this entry owns.
 
-    Discovery may legitimately be unavailable while the bridge is not connected
-    to the cloud yet. An explicitly configured id is then kept as given. Without
-    an id, discovery has to succeed so the entry never guesses a mower.
+    Returns the bridge state document and the mower id. Discovery may
+    legitimately be unavailable while the bridge is not connected to the cloud
+    yet. An explicitly configured id is then kept as given. Without an id,
+    discovery has to succeed so the entry never guesses a mower.
     """
     client = BridgeClient(hass, settings)
-    await client.async_state()
+    state = await client.async_state()
     try:
         discovery = await client.async_mowers()
     except BridgeClientError:
         if settings.mower_id is not None:
-            return settings.mower_id
+            return state, settings.mower_id
         raise
-    return resolve_mower_id(discovery, settings.mower_id)
+    return state, resolve_mower_id(discovery, settings.mower_id)
+
+
+def _bridge_serves_maps(state: dict[str, Any]) -> bool:
+    """Whether the bridge reports its read-only map route, ``routes.maps``."""
+    routes = state.get("routes")
+    return isinstance(routes, dict) and routes.get("maps") is True
 
 
 class EufyRobomowOptionsFlow(OptionsFlowWithReload):
-    """Manage operating mode, the mower backend and optional read-only map acquisition."""
+    """Manage operating mode, the mower backend and the optional read-only map source.
+
+    The map source is ``external``, the map source URL and the manual recovery
+    path, or ``bridge``, the bridge's map route. The bridge source needs the
+    bridge backend and a bridge that reports ``routes.maps``. Choosing it keeps
+    the external URL, so switching back is one option change.
+    """
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -278,7 +297,11 @@ class EufyRobomowOptionsFlow(OptionsFlowWithReload):
                 )
             except MapSourceError:
                 errors["base"] = "invalid_map_source"
-            if not errors and user_input.get(CONF_BACKEND, DEFAULT_BACKEND) == BACKEND_BRIDGE:
+            backend = user_input.get(CONF_BACKEND, DEFAULT_BACKEND)
+            bridge_map = user_input.get(CONF_MAP_SOURCE, DEFAULT_MAP_SOURCE) == MAP_SOURCE_BRIDGE
+            if not errors and bridge_map and backend != BACKEND_BRIDGE:
+                errors["base"] = "map_source_needs_bridge"
+            if not errors and backend == BACKEND_BRIDGE:
                 try:
                     settings = BridgeSettings.from_values(
                         base_url=user_input.get(CONF_BRIDGE_URL, ""),
@@ -288,12 +311,14 @@ class EufyRobomowOptionsFlow(OptionsFlowWithReload):
                             CONF_BRIDGE_CERTIFICATE_FINGERPRINT, ""
                         ),
                     )
-                    mower_id = await _async_validate_bridge(self.hass, settings)
+                    state, mower_id = await _async_validate_bridge(self.hass, settings)
                 except BridgeSettingsError:
                     errors["base"] = "invalid_bridge"
                 except BridgeClientError as exc:
                     errors["base"] = _BRIDGE_FLOW_ERRORS.get(exc.code, "bridge_unavailable")
                 else:
+                    if bridge_map and not _bridge_serves_maps(state):
+                        errors["base"] = "bridge_maps_unavailable"
                     user_input = {
                         **user_input,
                         CONF_BRIDGE_URL: settings.base_url,
@@ -318,6 +343,7 @@ class EufyRobomowOptionsFlow(OptionsFlowWithReload):
                 ),
                 vol.Optional(CONF_BRIDGE_MOWER_ID): str,
                 vol.Optional(CONF_BRIDGE_CERTIFICATE_FINGERPRINT): str,
+                vol.Required(CONF_MAP_SOURCE, default=DEFAULT_MAP_SOURCE): vol.In(MAP_SOURCES),
                 vol.Optional(CONF_MAP_SOURCE_URL): str,
                 vol.Optional(CONF_MAP_CERTIFICATE_FINGERPRINT): str,
             }
@@ -331,6 +357,7 @@ class EufyRobomowOptionsFlow(OptionsFlowWithReload):
             CONF_BRIDGE_CERTIFICATE_FINGERPRINT: options.get(
                 CONF_BRIDGE_CERTIFICATE_FINGERPRINT, ""
             ),
+            CONF_MAP_SOURCE: options.get(CONF_MAP_SOURCE, DEFAULT_MAP_SOURCE),
             CONF_MAP_SOURCE_URL: options.get(CONF_MAP_SOURCE_URL, ""),
             CONF_MAP_CERTIFICATE_FINGERPRINT: options.get(
                 CONF_MAP_CERTIFICATE_FINGERPRINT,

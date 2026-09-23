@@ -11,6 +11,8 @@ mower backend that reads state from the dedicated mower bridge. Version 0.8.1
 corrects the Signal Strength sensor to the percentage the mower declares.
 Version 0.9.0 routes start, pause and resume through the mower bridge in bridge mode.
 Version 0.10.0 routes dock through the bridge's stop route on library 0.17.0.
+Version 0.11.0 lets the map entity read the mower bridge's read-only map route
+on library 0.18.0.
 
 ---
 
@@ -134,7 +136,8 @@ payload the library received at dock arrival about 30 seconds after the write,
 see the library's
 [stop and return receipt](https://github.com/keesmod/eufy-mega-client/blob/19d47a7144e505702e1ef98dfc7d84dfeb956cd6/docs/research/E15_STOP_RETURN_WINDOW_2026-09-20.md).
 No number, select or switch entity exists in bridge mode, the bridge has no
-settings route.
+settings route. The map entity has its own source choice, the bridge's map
+route or the external map source, see [Optional read-only map](#optional-read-only-map).
 
 Each command is one `POST` to the bridge, sent exactly once, and the bridge's
 answer is the confirmation. The `command` attribute goes `sending`, `pending`
@@ -152,8 +155,8 @@ retry. Nothing is replayed on reload, on a backend switch or after a bridge
 reconnect, a new coordinator starts without a command. The `bridge_control`
 attribute shows the opt-in the bridge reports, its classes and time bounds.
 
-Activity comes from the library's typed status. With bridge 0.6.0 on library
-0.17.0 the mower entity reports mowing, paused and returning from the confirmed
+Activity comes from the library's typed status. With bridge 0.7.0 on library
+0.18.0 the mower entity reports mowing, paused and returning from the confirmed
 DP 107 payloads, with `telemetry_updated_at` as the observation time. The
 `bridge_status` attribute shows the library's status state: `reported`,
 `missing` when the query carried no DP 107, `invalid` for a withheld payload,
@@ -194,7 +197,7 @@ Fifty observed session summaries are stored privately in Home Assistant; the
 card shows the latest twenty. Pauses and telemetry gaps remain visible, and a
 restart does not invent missing mowing time. Area remains in raw units until the
 scale is validated. Existing lifetime counters are not reconstructed as sessions.
-The optional map source described below is still required for map display.
+One of the map sources described below is still required for map display.
 
 ### Optional rain-aware planning
 
@@ -219,8 +222,16 @@ the mower's normal local DPS connection. This integration can consume a
 compatible map source without bundling that transport or its Android-only
 vendor libraries.
 
-Configure the source under **Settings → Devices & Services → Eufy Robomow →
-Configure**:
+**Settings → Devices & Services → Eufy Robomow → Configure** offers a **Map
+source** choice. Exactly one source feeds the map entity:
+
+- **external** (default, unchanged): a compatible HTTPS map source such as the
+  existing Android map helper, configured by the URL below. Existing entries
+  keep it until you change it, and it stays the manual recovery path.
+- **bridge**: the read-only map route of the dedicated mower bridge, described
+  below. It needs the **bridge** mower backend and a bridge that serves maps.
+
+The external source is configured with:
 
 - **Map source HTTPS URL** — base URL of the map source.
 - **Certificate SHA-256 fingerprint** — optional pin for private or self-signed
@@ -242,8 +253,28 @@ under `/config/eufy_robomow_maps/`. If acquisition fails, the previous valid map
 remains available. Idle maps refresh every five minutes. During an active mowing
 task, Home Assistant requests changed stream snapshots every two seconds,
 accumulates and deduplicates coverage deltas, and renders the newest mower pose.
-Clear the source URL to remove the map entity; no mower setting or geometry is
-changed.
+With the external source, clear the source URL to remove the map entity; no
+mower setting or geometry is changed.
+
+With the **bridge** map source the entity reads
+`GET /v1/mowers/{id}/map` of the configured bridge with the bridge's URL, token
+and optional certificate pin, and derives no token from the local key. The
+bundle and its validation are the same, but it is bound to the bridge's mower
+id instead of the device id and kept in its own latest-good file,
+`bridge.mapbundle`, next to the external source's `latest.mapbundle`, so
+switching the source never mixes or discards the other one's map. The bridge
+answers from memory and paces its own acquisitions, so Home Assistant checks
+an idle map every minute with `ETag` and a live map every two seconds while
+the bridge reports mowing, paused or returning. When the bridge serves its
+last good map after a failed acquisition, `acquisition_status` becomes
+`stale` and `acquisition_last_error` names the bridge's code, and a refused
+request names it too, for example `map_provisioning_unreadable`. The image
+entity, its unique id, the session history and the dashboard stay the same
+for both sources. Choosing the bridge source is refused unless the bridge
+reports `routes.maps`, which needs its operator-supplied map provisioning,
+see the [deployment guide](docs/bridge-deployment.md#map-provisioning-optional).
+The external URL stays stored, switch back to **external** to recover the
+previous source.
 
 Map bundles contain private lawn geometry. Never commit them, attach them to an
 issue or include them in diagnostics.
@@ -255,11 +286,11 @@ issue or include them in diagnostics.
 [`bridge/`](bridge/README.md) contains the dedicated Node 24 mower bridge that
 later steps connect to this integration. It consumes
 [`@keesmod/eufy-mega-client`](https://github.com/keesmod/eufy-mega-client)
-0.17.0 as a library, pinned to the exact release tarball, and instantiates only
+0.18.0 as a library, pinned to the exact release tarball, and instantiates only
 the library's mower module. It has its own token, credentials, session file,
 data directory, port and lifecycle, and runs with no camera bridge present.
 
-Version 0.6.0 validates its configuration, keeps one private session, makes one
+Version 0.7.0 validates its configuration, keeps one private session, makes one
 explicit authentication attempt without retries and stops cleanly on `SIGTERM`.
 Its read-only routes are `GET /v1/state`, `GET /v1/mowers` for the discovered
 E15 mowers and `GET /v1/mowers/{id}/state` for one typed local query over the
@@ -274,10 +305,16 @@ the bridge for mode, class, mower, host, exclusive ownership and the age of the
 last state observation, and served as the library's confirmed, failed or
 uncertain outcome without retry or replay. `return` stays unsupported, the
 owned firmware ignores its DP 3 write from paused and from the stopped task,
-and `stop` is the route that returns the mower to the dock. No settings or map
-routes. The Python integration consumes it through the optional **bridge**
+and `stop` is the route that returns the mower to the dock. No settings route.
+With an operator-supplied map provisioning file it adds the read-only
+`GET /v1/mowers/{id}/map`, which serves the map bundle described above from
+the library's portable map acquisition after the library's decoder accepted
+the snapshot, with `ETag`, an explicit age and the last good bundle after a
+failed acquisition. No live map has been acquired through the bridge yet,
+that map acceptance is issue #8. The Python integration consumes it through the optional **bridge**
 mower backend described above, for state and, behind both control opt-ins, for
-start, pause, resume and dock. It ships as a reproducible container image and as a
+start, pause, resume and dock, and through the **bridge** map source for the
+map. It ships as a reproducible container image and as a
 local Home Assistant app candidate with a health check, see the
 [deployment guide](docs/bridge-deployment.md). The follow-up order is recorded
 in [issue #12](https://github.com/keesmod/eufy-robomow-ha/issues/12). See
@@ -292,7 +329,9 @@ in [issue #12](https://github.com/keesmod/eufy-robomow-ha/issues/12). See
 - **Writes**, when control is explicitly enabled, go to either the local mower or the cloud API depending on the setting. With the **bridge** backend start, pause, resume and dock go through the bridge's command routes instead, once each, dock through the bridge's stop route, and settings have no route.
 - **Optional map acquisition** uses five-minute idle snapshots and two-second
   `ETag`-aware live pulls while mowing, then renders the validated geometry
-  locally as a script-free SVG.
+  locally as a script-free SVG. With the **bridge** map source the bridge
+  acquires through the library and Home Assistant checks it every minute when
+  idle and every two seconds while a task runs.
 
 Runtime dependencies are pinned to the versions validated with Home Assistant
 2026.7.1 and the E15's Tuya 3.5 transport. `requests` is declared directly;
@@ -303,6 +342,17 @@ protocol tests.
 
 ## Upgrade notes
 
+- **0.11.0, the map through the bridge.** With mower bridge 0.7.0 on library
+  0.18.0 the options gain **Map source**, `external` by default, so existing
+  entries keep their map unchanged. `bridge` points the same map entity at the
+  bridge's read-only map route in bridge mode, with its own latest-good file
+  and the bridge's token. In bridge mode the live map now follows the
+  bridge's reported mowing, paused or returning activity, where it previously
+  never switched to live pulls because bridge mode has no DP 1. A failed or
+  refused request names the source's error code in `acquisition_last_error`.
+  The external source, the local backend and the Android map source are
+  unchanged. No live map has been acquired through the bridge, that map
+  acceptance is issue #8.
 - **0.10.0, dock through the bridge.** With mower bridge 0.6.0 on library
   0.17.0 the bridge backend exposes dock next to start and pause in control
   mode and routes it through the bridge's `stop` class. On the owned E15
@@ -340,7 +390,7 @@ protocol tests.
 ## Known limitations
 
 - **Zone mowing** — the owned E15 app shows Entire, Zone, Box and Spot, but area identifiers and command transport have not been validated. No zone action is exposed; see [zone research](docs/zone-control-research.md).
-- **Map acquisition** — experimental and requires a separate compatible source because Tuya publishes the required P2P transport only through its Android media stack.
+- **Map acquisition** — experimental. The external source needs a separate compatible source, because Tuya publishes the required P2P transport only through its Android media stack. The bridge source uses the library's portable acquisition, which needs private provisioning that the operator supplies and keeps fresh. Neither has passed native map acceptance yet, see issue #8.
 - **Live marker semantics** — the live mower/station interpretation matches repeated E15 observations but is not a vendor-documented protocol contract. It is display-only and never drives mower control.
 
 ---

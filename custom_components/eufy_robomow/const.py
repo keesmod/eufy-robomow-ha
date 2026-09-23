@@ -36,6 +36,13 @@ CONF_BRIDGE_TOKEN = "bridge_token"
 CONF_BRIDGE_MOWER_ID = "bridge_mower_id"
 CONF_BRIDGE_CERTIFICATE_FINGERPRINT = "bridge_certificate_fingerprint"
 
+# Source of the read-only map entity. Exactly one source feeds the map at a time.
+CONF_MAP_SOURCE = "map_source"
+MAP_SOURCE_EXTERNAL = "external"  # the map source URL option, also the manual recovery path
+MAP_SOURCE_BRIDGE = "bridge"  # the mower bridge's map route, only with the bridge backend
+MAP_SOURCES = [MAP_SOURCE_EXTERNAL, MAP_SOURCE_BRIDGE]
+DEFAULT_MAP_SOURCE = MAP_SOURCE_EXTERNAL
+
 # Physical commands and setting writes are opt-in while the integration is alpha.
 OPERATING_MODE_OBSERVE_ONLY = "observe_only"
 OPERATING_MODE_CONTROL = "control"

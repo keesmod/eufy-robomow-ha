@@ -34,6 +34,20 @@ one new authentication attempt. Details, upgrade and rollback steps are in the
 
 By default this version serves state only and stays in `observe_only`, where
 every command route answers `403`. Setting `operating_mode` to `control` with
-a `control_stop_route` enables the bridge's opt-in start, pause and resume
-routes. The integration does not use them yet. Leave the default unless a
-supervised test with the eufy app at hand is planned.
+a `control_stop_route` enables the bridge's opt-in start, pause, resume and
+stop routes, which the integration's bridge backend uses in its own `control`
+mode. Leave the default unless a supervised test with the eufy app at hand is
+planned.
+
+## Read-only map
+
+The map route needs a private provisioning file that you supply and keep
+fresh, the app cannot obtain it. Put it in the app's configuration folder,
+`/addon_configs/local_eufy_mower_bridge/` on the Home Assistant OS machine,
+owned by uid 1000 with mode `0600`, and set `map_provisioning_file` to
+`/config/map-provisioning.json`. The app sees that folder read-only at
+`/config`. Set `map_mower_id` only when your account has more than one mower.
+Then choose the map source `bridge` in the integration. The file's content,
+rules and the route are described in the
+[bridge README](https://github.com/keesmod/eufy-robomow-ha/blob/main/bridge/README.md#map-provisioning).
+This folder mapping has not been exercised on a Supervisor yet.

@@ -56,6 +56,10 @@ _MAX_CONSECUTIVE_ERRORS = 5
 # ignored by the firmware.
 BRIDGE_COMMAND_CLASSES = {"start": "start", "resume": "resume", "pause": "pause", "dock": "stop"}
 
+# The bridge's reported activities that mean a task runs. They play the role of the
+# local backend's DP 1 for the live map. Nothing else counts as a task.
+BRIDGE_TASK_ACTIVITIES = frozenset({"mowing", "paused", "returning"})
+
 
 class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
     """Polls the Eufy E15 via Tuya local protocol every POLL_INTERVAL seconds.
@@ -177,6 +181,20 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         if self.backend == BACKEND_BRIDGE:
             return self.bridge_routes_control
         return True
+
+    @property
+    def bridge_task_active(self) -> bool:
+        """A task runs according to the last successful bridge poll.
+
+        Only a reported mowing, paused or returning activity counts. A missing,
+        invalid or unconfirmed status, a failed poll and the age of an
+        observation never do.
+        """
+        return (
+            self.last_update_success
+            and self.bridge_status == "reported"
+            and self.bridge_activity in BRIDGE_TASK_ACTIVITIES
+        )
 
     def _require_control_enabled(self) -> None:
         """Reject writes while the integration is in its safe default mode."""

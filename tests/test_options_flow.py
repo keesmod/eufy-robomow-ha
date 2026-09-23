@@ -23,9 +23,12 @@ from custom_components.eufy_robomow.const import (
     CONF_DEVICE_ID,
     CONF_LOCAL_KEY,
     CONF_MAP_CERTIFICATE_FINGERPRINT,
+    CONF_MAP_SOURCE,
     CONF_MAP_SOURCE_URL,
     CONF_OPERATING_MODE,
     DOMAIN,
+    MAP_SOURCE_BRIDGE,
+    MAP_SOURCE_EXTERNAL,
     OPERATING_MODE_CONTROL,
     OPERATING_MODE_OBSERVE_ONLY,
 )
@@ -238,6 +241,80 @@ def test_options_flow_local_backend_never_contacts_a_bridge(tmp_path) -> None:
             )
         assert result["type"] == "create_entry"
         state.assert_not_called()
+        await hass.async_stop()
+
+    asyncio.run(run_test())
+
+
+def test_options_flow_selects_the_bridge_map_only_with_the_bridge_backend_and_its_map_route(
+    tmp_path,
+) -> None:
+    async def run_test() -> None:
+        hass, entry, flow = _hass_with_entry(tmp_path)
+        recovery = {CONF_MAP_SOURCE_URL: "https://map.example.test"}
+        with patch.object(BridgeClient, "async_state") as state:
+            local = await flow.async_step_init(
+                {
+                    CONF_OPERATING_MODE: OPERATING_MODE_OBSERVE_ONLY,
+                    CONF_BACKEND: BACKEND_LOCAL,
+                    CONF_MAP_SOURCE: MAP_SOURCE_BRIDGE,
+                    CONF_MAP_SOURCE_URL: "",
+                    CONF_MAP_CERTIFICATE_FINGERPRINT: "",
+                }
+            )
+        assert local["type"] == "form"
+        assert local["errors"] == {"base": "map_source_needs_bridge"}
+        state.assert_not_called()
+
+        mowers = {"contract": 1, "mowers": [{"id": MOWER_ID}]}
+        without_maps = {**STATE, "routes": {"discovery": True, "state": True, "control": False, "maps": False}}
+        with (
+            patch.object(BridgeClient, "async_state", return_value=without_maps),
+            patch.object(BridgeClient, "async_mowers", return_value=mowers),
+        ):
+            refused = await flow.async_step_init(
+                _bridge_input(**{CONF_MAP_SOURCE: MAP_SOURCE_BRIDGE}, **recovery)
+            )
+        assert refused["type"] == "form"
+        assert refused["errors"] == {"base": "bridge_maps_unavailable"}
+
+        with_maps = {**STATE, "routes": {"discovery": True, "state": True, "control": False, "maps": True}}
+        with (
+            patch.object(BridgeClient, "async_state", return_value=with_maps),
+            patch.object(BridgeClient, "async_mowers", return_value=mowers),
+        ):
+            result = await flow.async_step_init(
+                _bridge_input(**{CONF_MAP_SOURCE: MAP_SOURCE_BRIDGE}, **recovery)
+            )
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_MAP_SOURCE] == MAP_SOURCE_BRIDGE
+        assert result["data"][CONF_BRIDGE_MOWER_ID] == MOWER_ID
+        assert result["data"][CONF_MAP_SOURCE_URL] == "https://map.example.test", (
+            "the external URL is kept for manual recovery"
+        )
+
+        with (
+            patch.object(BridgeClient, "async_state", return_value=without_maps),
+            patch.object(BridgeClient, "async_mowers", return_value=mowers),
+        ):
+            external = await flow.async_step_init(
+                _bridge_input(**{CONF_MAP_SOURCE: MAP_SOURCE_EXTERNAL}, **recovery)
+            )
+        assert external["type"] == "create_entry", "the external map needs no bridge map route"
+        assert external["data"][CONF_MAP_SOURCE] == MAP_SOURCE_EXTERNAL
+        await hass.async_stop()
+
+    asyncio.run(run_test())
+
+
+def test_options_form_offers_the_map_source_with_the_external_default(tmp_path) -> None:
+    async def run_test() -> None:
+        hass, entry, flow = _hass_with_entry(tmp_path)
+        form = await flow.async_step_init()
+        schema = form["data_schema"].schema
+        field = next(key for key in schema if key == CONF_MAP_SOURCE)
+        assert field.default() == MAP_SOURCE_EXTERNAL
+        assert schema[field].container == [MAP_SOURCE_EXTERNAL, MAP_SOURCE_BRIDGE]
         await hass.async_stop()
 
     asyncio.run(run_test())

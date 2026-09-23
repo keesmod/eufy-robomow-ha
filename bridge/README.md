@@ -20,7 +20,12 @@ required stop route, and `POST /v1/mowers/{id}/commands/{class}` for `start`,
 every command route answers `403`. Version 0.6.0 pins library 0.17.0 and adds
 the `stop` route from issue #31: on the owned E15 a stop over DP 1 false ends
 the task and the mower returns to the dock by itself, so `stop` is the route
-that brings the mower home. `return` stays unsupported.
+that brings the mower home. `return` stays unsupported. Version 0.7.0 pins
+library 0.18.0 and adds the read-only map route from issue #25:
+`GET /v1/mowers/{id}/map` serves the map bundle the integration already
+validates, built from the library's portable map acquisition after the
+library's decoder accepted the snapshot. The route exists only when the
+operator supplies map provisioning, see [Map provisioning](#map-provisioning).
 
 ## What it does
 
@@ -48,14 +53,31 @@ that brings the mower home. `return` stays unsupported.
   The library runs one fresh status query, writes one declared boolean point
   and reads the lifecycle back from fresh reports. The outcome is served as
   `confirmed`, `failed` or `uncertain` and is never retried or replayed.
+- With map provisioning, answers a map request at once from memory with the
+  last good bundle, its entity tag and its age. The request may start one
+  acquisition demand of the library's `PortableMapAcquisition` in the
+  background. Only a snapshot that the library's decoder accepts replaces the
+  bundle, and a failed demand keeps the last good bundle with its failure code.
 - Stops on `SIGTERM` or `SIGINT`: cancels an in-flight authentication, closes
   the server and all connections, shuts the library client down and flushes
   files. Startup, authentication and shutdown each have a deadline.
 
 ## What it does not do yet
 
-- No settings or map routes. The state document reports `routes.maps` as
-  `false`.
+- No settings route. The map route exists only with map provisioning, which
+  the bridge cannot obtain itself: the library's acquisition needs private,
+  expiring `MapSessionProvisioning` from the current relay route, and the
+  operator supplies it as a file. Without it the state document reports
+  `routes.maps` as `false` and the map route answers `404`.
+- No live map acquisition has run through the bridge. The library's
+  acquisition and decoder are software-verified, a fresh acquisition decoded
+  end to end on the owned E15 is still open in the library, and this bridge
+  tests the route, the bundle and the demand scheduling with synthetic
+  snapshots only. Map acceptance on the owned E15 is issue #8.
+- No map editing, zone or selection, and no path history across demands. The
+  bundle carries the three transport files as the library retained them. The
+  library's `MowerPathAccumulator` is not part of this contract, the
+  integration merges live coverage itself.
 - No physical mower control in the default `observe_only` mode. Every command
   route answers `403 control_disabled` there and never reaches the library.
   `control` mode needs the explicit stop route opt-in at startup.
@@ -72,7 +94,8 @@ that brings the mower home. `return` stays unsupported.
   to the dock by itself, it never keeps the mower where it stands. No
   settings, zone or scheduling command.
 - No polling, reconnect or spontaneous report stream. Every LAN session is
-  opened by a request and closed after its query.
+  opened by a request and closed after its query. A map demand starts only
+  when a map request finds one due, never on a timer of its own.
 - `status` reports only the three confirmed E15 activities. No E15 payload
   identifies `docked`, `charging`, `idle` or `error`, so those values are
   never served and never inferred from age, absence or inactivity. Mowing
@@ -110,6 +133,8 @@ may contain only the keys below, as strings or integers, and must stay under
 | `EUFY_MOWER_CONTROL_STOP_ROUTE` | `control_stop_route` | in `control` mode | | 1 to 200 printable ASCII characters. The operator's own words for how the mower is stopped when a command misbehaves, for example `pause here, then Stop and Charge in the eufy app`. Passed to the library opt-in, never logged or served |
 | `EUFY_MOWER_CONTROL_MAX_STATE_AGE_MS` | `control_max_state_age_ms` | no | `30000` | 1000 to 300000. A command is refused when the last successful state observation of that mower is older |
 | `EUFY_MOWER_CONTROL_READ_BACK_MS` | `control_read_back_ms` | no | `20000` | 1000 to 60000. How long the library waits for fresh reports after every write |
+| `EUFY_MOWER_MAP_PROVISIONING_FILE` | `map_provisioning_file` | no | | Absolute path of the operator's private map provisioning file. Enables the read-only map route. Read for every acquisition, never logged or served |
+| `EUFY_MOWER_MAP_MOWER_ID` | `map_mower_id` | no | | 64-character id of the mower the provisioning belongs to. Required only when more than one mower is discovered, needs `map_provisioning_file` |
 
 Mower ids are the opaque 64-character identifiers from `GET /v1/mowers`. They
 are account-scoped and stable while the private session identity is kept. A
@@ -123,13 +148,41 @@ session renewal. Protect the environment, the options file and the data
 directory accordingly. Nothing in the state document or the logs contains the
 token, the credentials or the session.
 
+### Map provisioning
+
+The library's `PortableMapAcquisition` needs private provisioning from the
+verified account and the current relay route of the mower: the library's
+`MapSessionProvisioning` object with `expiresAt`, `accountUid`, `peer`,
+`localKey`, `password`, `motoId`, `preconnect`, `iceTokens`, `tcpToken`,
+`mqtt`, `mqttHeader`, `subscribeTopics` and `publishTopic`, see the library's
+[portable map acquisition](https://github.com/keesmod/eufy-mega-client/blob/1792bbc5bbe420adc54c6329bf9ea72e4e222a02/docs/MAP_ACQUISITION.md).
+It expires, and the library refuses it when less than 65 seconds of validity
+remain. Neither the library nor this bridge obtains it. The operator writes it
+as one JSON object into a file and keeps that file fresh, for example with a
+private tool of their own.
+
+The bridge reads the file anew for every acquisition demand, so a replaced file
+takes effect without a restart. The file must be a regular file of at most
+64 KiB, readable by the bridge's user, not writable by group or others and not
+readable by others, for example mode `0600` owned by the bridge's user.
+Anything else fails that demand with `map_provisioning_unreadable` or
+`map_provisioning_insecure`, and the library's own validation fails it with
+`mower_map_invalid_provisioning` before any network I/O. The content is handed
+to the library and never logged, served, copied into the data directory or
+kept after the demand.
+
+The provisioning belongs to one mower. With one discovered mower that is the
+mower. With several, set `map_mower_id`, otherwise the map route answers
+`409 map_mower_unresolved`.
+
 ## Private API
 
 Every request carries `Authorization: Bearer <token>`. A missing or wrong token
 gets `401`, an unknown path `404`, another method `405`, a command outside
 `control` mode `403`, a command the bridge refuses before any write `409` and a
 route failure `503`, each with only a stable code in `{ "error": "…" }`.
-Responses are never cached.
+Responses are never cached. The map bundle is the only answer that is not
+JSON.
 
 ### `GET /v1/state`
 
@@ -139,15 +192,16 @@ Bridge state, for example:
 {
   "protocol": 1,
   "bridge": "eufy-robomow-bridge",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "bridge_id": "00000000-0000-4000-8000-000000000000",
   "lifecycle": "running",
   "operating_mode": "observe_only",
   "auth": { "state": "disconnected", "last_error": "authentication_failed", "attempted_at": "2026-09-19T10:00:00.000Z" },
-  "client": { "package": "@keesmod/eufy-mega-client", "version": "0.17.0", "module": "mowers", "lifecycle": "open", "connected": false },
+  "client": { "package": "@keesmod/eufy-mega-client", "version": "0.18.0", "module": "mowers", "lifecycle": "open", "connected": false },
   "mowers": { "count": null, "discovered_at": null, "error": "authentication_required" },
   "routes": { "discovery": true, "state": true, "control": false, "maps": false },
-  "control": null
+  "control": null,
+  "maps": null
 }
 ```
 
@@ -155,8 +209,31 @@ Bridge state, for example:
 stable library or bridge error code of the last explicit attempt, or `null`
 after success. `mowers` summarises the discovery cache. In `control` mode
 `routes.control` is `true` and `control` carries the opt-in in effect, for
-example `{ "classes": ["start", "pause", "resume"], "max_state_age_ms": 30000, "read_back_ms": 20000 }`.
+example `{ "classes": ["start", "pause", "resume", "stop"], "max_state_age_ms": 30000, "read_back_ms": 20000 }`.
 The stop route text is never served.
+
+With map provisioning `routes.maps` is `true` and `maps` reports the
+acquisition without any geometry, for example:
+
+```json
+{
+  "captured_at": "2026-09-23T10:00:00.250Z",
+  "age_ms": 41250,
+  "stale": false,
+  "error": null,
+  "acquiring": false,
+  "streaming": false,
+  "last_demand": { "started_at": "2026-09-23T09:59:48.000Z", "ended_at": "2026-09-23T10:00:01.000Z", "end": "aborted", "cancellation_confirmed": true, "cleanup_confirmed": true, "published": 2, "rejected": 0 }
+}
+```
+
+`captured_at` is the library's receipt time of the served snapshot and
+`age_ms` its age against the bridge clock. `stale` is true while a bundle is
+served but the last demand failed, with that demand's code in `error`.
+`acquiring` shows a running demand and `streaming` an active stream lease.
+`last_demand` is the last demand that reached the library: its end reason as
+the library reports it, whether the peer confirmed the cancellation and the
+local cleanup, and how many snapshots it published and rejected.
 
 ### `GET /v1/mowers`
 
@@ -210,9 +287,9 @@ DP 107 payload itself is never served.
 
 #### E15 activity
 
-`status` is whatever library 0.17.0 reports, unchanged. The library is pinned
-to the release tarball with SHA-256 `021186b38ff4d4c058e7e0f8406214737a61e5b9248235556bf6affd3180d184`
-(source commit `f29df02e`). Its E15 registry confirms three DP 107
+`status` is whatever library 0.18.0 reports, unchanged. The library is pinned
+to the release tarball with SHA-256 `52c1af2849bb43489171e56584cecd4795dec38459a0c5b9603923d5fb7aad2a`
+(source commit `1792bbc5`). Its E15 registry confirms three DP 107
 `robot_status` payloads on the owned E15 (T2880, firmware 6.9.28, Anker eufy
 app 6.1.00): fields 1 = 2 and 3 = 1 `mowing`, fields 1 = 2 and 3 = 2 `paused`
 and fields 1 = 1 and 3 = 1 `returning`, each reproduced through owner-operated
@@ -321,6 +398,86 @@ from the stopped task. The bridge itself has not been run against the mower
 in `control` mode, that is the hardware acceptance in
 keesmod/eufy-robomow-ha#8.
 
+### `GET /v1/mowers/{id}/map`
+
+Read-only, only with [map provisioning](#map-provisioning). The current map
+bundle of the mower the provisioning belongs to, in the format the
+integration validates for every compatible map source. Two request headers
+count: `X-Eufy-Map-Mode`, `idle` (the default when absent) or `stream`, and
+`If-None-Match`. The request is answered at once from memory and never waits
+for an acquisition.
+
+A `200` carries the bundle with these headers:
+
+| Header                   | Value                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------- |
+| `Content-Type`           | `application/vnd.eufy-robomow-map+zip`                                                 |
+| `ETag`                   | `"<snapshot_id>-<captured_at>"`, a new tag for new files or a later capture             |
+| `X-Eufy-Map-Captured-At` | The library's receipt time of the snapshot                                             |
+| `X-Eufy-Map-Age-Ms`      | Its age against the bridge clock when the answer was built                             |
+| `X-Eufy-Map-Stale`       | `true` while the last demand failed and the last good bundle is served, else `false`   |
+| `X-Eufy-Map-Error`       | The failed demand's code, only while stale                                              |
+
+When `If-None-Match` matches, the answer is `304` with the same headers and no
+body. Before the first snapshot the answer is `503` with `map_unavailable` or
+the code of the failed demand. Other refusals: `404 map_unconfigured` without
+provisioning or for another mower than the provisioned one, `400
+invalid_mower_id`, `400 invalid_map_mode`, `404 unknown_mower`, `409
+map_mower_unresolved` and the discovery codes of the state route.
+
+The bundle is a ZIP archive whose members are stored without compression:
+`manifest.json` and the three transport files `map.bin.stream`,
+`cleanPath.bin.stream` and `navPath.bin.stream` exactly as the library
+retained them. The manifest holds `schema_version` 1, `device_id`, the mower
+id of the route, `captured_at`, the receipt time in whole Unix seconds,
+`snapshot_id`, the SHA-256 over every file name, its length as eight
+big-endian bytes and its bytes in that file order, and `files` with every
+file's `size` and `sha256`. Identical input gives identical bytes.
+
+Acquisition follows the requests, one demand at a time:
+
+- An idle request starts a demand when none ran in the last five minutes or
+  no bundle exists. The demand ends once a snapshot with a `history` or
+  `complete` cleaning path was published, as the retained source closed its
+  idle stream after one complete snapshot, otherwise after 30 seconds. The
+  empty `realtime` placeholder that opens every demand does not end it.
+- A `stream` request keeps demands running for a 30-second lease. Each demand
+  lasts up to 30 seconds and the next stream request after it starts the
+  next one.
+- After a demand that published nothing the next one waits a minute, in both
+  modes.
+- Every demand reads the provisioning file, constructs one
+  `PortableMapAcquisition`, checks its retained files every second and
+  publishes each newer complete snapshot that passes the gate. Afterwards it
+  releases the library's retained bytes and shuts the instance down. An
+  unconfirmed local cleanup stops all further demands until a restart, as the
+  library refuses further acquisition on that instance.
+
+The gate runs the library's `decodeMowerMapSnapshot`. Every file holds 1 byte
+to 5 MiB, the integration's limit, all three files decode without a fault and
+the map file carries a realtime map with at least one region and no
+degenerate region boundary. A refused snapshot never replaces the bundle.
+
+Failure codes, in `X-Eufy-Map-Error`, in the `503` body and in the state
+document's `maps.error`:
+
+| Code                                                                                                                          | Meaning                                                                    |
+| ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `map_provisioning_unreadable`                                                                                                 | The file is missing, not a regular file, too large, empty or not a JSON object |
+| `map_provisioning_insecure`                                                                                                   | Group or others may write the file, or others may read it                  |
+| `mower_map_invalid_provisioning`                                                                                              | The library refused the provisioning, for example because it expired, before any network I/O |
+| `mower_map_incomplete`                                                                                                        | The demand ended without a complete snapshot                               |
+| `mower_map_negotiation_timeout`, `mower_map_connection_failed`, `mower_map_protocol_error`, `mower_map_stream_ended`, `mower_map_cancel_unconfirmed` | The library's end reason of a demand that published nothing |
+| `mower_map_cleanup_unconfirmed`                                                                                               | Local cleanup was not confirmed, no further demand until a restart         |
+| `map_undecodable`, `map_boundary_missing`, `map_file_size`                                                                    | The demand's snapshots failed the gate                                     |
+| `request_aborted`                                                                                                             | The bridge stopped during the demand                                       |
+
+The bundle is private lawn geometry. It is served only with the bearer token,
+never logged and never part of the state document. The bridge keeps the last
+good bundle in memory only and writes nothing about the map to disk, so after
+a restart the route answers `503` until the first snapshot while the
+integration keeps showing its own last good copy.
+
 ## Data directory
 
 | File                 | Mode   | Content                                                 |
@@ -329,7 +486,9 @@ keesmod/eufy-robomow-ha#8.
 | `bridge-id`          | `0600` | Random UUID created once, reported as `bridge_id`      |
 
 The session belongs to the library adapter and is never inspected, logged or
-served. Delete the file to force a fresh login on the next start.
+served. Delete the file to force a fresh login on the next start. The map
+provisioning file is the operator's and lives wherever the operator keeps it.
+No map data is written here.
 
 ## Running
 
@@ -368,10 +527,18 @@ route's contract, error mapping, single LAN session per mower, stale
 last-good results and cancellation at shutdown, and the command route's 403 in
 `observe_only`, its class, id, host, freshness and ownership checks, the
 confirmed, failed and uncertain outcomes, the library's typed refusals, session
-failures and cancellation at shutdown. Route tests use the `openLocalSession`
-seam with a synthetic session, while the library's own refusals
-(`authentication_required`, `mower_protocol_unavailable`) run through the real
-module. No test sends anything to a mower. Every lifecycle test asserts that no socket, listener or
+failures and cancellation at shutdown, and the map route's bundle contract,
+its entity tag and age headers, the decoder gate, the provisioning file rules,
+idle and stream demands, the last good bundle after failed and refused
+demands, the retry spacing, unconfirmed cleanup and cancellation at shutdown.
+Route tests use the `openLocalSession` and `mapAcquisition` seams with
+synthetic sessions and snapshots, while the library's own refusals
+(`authentication_required`, `mower_protocol_unavailable`,
+`mower_map_invalid_provisioning`) and its map decoder run through the real
+package. `test/maps.test.ts` also proves that the bridge builds byte for byte
+the bundle in `tests/fixtures/bridge_map_bundle.json`, which the integration's
+own validator decodes in `tests/test_bridge_map.py`. No test sends anything
+to a mower or a relay. Every lifecycle test asserts that no socket, listener or
 referenced timer remains afterwards.
 
 The library is pinned to the exact release tarball and its `sha512` integrity
