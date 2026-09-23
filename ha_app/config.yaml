@@ -1,5 +1,5 @@
 name: Eufy Mower Bridge
-version: 0.7.0
+version: 0.7.1
 slug: eufy_mower_bridge
 description: Dedicated Eufy E15 mower bridge for the Eufy Robomow integration (state routes, opt-in start/pause/resume/stop, read-only map route, local install candidate)
 url: https://github.com/keesmod/eufy-robomow-ha

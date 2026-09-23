@@ -1,4 +1,4 @@
-import { BridgeError, MowerBridge } from './bridge.ts';
+import { BridgeError, MowerBridge, ROUTED_COMMAND_CLASSES } from './bridge.ts';
 import { ConfigError, describeConfig, loadConfig, type BridgeConfig } from './config.ts';
 import { BRIDGE_NAME, BRIDGE_VERSION } from './version.ts';
 
@@ -7,6 +7,12 @@ const HARD_EXIT_AFTER_MS = 20_000;
 
 function log(level: 'info' | 'warn' | 'error', message: string): void {
   console[level](`${BRIDGE_NAME}: ${message}`);
+}
+
+/** `start, pause, resume and stop`, taken from the routed classes so the log follows the routes. */
+function routedClasses(): string {
+  const classes: readonly string[] = ROUTED_COMMAND_CLASSES;
+  return classes.length > 1 ? `${classes.slice(0, -1).join(', ')} and ${classes.at(-1)}` : (classes[0] ?? '');
 }
 
 async function main(): Promise<number> {
@@ -51,7 +57,7 @@ async function main(): Promise<number> {
   log(
     'info',
     config.control
-      ? `operating mode ${config.operatingMode}: start, pause and resume routes enabled, read-back ${config.control.readBackMs} ms, state older than ${config.control.maxStateAgeMs} ms refuses a command`
+      ? `operating mode ${config.operatingMode}: ${routedClasses()} routes enabled, read-back ${config.control.readBackMs} ms, state older than ${config.control.maxStateAgeMs} ms refuses a command`
       : `operating mode ${config.operatingMode}: every command route answers 403`,
   );
   log(
