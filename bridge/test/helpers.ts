@@ -33,16 +33,18 @@ export interface Reply {
   headers: Record<string, string | string[] | undefined>;
   text: string;
   json: unknown;
+  /** The body as received, for the binary map bundle. */
+  raw: Buffer;
 }
 
 /** One request over a fresh connection that is closed before the promise resolves. */
 export function call(
   base: string,
   path: string,
-  options: { token?: string; authorization?: string; method?: string; body?: string } = {},
+  options: { token?: string; authorization?: string; method?: string; body?: string; headers?: Record<string, string> } = {},
 ): Promise<Reply> {
   return new Promise((resolve, reject) => {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { ...options.headers };
     if (options.token !== undefined) headers.authorization = `Bearer ${options.token}`;
     if (options.authorization !== undefined) headers.authorization = options.authorization;
     const request = httpRequest(new URL(path, base), { method: options.method ?? 'GET', agent: false, headers }, (response) => {
@@ -50,14 +52,15 @@ export function call(
       response.on('data', (chunk: Buffer) => chunks.push(chunk));
       response.on('error', reject);
       response.on('close', () => {
-        const text = Buffer.concat(chunks).toString('utf8');
+        const raw = Buffer.concat(chunks);
+        const text = raw.toString('utf8');
         let json: unknown;
         try {
           json = JSON.parse(text);
         } catch {
           json = undefined;
         }
-        resolve({ status: response.statusCode ?? 0, headers: response.headers, text, json });
+        resolve({ status: response.statusCode ?? 0, headers: response.headers, text, json, raw });
       });
     });
     request.on('error', reject);

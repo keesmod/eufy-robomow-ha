@@ -46,10 +46,10 @@ version 0.8.1.
 ## DP 107 activity
 
 The mower declares DP 107 `robot_status` as a raw data point. Library
-`@keesmod/eufy-mega-client` 0.17.0, pinned by the mower bridge to the release
+`@keesmod/eufy-mega-client` 0.18.0, pinned by the mower bridge to the release
 tarball with SHA-256
-`ff7ab463d418c7bd0a98e204a81acc362e4f3affbc1f53ebc4c0dcc21aaf5288` from source commit
-`192e57e6830fa81680cc55d239ae4387b8f44a95`, confirms three payloads on the
+`52c1af2849bb43489171e56584cecd4795dec38459a0c5b9603923d5fb7aad2a` from source commit
+`1792bbc5bbe420adc54c6329bf9ea72e4e222a02`, confirms three payloads on the
 owned E15 (product code T2880, firmware 6.9.28, Anker eufy app 6.1.00): fields
 1 = 2 and 3 = 1 `mowing`, fields 1 = 2 and 3 = 2 `paused`, and fields 1 = 1 and
 3 = 1 `returning`. Each reached at least four app-correlated transitions across
@@ -57,7 +57,7 @@ two owner-operated windows, recorded in the library's
 [contract receipt](https://github.com/keesmod/eufy-mega-client/blob/ee1ac36bead945445aee63fe049b295e81b9eafc/docs/research/E15_ROBOT_STATUS_CONTRACT_2026-09-16.md)
 and
 [reproduction receipt](https://github.com/keesmod/eufy-mega-client/blob/ee1ac36bead945445aee63fe049b295e81b9eafc/docs/research/E15_ROBOT_STATUS_REPRODUCTION_2026-09-19.md).
-The three activities are `confirmed`. Mower bridge 0.6.0 serves them in the
+The three activities are `confirmed`. Mower bridge 0.7.0 serves them in the
 `status` field of the state route and the integration's bridge mode (0.8.2)
 maps them onto the mower entity, both with the observation time of the query
 that carried the payload.
@@ -87,3 +87,26 @@ This is an `observed` presentation rule, not a confirmed protocol contract. The
 fixed SVG marker offset is visual alignment for the renderer's fixed-size icons
 and is clamped to the canvas. None of these positions may be used for commands,
 safety decisions, virtual-fence writes, or other physical control.
+
+The library's decoder in 0.18.0 reads map-record field 8 as the station pose
+and `navPath.bin.stream` as a pose, both with x in field 1, y in field 2 and
+the heading in field 3, from the original parser's numbering. This
+integration's parser reads fields 2 and 3 of both as x and y for the renderer.
+The two readings differ, and which
+one matches the app on the owned E15 is part of the native map acceptance in
+issue #8. Until then both stay display only.
+
+## Map bundle through the bridge
+
+Mower bridge 0.7.0 serves the map bundle this integration already validates
+from the library's `PortableMapAcquisition` (keesmod/eufy-mega-client#50) and
+its decoder `decodeMowerMapSnapshot` (keesmod/eufy-mega-client#51) in library
+0.18.0. No new protocol fact enters this repository: the bundle carries the
+three transport files as the library retained them, and the manifest,
+snapshot digest and validation are this repository's existing contract. The
+library's evidence levels apply unchanged. The three-file transfer has prior
+standalone Linux research hardware proof (#49 in the library), the
+acquisition adapter and the decoder are experimental software coverage and
+the decoder's numbering is capture-validated. A fresh acquisition decoded end
+to end on the owned E15, through the library or through the bridge, has not
+run. The bridge tests use synthetic snapshots only.

@@ -32,7 +32,7 @@
     "step": {
       "init": {
         "title": "Eufy Robomow options",
-        "description": "Observe-only disables mower and settings writes. The local backend polls the mower itself. The bridge backend reads state from the dedicated mower bridge and routes start, pause, resume and dock through it while the bridge runs in control mode. Dock uses the bridge's stop route, which returns the owned E15 to the dock. Settings have no bridge route. The optional map source is always read-only; leave its URL empty to disable the map entity.",
+        "description": "Observe-only disables mower and settings writes. The local backend polls the mower itself. The bridge backend reads state from the dedicated mower bridge and routes start, pause, resume and dock through it while the bridge runs in control mode. Dock uses the bridge's stop route, which returns the owned E15 to the dock. Settings have no bridge route. The map is always read-only. The external map source reads the map source URL, leave it empty to disable the map entity. The bridge map source reads the mower bridge's map route and needs the bridge backend.",
         "data": {
           "operating_mode": "Operating mode",
           "backend": "Mower backend",
@@ -40,6 +40,7 @@
           "bridge_token": "Bridge token",
           "bridge_mower_id": "Bridge mower id (optional)",
           "bridge_certificate_fingerprint": "Bridge certificate SHA-256 fingerprint (optional)",
+          "map_source": "Map source",
           "map_source_url": "Map source HTTPS URL",
           "map_certificate_fingerprint": "Certificate SHA-256 fingerprint (optional)"
         },
@@ -50,6 +51,7 @@
           "bridge_token": "The bridge's bearer token. It is stored in this entry's options.",
           "bridge_mower_id": "The mower id from the bridge's discovery. Leave empty when the bridge discovers exactly one mower.",
           "bridge_certificate_fingerprint": "Optional pin for a private or self-signed TLS certificate on an https bridge URL.",
+          "map_source": "external reads the map source URL below, the existing source and the manual recovery path. bridge reads the map route of the mower bridge above and keeps the URL for recovery.",
           "map_source_url": "Base URL of a compatible E15 map source.",
           "map_certificate_fingerprint": "Optional pin for a private or self-signed TLS certificate."
         }
@@ -57,6 +59,8 @@
     },
     "error": {
       "invalid_map_source": "The map source URL or certificate fingerprint is invalid.",
+      "map_source_needs_bridge": "The bridge map source needs the bridge backend.",
+      "bridge_maps_unavailable": "The bridge does not serve maps. Configure its map provisioning first, or keep the external map source.",
       "invalid_bridge": "The bridge URL, token, mower id or certificate fingerprint is invalid.",
       "bridge_unauthorized": "The bridge rejected the token.",
       "bridge_cannot_connect": "Cannot connect to the bridge. Check the URL, the certificate and that the bridge is running.",
