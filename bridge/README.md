@@ -26,6 +26,8 @@ library 0.18.0 and adds the read-only map route from issue #25:
 validates, built from the library's portable map acquisition after the
 library's decoder accepted the snapshot. The route exists only when the
 operator supplies map provisioning, see [Map provisioning](#map-provisioning).
+Version 0.7.1 names every routed command class in the `control` startup log,
+`stop` included, taken from the routes themselves.
 
 ## What it does
 
@@ -192,7 +194,7 @@ Bridge state, for example:
 {
   "protocol": 1,
   "bridge": "eufy-robomow-bridge",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "bridge_id": "00000000-0000-4000-8000-000000000000",
   "lifecycle": "running",
   "operating_mode": "observe_only",
