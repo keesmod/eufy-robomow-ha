@@ -130,11 +130,12 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
             if dp118 == 100:
                 # DP118 stays at 100 after a map save, so this shape is a later
                 # task that mows or the mower resting in the dock with its task
-                # flag set, charging or after a session. DP 107 from a cloud poll
-                # taken since the shape appeared tells them apart. Without it the
+                # flag set, charging or after a session, or saving the map at the
+                # arrival before DP 1 turns false. DP 107 from a cloud poll taken
+                # since the shape appeared tells them apart. Without it the
                 # reading stays MOWING, as before.
                 status = self.coordinator.ambiguous_task_status
-                if status == "idle":
+                if status in ("idle", "map_saving"):
                     return LawnMowerActivity.DOCKED
                 if status == "paused":
                     return LawnMowerActivity.PAUSED

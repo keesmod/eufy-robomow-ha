@@ -52,12 +52,15 @@ def test_robot_status_reads_the_confirmed_definitions_and_the_default_payload() 
     assert robot_status(_b64(0x08, 0x02, 0x18, 0x02)) == "paused"
     assert robot_status(_b64(0x08, 0x01, 0x18, 0x01)) == "returning"
     assert robot_status(_b64(0x08, 0x01, 0x10, 0x01, 0x18, 0x01)) == "returning"
+    assert robot_status(_b64(0x10, 0x05, 0x18, 0x01)) == "map_saving"
 
 
 def test_robot_status_never_guesses() -> None:
     for value in (
-        _b64(0x10, 0x05, 0x18, 0x01),  # the map-saving payload
+        _b64(0x10, 0x05, 0x18, 0x02),  # not exactly the map-saving payload
+        _b64(0x10, 0x05, 0x18, 0x01, 0x30, 0x01),  # map saving with another record
         _b64(0x30, 0x01),  # field 6
+        _b64(0x20, 0x02),  # field 4, seen once while docked idle on 2026-09-24
         _b64(0x08, 0x02),  # field 3 absent counts as zero, no definition matches
         _b64(0x08, 0x02, 0x08, 0x02, 0x18, 0x01),  # a repeated field
         _b64(0x0A, 0x01, 0x00),  # a length-delimited record
@@ -104,6 +107,7 @@ def _local_entity(dps: dict[str, Any], status: str | None = None, polled_at: dat
 def test_a_fresh_default_payload_makes_the_ambiguous_shape_docked() -> None:
     fresh = T0 + timedelta(seconds=2)
     assert _local_entity(RESTING_IN_DOCK, "idle", fresh).activity == LawnMowerActivity.DOCKED
+    assert _local_entity(RESTING_IN_DOCK, "map_saving", fresh).activity == LawnMowerActivity.DOCKED, "the map save at the arrival"
     assert _local_entity(RESTING_IN_DOCK, "mowing", fresh).activity == LawnMowerActivity.MOWING
     assert _local_entity(RESTING_IN_DOCK, "paused", fresh).activity == LawnMowerActivity.PAUSED
     assert _local_entity(RESTING_IN_DOCK, "returning", fresh).activity == LawnMowerActivity.RETURNING
