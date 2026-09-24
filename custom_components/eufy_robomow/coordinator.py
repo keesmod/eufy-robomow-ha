@@ -526,6 +526,10 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self.bridge_error = None
         self.bridge_status = telemetry.status
         self.bridge_activity = telemetry.activity
+        if telemetry.command_activity is not None:
+            # A report of the command still running on the bridge, for example
+            # returning within a second of a dock that confirms only at arrival.
+            self._record_activity(*telemetry.command_activity)
         self.local_generation += 1
         self.last_local_update = telemetry.observed_at
         if self.session_store and telemetry.status == "reported" and telemetry.activity:
@@ -683,7 +687,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
                     f"The mower bridge refused the command before sending it: {exc.code}"
                 ) from exc
             operation.finish("uncertain", exc.code)
-            self._clear_command_activity()
+            self._clear_command_activity(before=dt_util.parse_datetime(operation.requested_at))
             raise HomeAssistantError(
                 f"The mower bridge did not answer the command ({exc.code}). The command "
                 "may have been written. Check the mower before repeating it."
@@ -712,7 +716,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             operation.finish("rejected", f"bridge:{outcome.end}")
             raise HomeAssistantError("The mower rejected the command")
         operation.finish("uncertain", f"bridge:{outcome.end}")
-        self._clear_command_activity()
+        self._clear_command_activity(before=dt_util.parse_datetime(operation.requested_at))
         raise HomeAssistantError(
             "The command was written, but the mower did not confirm it within the "
             "bridge's read-back window. Check the mower before repeating it."
@@ -727,8 +731,18 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         activity once, as it observes a reported status.
         """
         activity = outcome.activity or ("docked" if outcome.payload == "map_saving" else None)
-        observed_at = outcome.observed_at
-        if activity is None or observed_at is None:
+        if activity is None or outcome.observed_at is None:
+            return
+        self._record_activity(activity, outcome.observed_at)
+
+    def _record_activity(self, activity: str, observed_at: datetime) -> None:
+        """Keep one reported activity from a command as the bridge-mode evidence.
+
+        An older report than the evidence already held changes nothing, and the
+        session history observes each accepted activity once.
+        """
+        held = self.bridge_command_activity_at
+        if held is not None and held >= observed_at:
             return
         if (
             self.bridge_status == "reported"
@@ -742,8 +756,16 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         if self.session_store:
             self.session_store.observe_activity(activity, observed_at)
 
-    def _clear_command_activity(self) -> None:
-        """Forget the command activity once the mower's state is no longer known."""
+    def _clear_command_activity(self, before: datetime | None = None) -> None:
+        """Forget the command activity once the mower's state is no longer known.
+
+        With ``before``, a report received at or after that time stays: the
+        running command's own progress, for example ``returning`` during a dock
+        whose arrival fell outside the read-back, was observed after the write.
+        """
+        held = self.bridge_command_activity_at
+        if before is not None and held is not None and held >= before:
+            return
         self.bridge_command_activity = None
         self.bridge_command_activity_at = None
 

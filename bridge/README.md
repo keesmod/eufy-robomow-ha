@@ -32,7 +32,9 @@ lapsed cloud session, a finding of the 2026-09-24 control window in issue #8:
 the library reuses a session for at most one hour after its sign-in, and
 0.7.1 signed in once, so every route answered `authentication_required` about
 an hour later until a restart. The state document's `auth.state` now follows
-the library.
+the library. Version 0.9.0 pins library 0.19.0 and serves the running
+command's progress in the state route's `command` field, so the integration
+shows the drive home after a dock instead of the earlier activity.
 
 ## What it does
 
@@ -213,7 +215,7 @@ Bridge state, for example:
   "lifecycle": "running",
   "operating_mode": "observe_only",
   "auth": { "state": "disconnected", "last_error": "authentication_failed", "attempted_at": "2026-09-19T10:00:00.000Z" },
-  "client": { "package": "@keesmod/eufy-mega-client", "version": "0.18.0", "module": "mowers", "lifecycle": "open", "connected": false },
+  "client": { "package": "@keesmod/eufy-mega-client", "version": "0.19.0", "module": "mowers", "lifecycle": "open", "connected": false },
   "mowers": { "count": null, "discovered_at": null, "error": "authentication_required" },
   "routes": { "discovery": true, "state": true, "control": false, "maps": false },
   "control": null,
@@ -293,7 +295,8 @@ Contract 1. One read-only local query, for example:
   "status": { "state": "reported", "value": "mowing", "dp": ["107", "107", "107"], "source": "local-tuya-3.5", "observedAt": "2026-09-19T10:00:01.250Z" },
   "battery": { "state": "reported", "value": { "percent": 85 }, "dp": ["8"], "source": "local-tuya-3.5", "observedAt": "2026-09-19T10:00:01.250Z" },
   "progress": { "state": "unconfirmed" },
-  "network": { "state": "reported", "value": { "kind": "wifi", "signalPercent": 70 }, "dp": ["134", "109"], "source": "local-tuya-3.5", "observedAt": "2026-09-19T10:00:01.250Z" }
+  "network": { "state": "reported", "value": { "kind": "wifi", "signalPercent": 70 }, "dp": ["134", "109"], "source": "local-tuya-3.5", "observedAt": "2026-09-19T10:00:01.250Z" },
+  "command": null
 }
 ```
 
@@ -303,11 +306,22 @@ local receipt time of the query reply and `age_ms` its age against the bridge
 clock when the response was built. Raw data points are never included, so the
 DP 107 payload itself is never served.
 
+`command` is the command that owns this mower right now, or `null`. While its
+read-back runs it carries the library's progress, for example
+`{ "command": "stop", "acknowledged_at": "…", "activity": { "observed_at": "…", "sequence": 12, "value": "returning" } }`:
+the time of the acknowledgement and the latest fresh DP 107 report that decodes
+to a confirmed activity. After a `stop` on the owned E15 that is `returning`
+within a second, while the outcome only arrives with the map-saving payload at
+the dock arrival about 30 seconds later. It comes from the library's
+`onProgress` callback, never ends, repeats or changes the command, and
+disappears when the command ends. The typed `status` stays what the query
+reported.
+
 #### E15 activity
 
-`status` is whatever library 0.18.0 reports, unchanged. The library is pinned
-to the release tarball with SHA-256 `52c1af2849bb43489171e56584cecd4795dec38459a0c5b9603923d5fb7aad2a`
-(source commit `1792bbc5`). Its E15 registry confirms three DP 107
+`status` is whatever library 0.19.0 reports, unchanged. The library is pinned
+to the release tarball with SHA-256 `982ef2e72167629333a86fab869a8f48439ae33909f30922b1ea8534308f2297`
+(source commit `80734eb`). Its E15 registry confirms three DP 107
 `robot_status` payloads on the owned E15 (T2880, firmware 6.9.28, Anker eufy
 app 6.1.00): fields 1 = 2 and 3 = 1 `mowing`, fields 1 = 2 and 3 = 2 `paused`
 and fields 1 = 1 and 3 = 1 `returning`, each reproduced through owner-operated
