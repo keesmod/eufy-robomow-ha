@@ -13,7 +13,9 @@ Version 0.9.0 routes start, pause and resume through the mower bridge in bridge 
 Version 0.10.0 routes dock through the bridge's stop route on library 0.17.0.
 Version 0.11.0 lets the map entity read the mower bridge's read-only map route
 on library 0.18.0. Version 0.12.0 takes the mower activity in bridge mode from
-the last confirmed command, so resume works through Home Assistant.
+the last confirmed command, so resume works through Home Assistant. Version
+0.12.1 stops the local backend from reporting mowing while the mower rests in
+the dock with its task flag set.
 
 ---
 
@@ -108,6 +110,18 @@ opt in to control.
 - **local** (default, unchanged): this integration polls the mower over the
   Tuya local protocol and, with account credentials, polls cloud settings.
   Existing entries keep this backend until you change it.
+
+  One local status shape is ambiguous: DP 1 true, DP 2 false and DP 118 at
+  100. DP 118 is map-save progress and stays at 100 after a map save, so a
+  later task mows with it. On 2026-09-24 the same shape also held for about
+  fifteen minutes after each dock arrival and each evening while the mower
+  rested in the dock and the app showed it idle or charging. A local status
+  reply never carries DP 107, so in this shape the integration asks the cloud
+  at once and then every minute, also at night. A default DP 107 payload then
+  reports `docked`, the confirmed `paused` and `returning` payloads report
+  those activities, and anything else keeps `mowing`. Without account
+  credentials or a cloud answer the reading stays `mowing`. The
+  `robot_status` attribute shows DP 107 as the last cloud poll read it.
 - **bridge**: the integration reads state from the dedicated mower bridge
   described below and creates no local connection and no cloud client of its
   own. Enter the bridge URL (`http` or `https`, for example
@@ -360,6 +374,13 @@ protocol tests.
 
 ## Upgrade notes
 
+- **0.12.1, resting in the dock is docked.** With account credentials the
+  local backend reports `docked` instead of `mowing` while the mower rests in
+  the dock with its task flag set, which on 2026-09-24 happened for about
+  fifteen minutes after every dock arrival and every evening. Automations that
+  wait for `docked` now see it at the dock arrival instead of a quarter of an
+  hour later, and automations that watch `mowing` no longer act on a mower in
+  the dock. The cloud is asked every minute while that status shape lasts.
 - **0.12.0, activity from confirmed commands, and bridge 0.8.0.** In bridge
   mode the mower entity shows the activity the last confirmed command
   reflected, for at most 30 minutes, so start while paused sends resume and a

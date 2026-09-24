@@ -18,6 +18,7 @@ from .bridge_client import (
 )
 from .commands import MowerCommand
 from .sessions import SessionStore
+from .telemetry import robot_status, task_ambiguous
 from .const import CMD_START, CMD_RESUME, CMD_PAUSE, CMD_DOCK
 from datetime import datetime, timedelta
 
@@ -60,6 +61,11 @@ BRIDGE_COMMAND_CLASSES = {"start": "start", "resume": "resume", "pause": "pause"
 # local backend's DP 1 for the live map. Nothing else counts as a task.
 BRIDGE_TASK_ACTIVITIES = frozenset({"mowing", "paused", "returning"})
 
+# Cloud refresh spacing while the local status is ambiguous (DP 1 true, DP 2
+# false, DP 118 at 100). Mowing and resting in the dock look alike there, and the
+# cloud DPS carry DP 107, which the local status reply never does.
+AMBIGUOUS_CLOUD_INTERVAL = 60
+
 # How long the activity a confirmed bridge command reflected stands in for the
 # polled one. The E15 answers state queries without DP 107, so after this bound
 # the mower may have changed by itself (its app schedule, the app, a low battery)
@@ -100,6 +106,12 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
     # The observation time of the last successful poll, the bridge's
     # ``observed_at`` in bridge mode.
     last_local_update: datetime | None = None
+    # The local backend's DP 107 from the last successful cloud poll, read with
+    # the confirmed definitions, when that poll ran, and since when the local
+    # status has been ambiguous.
+    cloud_robot_status: str | None = None
+    cloud_polled_at: datetime | None = None
+    ambiguous_since: datetime | None = None
     # Whether the bridge's last state answer reported ``routes.control`` and the
     # control opt-in it carried (classes, max_state_age_ms, read_back_ms).
     bridge_routes_control: bool = False
@@ -158,6 +170,9 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         )
         # Use float('-inf') so the first poll always fetches cloud DPS
         self._cloud_last_fetch: float = float("-inf")
+        self.cloud_robot_status = None
+        self.cloud_polled_at = None
+        self.ambiguous_since = None
         # Consecutive cloud failures — used for exponential backoff
         self._cloud_consecutive_failures: int = 0
         # Track consecutive local-poll failures to know when to recreate the device
@@ -197,6 +212,21 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         if self.backend == BACKEND_BRIDGE:
             return self.bridge_routes_control
         return True
+
+    @property
+    def ambiguous_task_status(self) -> str | None:
+        """DP 107 from a cloud poll that ran after the local status became ambiguous.
+
+        None while the local status is not ambiguous or no such poll succeeded
+        yet, so an older cloud value never decides the current shape.
+        """
+        if (
+            self.ambiguous_since is None
+            or self.cloud_polled_at is None
+            or self.cloud_polled_at < self.ambiguous_since
+        ):
+            return None
+        return self.cloud_robot_status
 
     @property
     def bridge_activity_evidence(self) -> tuple[str, str, datetime | None] | None:
@@ -360,6 +390,11 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             self.command.observe(self.local_generation, self.local_dps)
         if self.session_store:
             self.session_store.observe(self.local_dps, self.last_local_update)
+        if task_ambiguous(self.local_dps):
+            if self.ambiguous_since is None:
+                self.ambiguous_since = self.last_local_update
+        else:
+            self.ambiguous_since = None
 
         _LOGGER.debug("Local DPS update received (%d keys)", len(dps))
 
@@ -377,8 +412,20 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         elif self.cloud_client is not None:
             _sun = self.hass.states.get("sun.sun")
             _sun_below_horizon = _sun is not None and _sun.state == "below_horizon"
+            # An ambiguous local status needs DP 107 from the cloud at once and then
+            # every AMBIGUOUS_CLOUD_INTERVAL, also at night, because the mower may
+            # rest in the dock or mow. Failures keep their backoff.
+            ambiguous_refresh = (
+                self.ambiguous_since is not None
+                and self._cloud_consecutive_failures == 0
+                and (
+                    self.cloud_polled_at is None
+                    or self.cloud_polled_at < self.ambiguous_since
+                    or now - self._cloud_last_fetch >= AMBIGUOUS_CLOUD_INTERVAL
+                )
+            )
 
-            if _sun_below_horizon:
+            if _sun_below_horizon and not ambiguous_refresh:
                 _LOGGER.debug("Sun below horizon — skipping cloud poll")
                 self._carry_forward_cloud_data(dps, local_dp_keys)
             else:
@@ -386,7 +433,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
                     CLOUD_POLL_INTERVAL * (2**self._cloud_consecutive_failures),
                     _CLOUD_MAX_BACKOFF,
                 )
-                if now - self._cloud_last_fetch >= backoff:
+                if ambiguous_refresh or now - self._cloud_last_fetch >= backoff:
                     try:
                         raw_cloud_dps, cloud_settings = await self.hass.async_add_executor_job(
                             self.cloud_client.get_all_dps
@@ -406,6 +453,8 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
 
                         self._cloud_last_fetch = now
                         self._cloud_consecutive_failures = 0
+                        self.cloud_robot_status = robot_status(raw_cloud_dps.get("107"))
+                        self.cloud_polled_at = dt_util.utcnow()
                         _LOGGER.debug(
                             "Cloud poll: %d raw DPS merged, settings=%s",
                             len(raw_cloud_dps),

@@ -142,9 +142,15 @@ CUT_HEIGHT_STEP = 5  # mm
 #  DP1 absent,  DP2 absent                    → DOCKED  (cold / never started)
 #  DP1=True,    DP2=False,  DP118=0           → MOWING
 #  DP1=True,    DP2=False,  DP118 5–99        → RETURNING (progress back to base)
-#  DP1=True,    DP2=False,  DP118=100         → MOWING  (briefly docked mid-session
-#                                               for charging; DP1 still True so we
-#                                               report MOWING not DOCKED)
+#  DP1=True,    DP2=False,  DP118=100         → ambiguous: DP118 stays at 100 after
+#                                               a map save, so a later task mows with
+#                                               it, and on 2026-09-24 the mower also
+#                                               rested in the dock with DP1=True for
+#                                               about 15 min after each dock arrival
+#                                               and each evening. DP107 from a fresh
+#                                               cloud poll decides: the default
+#                                               payload → DOCKED, paused → PAUSED,
+#                                               returning → RETURNING, otherwise MOWING
 #  DP1 absent/False                           → DOCKED  (no active session)
 #  DP1=True,    DP2=True                      → PAUSED
 #
