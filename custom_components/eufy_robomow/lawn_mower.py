@@ -122,13 +122,24 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
 
         if dp1 and not dp2:
             # DP118 5–99 → mower returning to base
-            # DP118=100 while DP1=True means briefly docked mid-session for
-            # charging (will resume); treat as MOWING, not RETURNING.
             if RETURNING_THRESHOLD <= dp118 < 100:
                 try:
                     return LawnMowerActivity.RETURNING
                 except AttributeError:
                     return LawnMowerActivity.MOWING
+            if dp118 == 100:
+                # DP118 stays at 100 after a map save, so this shape is a later
+                # task that mows or the mower resting in the dock with its task
+                # flag set, charging or after a session. DP 107 from a cloud poll
+                # taken since the shape appeared tells them apart. Without it the
+                # reading stays MOWING, as before.
+                status = self.coordinator.ambiguous_task_status
+                if status == "idle":
+                    return LawnMowerActivity.DOCKED
+                if status == "paused":
+                    return LawnMowerActivity.PAUSED
+                if status == "returning":
+                    return LawnMowerActivity.RETURNING
             return LawnMowerActivity.MOWING
 
         # DP1 absent or False → no active session → docked / idle
@@ -142,6 +153,10 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
             "telemetry_updated_at": self.coordinator.last_local_update,
             "command": self.coordinator.command.as_dict() if self.coordinator.command else None,
         }
+        if self.coordinator.backend != BACKEND_BRIDGE:
+            # DP 107 as the last cloud poll reported it, read with the confirmed
+            # definitions: mowing, paused, returning, idle or None.
+            attributes["robot_status"] = self.coordinator.cloud_robot_status
         if self.coordinator.backend == BACKEND_BRIDGE:
             attributes["bridge_status"] = self.coordinator.bridge_status
             attributes["bridge_activity"] = self.coordinator.bridge_activity
