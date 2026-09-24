@@ -50,6 +50,24 @@ export const SERVER_CLOSE_GRACE_MS = 1_000;
 export const DEFAULT_DISCOVERY_CACHE_MS = 10 * 60_000;
 /** Minimum spacing between discovery attempts, so failing requests cannot hammer the cloud. */
 export const DEFAULT_DISCOVERY_INTERVAL_MS = 60_000;
+/**
+ * Minimum spacing between automatic re-authentication attempts after an attempt failed for a
+ * transient reason. A session that was good and has lapsed is renewed at once.
+ */
+export const DEFAULT_REAUTH_INTERVAL_MS = 60_000;
+/** Sign-in outcomes that need the operator. They are never repeated automatically. */
+const REFUSED_SIGN_IN_CODES: ReadonlySet<string> = new Set([
+  'authentication_failed',
+  'mower_authentication_failed',
+  'mower_invalid_options',
+  'mower_region_unsupported',
+]);
+const REFUSED_SIGN_IN_STATES: ReadonlySet<string> = new Set(['captcha_required', 'verification_required', 'locked']);
+
+/** Whether a recorded attempt was refused in a way that only the operator can resolve. */
+export function signInRefused(status: { state: string; last_error: string | null }): boolean {
+  return REFUSED_SIGN_IN_STATES.has(status.state) || (status.last_error !== null && REFUSED_SIGN_IN_CODES.has(status.last_error));
+}
 
 export { ApiError, BridgeError } from './errors.ts';
 
@@ -83,6 +101,9 @@ export interface BridgeDependencies {
   discoveryTimeoutMs?: number;
   discoveryCacheMs?: number;
   discoveryIntervalMs?: number;
+  reauthIntervalMs?: number;
+  /** Receives one line per automatic re-authentication. Never receives credentials or session data. */
+  log?: (level: 'info' | 'warn', message: string) => void;
   mapDemandMs?: number;
   mapStreamLeaseMs?: number;
   mapIdleIntervalMs?: number;
@@ -166,11 +187,15 @@ export interface MowerCommandDocument {
 
 export type BridgeLifecycle = 'created' | 'starting' | 'running' | 'stopping' | 'stopped';
 
-/** Authentication summary. Captcha images and verification prompts are not exposed by this version. */
+/**
+ * Authentication summary. `state` follows the library: a session that has lapsed reads as
+ * `disconnected`. Captcha images and verification prompts are not exposed by this version.
+ */
 export interface AuthStatus {
   state: AuthState['state'];
-  /** Stable library or bridge error code of the last explicit attempt, or null when it succeeded. */
+  /** Stable library or bridge error code of the last attempt, or null when it succeeded. */
   last_error: string | null;
+  /** Time of the last attempt, the startup attempt or an automatic re-authentication. */
   attempted_at: string | null;
 }
 
@@ -293,8 +318,10 @@ function closeServer(server: Server, graceMs: number): Promise<void> {
 /**
  * Owns exactly one library client with only the mower module, one private session file, one
  * identity and one private HTTP server. Startup, one explicit authentication attempt and
- * shutdown are each bounded. Nothing is retried. Commands exist only behind the `control`
- * opt-in, one per mower at a time, and are never replayed.
+ * shutdown are each bounded. The library's cloud session is a bounded reuse window, so a route
+ * that needs it renews a lapsed session through one bounded attempt, spaced after a failure and
+ * never after a refused sign-in. Commands exist only behind the `control` opt-in, one per mower at
+ * a time, and are never retried or replayed.
  */
 export class MowerBridge {
   readonly #config: BridgeConfig;
@@ -314,6 +341,11 @@ export class MowerBridge {
   #discoveryError: string | null = null;
   #discoveryAttemptAt: number | undefined;
   #discovering: Promise<void> | undefined;
+  /**
+   * True after a new cloud session or a failed discovery. The library then holds no device binding
+   * until discovery succeeds again, so a LAN route runs discovery first.
+   */
+  #bindingsStale = false;
   #lastGood = new Map<string, TelemetryFields>();
   /** Ids whose most recent state query failed, so their last good result is only served as stale. */
   #staleIds = new Set<string>();
@@ -368,7 +400,7 @@ export class MowerBridge {
       bridge_id: this.#bridgeId,
       lifecycle: this.#lifecycle,
       operating_mode: this.#config.operatingMode,
-      auth: { ...this.#auth },
+      auth: this.#authStatus(),
       client: {
         package: CLIENT_PACKAGE,
         version: CLIENT_VERSION,
@@ -403,6 +435,53 @@ export class MowerBridge {
     return mowers;
   }
 
+  /** The last attempt, with the library's live state: a session that has lapsed reads as disconnected. */
+  #authStatus(): AuthStatus {
+    if (this.#auth.state === 'connected' && !this.#client?.mowers?.connected) return { ...this.#auth, state: 'disconnected' };
+    return { ...this.#auth };
+  }
+
+  /**
+   * Whether a route may renew the cloud session now. The explicit startup attempt comes first. A
+   * session that was good and has lapsed is renewed at once, a transient failure after the
+   * re-authentication interval, and a refused sign-in never, because it needs the operator.
+   */
+  #reauthenticationAllowed(): boolean {
+    const { last_error: lastError, attempted_at: attemptedAt } = this.#auth;
+    if (attemptedAt === null || signInRefused(this.#auth)) return false;
+    if (lastError === null) return true;
+    const interval = this.#dependencies.reauthIntervalMs ?? DEFAULT_REAUTH_INTERVAL_MS;
+    return this.#now() - Date.parse(attemptedAt) >= interval;
+  }
+
+  /**
+   * Renews a lapsed or failed cloud session before a route needs it, through one bounded attempt
+   * that concurrent routes join. It never throws: without a session the route fails as before,
+   * before any write. A new session leaves the library without device bindings until discovery
+   * runs again. Nothing about a command is repeated.
+   */
+  async #renewSession(mowers: MowerModule): Promise<void> {
+    if (mowers.connected) return;
+    if (this.#connecting) {
+      await this.#connecting.done;
+      return;
+    }
+    if (!this.#reauthenticationAllowed()) return;
+    const result = await this.connect().catch(() => null);
+    if (!result) return;
+    if (result.state === 'connected') this.#dependencies.log?.('info', 'mower cloud session renewed');
+    else this.#dependencies.log?.('warn', `mower cloud session renewal failed (${result.last_error ?? result.state})`);
+  }
+
+  /**
+   * A LAN session needs a live cloud session and the library's device binding from discovery. The
+   * lapsed session is renewed first, then discovery runs again while the bindings are stale.
+   */
+  async #prepareLocal(mowers: MowerModule): Promise<void> {
+    await this.#renewSession(mowers);
+    if (!this.#discovery || this.#bindingsStale) await this.#refreshDiscovery(mowers, this.#bindingsStale);
+  }
+
   /**
    * Discovered mowers from the library. A request runs discovery only when no list exists or the
    * list is older than the cache age, at most once per interval. A failed refresh keeps serving
@@ -415,25 +494,32 @@ export class MowerBridge {
     return this.#discoveryDocument(this.#discovery);
   }
 
-  #refreshDiscovery(mowers: MowerModule): Promise<void> {
+  /** `force` refreshes a list younger than the cache age, for stale bindings. The spacing still applies. */
+  #refreshDiscovery(mowers: MowerModule, force = false): Promise<void> {
     if (this.#discovering) return this.#discovering;
     const now = this.#now();
     const cacheMs = this.#dependencies.discoveryCacheMs ?? DEFAULT_DISCOVERY_CACHE_MS;
     const intervalMs = this.#dependencies.discoveryIntervalMs ?? DEFAULT_DISCOVERY_INTERVAL_MS;
-    const wanted = !this.#discovery || now - this.#discovery.at >= cacheMs;
+    const wanted = force || !this.#discovery || now - this.#discovery.at >= cacheMs;
     const allowed = this.#discoveryAttemptAt === undefined || now - this.#discoveryAttemptAt >= intervalMs;
     if (!wanted || !allowed) return Promise.resolve();
     this.#discoveryAttemptAt = now;
-    const bound = deadline(this.#dependencies.discoveryTimeoutMs ?? DEFAULT_DISCOVERY_TIMEOUT_MS);
     const run = (async () => {
+      // Discovery needs the cloud session. A renewal inside this run keeps the spacing of this attempt.
+      await this.#renewSession(mowers);
+      this.#discoveryAttemptAt = now;
+      const bound = deadline(this.#dependencies.discoveryTimeoutMs ?? DEFAULT_DISCOVERY_TIMEOUT_MS);
       try {
         const devices = await mowers.discover(AbortSignal.any([this.#lifetime.signal, bound.signal]));
         this.#discovery = { at: this.#now(), mowers: devices.map((device) => ({ ...device })) };
         this.#discoveryError = null;
+        this.#bindingsStale = false;
       } catch (error) {
         let code = errorCode(error);
         if (code === 'request_aborted' && bound.expired()) code = 'request_timeout';
         this.#discoveryError = code;
+        // The library revokes its bindings when a discovery starts and holds none after a failure.
+        this.#bindingsStale = true;
       } finally {
         bound.clear();
       }
@@ -496,7 +582,7 @@ export class MowerBridge {
   }
 
   async #queryState(mowers: MowerModule, id: string): Promise<MowerStateDocument> {
-    if (!this.#discovery) await this.#refreshDiscovery(mowers);
+    await this.#prepareLocal(mowers);
     if (!this.#discovery) throw new ApiError(503, this.#discoveryError ?? 'mower_request_failed');
     if (!this.#discovery.mowers.some((mower) => mower.id === id)) throw new ApiError(404, 'unknown_mower');
     const host = this.#hostFor(id);
@@ -574,7 +660,8 @@ export class MowerBridge {
   }
 
   async #runCommand(mowers: MowerModule, control: ControlConfig, id: string, kind: RoutedCommandClass): Promise<MowerCommandDocument> {
-    if (!this.#discovery) await this.#refreshDiscovery(mowers);
+    // A renewal or discovery here runs before any write. The command itself is never repeated.
+    await this.#prepareLocal(mowers);
     if (!this.#discovery) throw new ApiError(503, this.#discoveryError ?? 'mower_request_failed');
     const mower = this.#discovery.mowers.find((entry) => entry.id === id);
     if (!mower) throw new ApiError(404, 'unknown_mower');
@@ -686,8 +773,9 @@ export class MowerBridge {
   }
 
   /**
-   * One explicit authentication attempt through the library. The result is recorded in the state
-   * document. Failures never throw and are never retried. A concurrent call joins the attempt.
+   * One authentication attempt through the library, explicit at startup or a renewal by a route.
+   * The result is recorded in the state document. Failures never throw and this call never
+   * retries. A concurrent call joins the attempt.
    */
   connect(): Promise<AuthStatus> {
     if (this.#lifecycle !== 'running' || !this.#client?.mowers) return Promise.reject(new BridgeError('bridge_not_running'));
@@ -701,8 +789,12 @@ export class MowerBridge {
       try {
         const result = await mowers.connect(undefined, controller.signal);
         this.#auth = { state: result.state, last_error: null, attempted_at: attemptedAt };
-        // A fresh session may discover at once. Earlier failed attempts must not delay it.
-        if (result.state === 'connected') this.#discoveryAttemptAt = undefined;
+        if (result.state === 'connected') {
+          // A fresh session may discover at once. Earlier failed attempts must not delay it.
+          this.#discoveryAttemptAt = undefined;
+          // A new session holds no device binding until discovery runs again.
+          this.#bindingsStale = true;
+        }
       } catch (error) {
         let code = error instanceof EufyError ? error.code : 'mower_authentication_failed';
         if (code === 'request_aborted' && bound.expired()) code = 'request_timeout';
