@@ -3,7 +3,7 @@
 How to run the dedicated mower bridge from `bridge/` as a container or as a
 local Home Assistant app, and how to upgrade, restart, back up and roll it
 back. Everything here is local: no image is published and no app repository is
-listed. Version 0.7.1 serves state routes and, only behind the explicit
+listed. Version 0.8.0 serves state routes and, only behind the explicit
 `operating_mode: control` opt-in with a stop route, the start, pause, resume
 and stop routes. It pins library 0.18.0, which confirms the E15 activities
 mowing, paused and returning and the start, pause, resume and stop commands.
@@ -49,7 +49,7 @@ in `ha_app/` (run `python3 scripts/prepare_ha_app.py`).
 ## Install with Docker
 
 ```bash
-docker build -t eufy-mower-bridge:0.7.1 ./bridge
+docker build -t eufy-mower-bridge:0.8.0 ./bridge
 ```
 
 ```bash
@@ -61,7 +61,7 @@ docker run -d --name eufy-mower-bridge --restart unless-stopped \
   -e EUFY_MOWER_PASSWORD=<eufy account password> \
   -e EUFY_MOWER_COUNTRY=NL \
   -e EUFY_MOWER_HOST=<mower LAN address> \
-  eufy-mower-bridge:0.7.1
+  eufy-mower-bridge:0.8.0
 ```
 
 Bind the published port to an address that only Home Assistant can reach, or
@@ -87,8 +87,8 @@ docker exec eufy-mower-bridge node dist/healthcheck.js
 The health check prints one JSON line with the HTTP status, lifecycle, bridge
 version, authentication state and last error code, and exits 0 only while the
 bridge reports `running`. The log shows one authentication attempt and the
-number of discovered mowers. Nothing is retried, restart the container after a
-configuration change.
+number of discovered mowers, and later one line for each renewal of the cloud
+session. Restart the container after a configuration change.
 
 Then select the `bridge` backend in the integration with the URL
 `http://<host>:8090` and the same token.
@@ -135,7 +135,7 @@ docker run -d --name eufy-mower-bridge --restart unless-stopped \
   -e EUFY_MOWER_PASSWORD=<eufy account password> \
   -e EUFY_MOWER_COUNTRY=NL \
   -e EUFY_MOWER_HOST=<mower LAN address> \
-  eufy-mower-bridge:0.7.1
+  eufy-mower-bridge:0.8.0
 ```
 
 Mount the directory rather than the file, so a file replaced by renaming
@@ -177,8 +177,11 @@ A restart stops the bridge with `SIGTERM`. It cancels an in-flight
 authentication or query, closes the private API, closes the library client and
 flushes files, all within 15 seconds, and exits with 1 twenty seconds after the
 signal at the latest. After the start one authentication attempt and one
-discovery run. There is no automatic retry, so a bridge that failed to sign in
-stays disconnected until the next restart.
+discovery run. The library reuses a cloud session for at most one hour, so a
+route that needs the cloud renews a lapsed session through one bounded attempt,
+at most once a minute after a failure. A refused sign-in, for example a wrong
+password, a captcha or a lock, is never repeated: resolve it and restart the
+bridge. No command is ever retried or replayed.
 
 ## Backup
 

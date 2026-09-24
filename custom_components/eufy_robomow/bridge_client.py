@@ -58,6 +58,7 @@ _REFUSED_BEFORE_WRITE = frozenset(
         "mower_host_unconfigured",
         "bridge_not_running",
         "authentication_required",
+        "mower_binding_unavailable",
         "mower_request_failed",
         "mower_local_unreachable",
         "mower_local_authentication_failed",
@@ -278,6 +279,9 @@ class BridgeCommandOutcome:
     # On the owned E15 it marks the dock arrival, about 30 seconds after the
     # write, because a stop ends the task and the mower returns by itself.
     payload: str | None = None
+    # When the library received the report that reflected the command: the
+    # activity report or, for a stop, the map-saving payload.
+    observed_at: datetime | None = None
 
 
 def parse_command_outcome(document: Any, mower_id: str, kind: str) -> BridgeCommandOutcome:
@@ -300,23 +304,45 @@ def parse_command_outcome(document: Any, mower_id: str, kind: str) -> BridgeComm
         raise BridgeClientError("invalid_document")
     activity_field = document.get("activity")
     activity: str | None = None
+    reflected_at: datetime | None = None
     if activity_field is not None:
         if not isinstance(activity_field, dict) or not isinstance(activity_field.get("value"), str):
             raise BridgeClientError("invalid_document")
         activity = activity_field["value"]
+        reflected_at = _report_time(activity_field)
     payload_field = document.get("payload")
     payload: str | None = None
     if payload_field is not None:
         if not isinstance(payload_field, dict) or not isinstance(payload_field.get("name"), str):
             raise BridgeClientError("invalid_document")
         payload = payload_field["name"]
+        reflected_at = _report_time(payload_field)
     if result == "confirmed" and activity is None and payload is None:
         # Confirmed means a fresh report reflected the expected activity or,
         # for a stop, the map-saving payload.
         raise BridgeClientError("invalid_document")
     return BridgeCommandOutcome(
-        result=result, stage=stage, end=end, activity=activity, sent_at=sent_at, payload=payload
+        result=result,
+        stage=stage,
+        end=end,
+        activity=activity,
+        sent_at=sent_at,
+        payload=payload,
+        observed_at=reflected_at,
     )
+
+
+def _report_time(field: dict[str, Any]) -> datetime | None:
+    """The library's receipt time of one reflecting report, or None when unreadable.
+
+    The time only dates the reflected activity. An unreadable one leaves the
+    outcome itself intact and records no activity.
+    """
+    raw = field.get("observed_at")
+    observed_at = dt_util.parse_datetime(raw) if isinstance(raw, str) else None
+    if observed_at is None or observed_at.tzinfo is None:
+        return None
+    return observed_at
 
 
 def resolve_mower_id(discovery: Any, configured: str | None) -> str:

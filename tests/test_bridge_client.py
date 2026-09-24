@@ -358,6 +358,7 @@ def test_client_posts_a_command_once_without_a_body_and_returns_the_outcome() ->
         end="reflected",
         activity="mowing",
         sent_at="2026-09-19T16:42:38.199Z",
+        observed_at=datetime(2026, 9, 19, 16, 42, 39, 351000, tzinfo=UTC),
     )
     assert len(session.requests) == 1, "a command is sent exactly once"
     method, url, kwargs = session.requests[0]

@@ -1,4 +1,4 @@
-import { BridgeError, MowerBridge, ROUTED_COMMAND_CLASSES } from './bridge.ts';
+import { BridgeError, MowerBridge, ROUTED_COMMAND_CLASSES, signInRefused } from './bridge.ts';
 import { ConfigError, describeConfig, loadConfig, type BridgeConfig } from './config.ts';
 import { BRIDGE_NAME, BRIDGE_VERSION } from './version.ts';
 
@@ -23,7 +23,7 @@ async function main(): Promise<number> {
     log('error', `invalid configuration: ${error instanceof ConfigError ? error.message : 'unexpected error'}`);
     return EXIT_CONFIG;
   }
-  const bridge = new MowerBridge(config);
+  const bridge = new MowerBridge(config, { log });
   const stopped = new Promise<number>((resolve) => {
     let closing = false;
     const shutdown = (signal: NodeJS.Signals) => {
@@ -74,9 +74,11 @@ async function main(): Promise<number> {
       const hosts = discovery.mowers.filter((mower) => mower.state_available).length;
       log('info', `discovered ${discovery.mowers.length} mower(s), ${hosts} with a configured LAN host`);
     } catch (error) {
-      log('warn', `mower discovery failed (${error instanceof BridgeError ? error.code : 'unexpected error'}). No automatic retry.`);
+      log('warn', `mower discovery failed (${error instanceof BridgeError ? error.code : 'unexpected error'}). The next request that needs it tries again, spaced by the discovery interval.`);
     }
-  } else log('warn', `mower authentication not connected (${auth.last_error ?? auth.state}). No automatic retry.`);
+  } else if (signInRefused(auth))
+    log('warn', `mower authentication refused (${auth.last_error ?? auth.state}). No automatic retry, restart the bridge after resolving it.`);
+  else log('warn', `mower authentication not connected (${auth.last_error ?? auth.state}). The next request that needs the cloud tries again, spaced by the re-authentication interval.`);
   return stopped;
 }
 

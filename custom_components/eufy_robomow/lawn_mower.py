@@ -104,8 +104,11 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
     @property
     def activity(self) -> LawnMowerActivity | None:
         if self.coordinator.backend == BACKEND_BRIDGE:
-            reported = self.coordinator.bridge_activity
-            return BRIDGE_ACTIVITIES.get(reported) if reported else None
+            # A reported poll or, while recent, the activity a confirmed command
+            # reflected. The E15's query replies carry no DP 107, so without the
+            # command the activity would stay unknown and resume unreachable.
+            evidence = self.coordinator.bridge_activity_evidence
+            return BRIDGE_ACTIVITIES.get(evidence[0]) if evidence else None
         dps = self.coordinator.local_dps
         dp1 = task_active(dps)
         if type(dp1) is not bool:
@@ -142,6 +145,11 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
         if self.coordinator.backend == BACKEND_BRIDGE:
             attributes["bridge_status"] = self.coordinator.bridge_status
             attributes["bridge_activity"] = self.coordinator.bridge_activity
+            evidence = self.coordinator.bridge_activity_evidence
+            attributes["bridge_activity_source"] = evidence[1] if evidence else None
+            attributes["bridge_activity_observed_at"] = (
+                evidence[2].isoformat() if evidence and evidence[2] else None
+            )
             attributes["bridge_error"] = self.coordinator.bridge_error
             attributes["bridge_control"] = self.coordinator.bridge_control
         return attributes

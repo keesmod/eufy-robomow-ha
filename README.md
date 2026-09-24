@@ -12,7 +12,8 @@ corrects the Signal Strength sensor to the percentage the mower declares.
 Version 0.9.0 routes start, pause and resume through the mower bridge in bridge mode.
 Version 0.10.0 routes dock through the bridge's stop route on library 0.17.0.
 Version 0.11.0 lets the map entity read the mower bridge's read-only map route
-on library 0.18.0.
+on library 0.18.0. Version 0.12.0 takes the mower activity in bridge mode from
+the last confirmed command, so resume works through Home Assistant.
 
 ---
 
@@ -160,15 +161,32 @@ Activity comes from the library's typed status. With bridge 0.7.0 on library
 DP 107 payloads, with `telemetry_updated_at` as the observation time. The
 `bridge_status` attribute shows the library's status state: `reported`,
 `missing` when the query carried no DP 107, `invalid` for a withheld payload,
-or `unconfirmed`. A missing or invalid status leaves the activity unknown. No
-E15 payload identifies docked, charging, idle or error yet, so the entity never
-shows docked in bridge mode and nothing is inferred from age, absence or
-inactivity. Mowing progress stays unconfirmed. See
-[DP 107 activity](docs/protocol-provenance.md#dp-107-activity). Session
-history in bridge mode observes only a reported activity, never a missing,
-invalid or unconfirmed status and never age or absence. Because no payload
-reports docked, a bridge-mode session cannot observe its end yet and area,
-distance and progress stay unknown. Entity unique IDs are unchanged, so
+or `unconfirmed`. A missing or invalid status leaves the activity unknown. On
+the owned E15 a state query carries no DP 107, so in the 2026-09-24 control
+window every poll reported `missing` (issue #8).
+
+Since 0.12.0 a confirmed command stands in for it. Its answer carries the fresh
+DP 107 report that reflected it and the time the library received that report:
+`mowing` after start or resume, `paused` after pause, and `docked` after a
+confirmed dock, whose map-saving payload is the dock arrival the library
+observed. The entity shows that activity for at most 30 minutes, because the
+mower can change by itself afterwards, for example through its app schedule. A
+newer reported poll replaces it, and an uncertain command or a
+`mower_command_already_set` refusal clears it, because the mower's state is
+then unknown or contradicts it. So start while paused sends resume, and a
+resume refused because the mower was resumed elsewhere makes the next start a
+start. `bridge_activity_source` (`report` or `command`) and
+`bridge_activity_observed_at` show where the activity comes from.
+`bridge_activity` stays the polled value. No E15 payload identifies charging,
+idle or error, and nothing is inferred from age, absence or inactivity. Mowing
+progress stays unconfirmed. See
+[DP 107 activity](docs/protocol-provenance.md#dp-107-activity).
+
+Session history in bridge mode observes a reported activity and the activity a
+confirmed command reflected, never a missing, invalid or unconfirmed status and
+never age or absence. A confirmed dock ends the session. Between commands the
+polls observe nothing, so the time in between counts as an observation gap and
+area, distance and progress stay unknown. Entity unique IDs are unchanged, so
 switching back and forth never duplicates or renames entities and no command
 is replayed on a switch.
 
@@ -342,6 +360,18 @@ protocol tests.
 
 ## Upgrade notes
 
+- **0.12.0, activity from confirmed commands, and bridge 0.8.0.** In bridge
+  mode the mower entity shows the activity the last confirmed command
+  reflected, for at most 30 minutes, so start while paused sends resume and a
+  confirmed dock shows docked and ends the session. The live map follows the
+  same activity. `mower_binding_unavailable` counts as refused before the
+  write. Mower bridge 0.8.0 renews its hourly cloud session by itself, where
+  0.7.1 answered `authentication_required` about an hour after its sign-in
+  until a restart. The local backend is unchanged. Upgrading from 0.8.0 or
+  earlier changes the Signal Strength unit from dBm to %, and Home Assistant
+  then suppresses its long-term statistics until they are fixed under
+  **Developer tools → Statistics**. Those values were the negated percentage,
+  so they can be kept with the sign restored.
 - **0.11.0, the map through the bridge.** With mower bridge 0.7.0 on library
   0.18.0 the options gain **Map source**, `external` by default, so existing
   entries keep their map unchanged. `bridge` points the same map entity at the

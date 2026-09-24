@@ -29,7 +29,9 @@ bridge of the Eufy Security Viewer and must use its own token, port and data.
 
 The app stores the bridge identity and the Eufy session in `/data/eufy-mower`.
 Back up the app and keep the same token when updating. Restarting the app makes
-one new authentication attempt. Details, upgrade and rollback steps are in the
+one new authentication attempt, and the bridge renews its hourly cloud session
+by itself when a request needs it. A refused sign-in, for example a wrong
+password, needs a restart after it is fixed. Details, upgrade and rollback steps are in the
 [deployment guide](https://github.com/keesmod/eufy-robomow-ha/blob/main/docs/bridge-deployment.md).
 
 By default this version serves state only and stays in `observe_only`, where

@@ -35,15 +35,22 @@ function device(id: string): MowerDevice {
   return { id, kind: 'mower', model: 'E15', productCode: 'T2880' };
 }
 
-/** Authenticates and discovers without any network. It has no private binding, like any custom adapter. */
+/**
+ * Authenticates and discovers without any network. It has no private binding, like any custom
+ * adapter. Setting `connected` to false stands in for the end of the library's session reuse window.
+ */
 class DiscoveringAdapter implements MowerAdapter {
   connected = false;
+  connects = 0;
+  connectFailWith: string | null = null;
   discoveries = 0;
   devices: MowerDevice[] = [device(ID_A)];
   failWith: string | null = null;
   waitForAbort = false;
 
   async connect(_answer: AuthAnswer | undefined, _signal: AbortSignal): Promise<AuthState> {
+    this.connects += 1;
+    if (this.connectFailWith) throw new EufyError(this.connectFailWith);
     this.connected = true;
     return { state: 'connected' };
   }
@@ -481,6 +488,115 @@ test('a failed query serves the last good result as stale with the failure code,
   assert.equal(unexpected.status, 503);
   assert.deepEqual(unexpected.json, { error: 'internal_error' });
   assert.ok(!unexpected.text.includes('unexpected detail'));
+});
+
+/** LAN sessions that need the library's cloud session, like `openLocalSession` does. */
+function sessionsNeedingCloud(log: SessionLog, f: () => Fixture, command?: CommandAnswer): OpenLocalSession {
+  return sessions(
+    log,
+    async () => telemetry(new Date(f().clock.now).toISOString()),
+    () => (f().adapter.connected ? null : 'authentication_required'),
+    command,
+  );
+}
+
+test('a lapsed cloud session is renewed by the next route, which discovers again before its LAN session', async (t) => {
+  const log = sessionLog();
+  const lines: string[] = [];
+  let f!: Fixture;
+  f = await fixture(t, { host: HOST_A }, { openLocalSession: sessionsNeedingCloud(log, () => f), log: (level, message) => lines.push(`${level} ${message}`) });
+  await f.bridge.connect();
+  const statePath = `${MOWERS_PATH}/${ID_A}/state`;
+  assert.equal(((await f.get(statePath)).json as MowerStateDocument).stale, false);
+  assert.equal(f.adapter.connects, 1);
+  assert.equal(f.adapter.discoveries, 1);
+  // The library's reuse window ends: the module reports disconnected and holds no binding.
+  f.adapter.connected = false;
+  f.clock.now += 1_000;
+  const lapsed = (await f.get(STATE_PATH)).json as BridgeState;
+  assert.deepEqual(lapsed.auth, { state: 'disconnected', last_error: null, attempted_at: new Date(T0).toISOString() }, 'the state document follows the library, not the earlier attempt');
+  assert.equal(lapsed.client.connected, false);
+  const renewed = await f.get(statePath);
+  assert.equal(renewed.status, 200);
+  const document = renewed.json as MowerStateDocument;
+  assert.equal(document.stale, false, 'the route renewed the session instead of failing');
+  assert.equal(document.error, null);
+  assert.equal(f.adapter.connects, 2, 'one renewal');
+  assert.equal(f.adapter.discoveries, 2, 'discovery ran again for the new bindings although the list was younger than the cache age');
+  assert.deepEqual(lines, ['info mower cloud session renewed']);
+  const state = (await f.get(STATE_PATH)).json as BridgeState;
+  assert.deepEqual(state.auth, { state: 'connected', last_error: null, attempted_at: new Date(T0 + 1_000).toISOString() });
+  assertNoSecrets(JSON.stringify(state) + lines.join('\n'));
+  f.clock.now += 1_000;
+  assert.equal(((await f.get(statePath)).json as MowerStateDocument).stale, false);
+  assert.equal(f.adapter.connects, 2, 'a live session is not renewed');
+  assert.equal(f.adapter.discoveries, 2, 'fresh bindings are not discovered again');
+});
+
+test('a failed renewal is spaced by the re-authentication interval and a refused sign-in is never repeated', async (t) => {
+  const log = sessionLog();
+  const lines: string[] = [];
+  let f!: Fixture;
+  f = await fixture(t, { host: HOST_A }, { openLocalSession: sessionsNeedingCloud(log, () => f), reauthIntervalMs: 60_000, log: (level, message) => lines.push(`${level} ${message}`) });
+  const statePath = `${MOWERS_PATH}/${ID_A}/state`;
+  assert.equal((await f.get(statePath)).status, 503, 'before the explicit startup attempt no route signs in');
+  assert.equal(f.adapter.connects, 0);
+  await f.bridge.connect();
+  await f.get(statePath);
+  f.adapter.connected = false;
+  f.adapter.connectFailWith = 'mower_request_failed';
+  f.clock.now += 1_000;
+  const failed = (await f.get(statePath)).json as MowerStateDocument;
+  assert.equal(failed.stale, true, 'the last good result is served as stale');
+  assert.equal(failed.error, 'authentication_required');
+  assert.equal(f.adapter.connects, 2);
+  assert.deepEqual(lines, ['warn mower cloud session renewal failed (mower_request_failed)']);
+  f.clock.now += 59_000;
+  await f.get(statePath);
+  assert.equal(f.adapter.connects, 2, 'no attempt within the interval after a failure');
+  assert.equal(log.opened.length, 1, 'no LAN session without a cloud session');
+  f.adapter.connectFailWith = null;
+  f.clock.now += 1_000;
+  assert.equal(((await f.get(statePath)).json as MowerStateDocument).stale, false, 'the attempt after the interval renewed the session');
+  assert.equal(f.adapter.connects, 3);
+  // A refused sign-in needs the operator and is never repeated.
+  f.adapter.connected = false;
+  f.adapter.connectFailWith = 'authentication_failed';
+  f.clock.now += 1_000;
+  assert.equal(((await f.get(statePath)).json as MowerStateDocument).error, 'authentication_required');
+  assert.equal(f.adapter.connects, 4);
+  f.clock.now += 3_600_000;
+  await f.get(statePath);
+  await f.get(MOWERS_PATH);
+  assert.equal(f.adapter.connects, 4, 'no automatic attempt after a refused sign-in');
+  const state = (await f.get(STATE_PATH)).json as BridgeState;
+  assert.equal(state.auth.state, 'disconnected');
+  assert.equal(state.auth.last_error, 'authentication_failed');
+});
+
+test('a command after a lapse renews the session and discovers before its single write, and without a session nothing is written', async (t) => {
+  const log = sessionLog();
+  let f!: Fixture;
+  f = await fixture(t, { host: HOST_A, ...CONTROL_MODE }, {
+    openLocalSession: sessionsNeedingCloud(log, () => f, async (request) => outcome(request.kind, 'reflected', new Date(f.clock.now).toISOString())),
+  });
+  await f.bridge.connect();
+  await f.get(`${MOWERS_PATH}/${ID_A}/state`);
+  f.adapter.connected = false;
+  f.clock.now += 1_000;
+  const started = await f.post(commandPath(ID_A, 'start'));
+  assert.equal(started.status, 200);
+  assert.equal((started.json as MowerCommandDocument).result, 'confirmed');
+  assert.equal(f.adapter.connects, 2, 'the command route renewed the session first');
+  assert.equal(f.adapter.discoveries, 2, 'and restored the binding before its LAN session');
+  assert.deepEqual(log.commands.map((request) => request.kind), ['start'], 'written once');
+  f.adapter.connected = false;
+  f.adapter.connectFailWith = 'authentication_failed';
+  f.clock.now += 1_000;
+  const refused = await f.post(commandPath(ID_A, 'pause'));
+  assert.equal(refused.status, 503);
+  assert.deepEqual(refused.json, { error: 'authentication_required' });
+  assert.deepEqual(log.commands.map((request) => request.kind), ['start'], 'nothing is written without a session');
 });
 
 test('an adapter without the private binding capability reports mower_protocol_unavailable through the library', async (t) => {
