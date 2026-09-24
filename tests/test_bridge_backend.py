@@ -636,6 +636,142 @@ def test_session_history_in_bridge_mode_observes_reported_activities_only(tmp_pa
     _run(scenario, tmp_path)
 
 
+def _reflected(command: str, observed_at: str, activity: str | None = "mowing", payload: str | None = None) -> dict[str, Any]:
+    """A confirmed command answer whose reflecting report the library received at ``observed_at``."""
+    answer = _outcome(command, activity=activity, payload=payload)
+    for field in ("activity", "payload"):
+        if answer[field] is not None:
+            answer[field]["observed_at"] = observed_at
+    return answer
+
+
+def _clock(now: datetime) -> Any:
+    return patch("custom_components.eufy_robomow.coordinator.dt_util.utcnow", return_value=now)
+
+
+def test_a_confirmed_command_stands_in_for_the_missing_activity_and_makes_resume_reachable(tmp_path: Path) -> None:
+    async def scenario(hass: HomeAssistant) -> None:
+        bridge = _FakeBridge(
+            [
+                _document(),
+                _document(status=_reported_status("returning", "2026-09-24T08:40:00.000Z"), observed_at="2026-09-24T08:40:00.000Z"),
+            ],
+            state=_control_state(),
+            command_answers=[
+                _reflected("pause", "2026-09-24T08:32:15.160Z", activity="paused"),
+                _reflected("resume", "2026-09-24T08:33:29.369Z"),
+                _reflected("stop", "2026-09-24T08:36:20.993Z", activity=None, payload="map_saving"),
+            ],
+        )
+        coordinator = _coordinator(hass, bridge)
+        entity = EufyRobomowEntity(coordinator, cast(Any, _entry(**{CONF_BACKEND: BACKEND_BRIDGE})))
+        with _clock(datetime(2026, 9, 24, 8, 37, tzinfo=UTC)):
+            await coordinator._async_update_data()
+            assert entity.activity is None, "the E15 answers a state query without DP 107"
+
+            await entity.async_pause()
+            assert entity.activity == LawnMowerActivity.PAUSED
+            attributes = entity.extra_state_attributes
+            assert attributes["bridge_activity_source"] == "command"
+            assert attributes["bridge_activity_observed_at"] == "2026-09-24T08:32:15.160000+00:00"
+            assert attributes["bridge_activity"] is None, "the polled activity stays what the poll reported"
+            assert coordinator.bridge_task_active is True
+
+            await entity.async_start_mowing()
+            assert bridge.commands[-1] == (MOWER_ID, "resume"), "paused from the confirmed pause picks resume"
+            assert entity.activity == LawnMowerActivity.MOWING
+
+            await entity.async_dock()
+            assert entity.activity == LawnMowerActivity.DOCKED, "the confirmed dock is the observed dock arrival"
+            assert coordinator.bridge_task_active is False
+        assert bridge.commands == [(MOWER_ID, "pause"), (MOWER_ID, "resume"), (MOWER_ID, "stop")]
+
+        with _clock(datetime(2026, 9, 24, 9, 6, 21, tzinfo=UTC)):
+            assert entity.activity is None, "after the bound the mower may have changed by itself"
+            assert entity.extra_state_attributes["bridge_activity_source"] is None
+
+        with _clock(datetime(2026, 9, 24, 8, 40, 5, tzinfo=UTC)):
+            await coordinator._async_update_data()
+            assert entity.activity == LawnMowerActivity.RETURNING, "a newer reported poll wins"
+            assert entity.extra_state_attributes["bridge_activity_source"] == "report"
+
+    _run(scenario, tmp_path)
+
+
+def test_an_uncertain_command_or_a_contradicting_refusal_leaves_the_activity_unknown(tmp_path: Path) -> None:
+    async def scenario(hass: HomeAssistant) -> None:
+        bridge = _FakeBridge(
+            [_document()],
+            state=_control_state(),
+            command_answers=[
+                _reflected("pause", "2026-09-24T08:32:15.160Z", activity="paused"),
+                BridgeClientError("mower_command_already_set", 409),
+                _reflected("start", "2026-09-24T08:33:40.000Z"),
+                BridgeClientError("telemetry_stale", 409),
+                _outcome("pause", result="uncertain", activity=None, stage="acknowledged", end="timed_out"),
+            ],
+        )
+        coordinator = _coordinator(hass, bridge)
+        entity = EufyRobomowEntity(coordinator, cast(Any, _entry(**{CONF_BACKEND: BACKEND_BRIDGE})))
+        with _clock(datetime(2026, 9, 24, 8, 34, tzinfo=UTC)):
+            await coordinator._async_update_data()
+            await entity.async_pause()
+            assert entity.activity == LawnMowerActivity.PAUSED
+
+            # Someone resumed in the app: the library's fresh query shows DP 2 already false.
+            with pytest.raises(HomeAssistantError, match="mower_command_already_set"):
+                await entity.async_start_mowing()
+            assert bridge.commands[-1] == (MOWER_ID, "resume")
+            assert entity.activity is None, "the refusal contradicted paused, so it is no longer evidence"
+
+            await entity.async_start_mowing()
+            assert bridge.commands[-1] == (MOWER_ID, "start"), "without paused evidence start is sent"
+            assert entity.activity == LawnMowerActivity.MOWING
+
+            with pytest.raises(HomeAssistantError, match="telemetry_stale"):
+                await entity.async_pause()
+            assert entity.activity == LawnMowerActivity.MOWING, "a refusal that says nothing about the mower keeps it"
+
+            with pytest.raises(HomeAssistantError, match="did not confirm it"):
+                await entity.async_pause()
+            assert entity.activity is None, "an uncertain command leaves the mower's state unknown"
+        assert len(bridge.commands) == 5, "every command went out once, nothing was retried"
+
+    _run(scenario, tmp_path)
+
+
+def test_session_history_in_bridge_mode_follows_confirmed_commands(tmp_path: Path) -> None:
+    async def scenario(hass: HomeAssistant) -> None:
+        bridge = _FakeBridge(
+            [_document()],
+            state=_control_state(),
+            command_answers=[
+                _reflected("start", "2026-09-24T08:31:19.442Z"),
+                _reflected("stop", "2026-09-24T08:36:20.993Z", activity=None, payload="map_saving"),
+            ],
+        )
+        coordinator = _coordinator(hass, bridge)
+        store = SessionStore(hass, "test-entry")
+        coordinator.session_store = store
+        history = store.history
+        with _clock(datetime(2026, 9, 24, 8, 37, tzinfo=UTC)):
+            await coordinator._async_update_data()
+            assert history.current is None, "a missing status starts nothing"
+            await coordinator.async_send_mower_command("start")
+            assert history.current is not None
+            assert history.current["phase"] == "mowing"
+            assert history.current["started_at"] == datetime(2026, 9, 24, 8, 31, 19, 442000, tzinfo=UTC).isoformat()
+            await coordinator.async_send_mower_command("dock")
+        assert history.current is None
+        assert len(history.recent) == 1
+        session = history.recent[0]
+        assert session["ended_at"] == datetime(2026, 9, 24, 8, 36, 20, 993000, tzinfo=UTC).isoformat()
+        assert session["end_observed"] is False, "five minutes without an observation is a gap, not an observed end"
+        assert session["observation_gap"] is True
+
+    _run(scenario, tmp_path)
+
+
 def test_bridge_backend_fails_the_update_on_stale_data_errors_or_bad_documents(tmp_path: Path) -> None:
     async def scenario(hass: HomeAssistant) -> None:
         bridge = _FakeBridge(
@@ -800,6 +936,7 @@ def test_mower_entity_keeps_its_identity_and_exposes_every_control_only_with_the
         ("error", LawnMowerActivity.ERROR),
         ("unknown", None),
     ):
+        coordinator.bridge_status = "reported"
         coordinator.bridge_activity = reported
         assert entity.activity == expected, reported
 

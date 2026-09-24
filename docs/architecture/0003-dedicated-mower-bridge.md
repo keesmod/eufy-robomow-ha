@@ -22,6 +22,14 @@ one explicit authentication attempt and shutdown each have a deadline. Nothing
 is retried automatically, in line with the programme rule that no uncertain
 mower command is ever replayed.
 
+Amended 2026-09-24 with bridge 0.8.0, after the control window in issue #8: the
+library reuses a cloud session for at most one hour after its sign-in, so a
+bridge that signs in once stops serving after an hour. A route that needs the
+cloud now renews a lapsed session through one bounded attempt, spaced by a
+minute after a failure and never repeated after a refused sign-in. A renewal
+happens only before a command's write, and commands are still never retried
+or replayed.
+
 The bridge starts only in `observe_only`. Physical control, when it arrives in
 a later step, keeps the explicit opt-in, current telemetry and supervised
 validation required by the repository rules. The first version serves one

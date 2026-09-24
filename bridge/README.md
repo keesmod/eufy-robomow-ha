@@ -27,7 +27,12 @@ validates, built from the library's portable map acquisition after the
 library's decoder accepted the snapshot. The route exists only when the
 operator supplies map provisioning, see [Map provisioning](#map-provisioning).
 Version 0.7.1 names every routed command class in the `control` startup log,
-`stop` included, taken from the routes themselves.
+`stop` included, taken from the routes themselves. Version 0.8.0 renews a
+lapsed cloud session, a finding of the 2026-09-24 control window in issue #8:
+the library reuses a session for at most one hour after its sign-in, and
+0.7.1 signed in once, so every route answered `authentication_required` about
+an hour later until a restart. The state document's `auth.state` now follows
+the library.
 
 ## What it does
 
@@ -39,9 +44,18 @@ Version 0.7.1 names every routed command class in the `control` startup log,
 - Listens on a private HTTP port. Every request needs the bearer token, checked
   in constant time. The read routes are `GET`. The single write route is
   `POST` and works only in `control` mode.
-- Performs exactly one explicit authentication attempt after listening, then
-  one discovery when that succeeded. Results are recorded in the state
-  document. Nothing is retried.
+- Performs one explicit authentication attempt after listening, then one
+  discovery when that succeeded. Results are recorded in the state document.
+- Renews the cloud session when a route needs it and the library reports it
+  lapsed, through one bounded attempt that concurrent routes join. A session
+  that was good is renewed at once. After a failed attempt the next one waits
+  at least a minute. A refused sign-in (`authentication_failed`, a captcha,
+  verification or lock, an unsupported region or invalid options) is never
+  repeated, restart the bridge after resolving it. No route signs in before
+  the explicit startup attempt. A new session holds no device binding, so the
+  next state or command route runs discovery again before its LAN session.
+  Each renewal logs one line without any account data. A command is never
+  retried or replayed, a renewal only happens before its write.
 - Serves the discovered mower list from a cache. A request refreshes it only
   when the list is older than ten minutes, at most once per minute, and an
   older list stays available with the failure code when a refresh fails.
@@ -194,7 +208,7 @@ Bridge state, for example:
 {
   "protocol": 1,
   "bridge": "eufy-robomow-bridge",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "bridge_id": "00000000-0000-4000-8000-000000000000",
   "lifecycle": "running",
   "operating_mode": "observe_only",
@@ -207,9 +221,11 @@ Bridge state, for example:
 }
 ```
 
-`auth.state` is the library's authentication state. `auth.last_error` is the
-stable library or bridge error code of the last explicit attempt, or `null`
-after success. `mowers` summarises the discovery cache. In `control` mode
+`auth.state` is the library's authentication state, so a session whose reuse
+window has passed reads as `disconnected` until a route renews it.
+`auth.last_error` is the stable library or bridge error code of the last
+attempt, the startup attempt or a renewal, or `null` after success, and
+`auth.attempted_at` is the time of that attempt. `mowers` summarises the discovery cache. In `control` mode
 `routes.control` is `true` and `control` carries the opt-in in effect, for
 example `{ "classes": ["start", "pause", "resume", "stop"], "max_state_age_ms": 30000, "read_back_ms": 20000 }`.
 The stop route text is never served.

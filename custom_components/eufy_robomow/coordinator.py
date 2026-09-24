@@ -60,6 +60,12 @@ BRIDGE_COMMAND_CLASSES = {"start": "start", "resume": "resume", "pause": "pause"
 # local backend's DP 1 for the live map. Nothing else counts as a task.
 BRIDGE_TASK_ACTIVITIES = frozenset({"mowing", "paused", "returning"})
 
+# How long the activity a confirmed bridge command reflected stands in for the
+# polled one. The E15 answers state queries without DP 107, so after this bound
+# the mower may have changed by itself (its app schedule, the app, a low battery)
+# and the activity is unknown again. Nothing is inferred from the age.
+BRIDGE_COMMAND_ACTIVITY_MAX_AGE = timedelta(minutes=30)
+
 
 class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
     """Polls the Eufy E15 via Tuya local protocol every POLL_INTERVAL seconds.
@@ -86,6 +92,14 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
     bridge_status: str | None = None
     bridge_activity: str | None = None
     bridge_error: str | None = None
+    # The activity the last confirmed bridge command reflected and when the
+    # library received that report. A confirmed dock records ``docked``: its
+    # map-saving payload is the dock arrival the library observed.
+    bridge_command_activity: str | None = None
+    bridge_command_activity_at: datetime | None = None
+    # The observation time of the last successful poll, the bridge's
+    # ``observed_at`` in bridge mode.
+    last_local_update: datetime | None = None
     # Whether the bridge's last state answer reported ``routes.control`` and the
     # control opt-in it carried (classes, max_state_age_ms, read_back_ms).
     bridge_routes_control: bool = False
@@ -122,6 +136,8 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self.bridge_status = None
         self.bridge_activity = None
         self.bridge_error = None
+        self.bridge_command_activity = None
+        self.bridge_command_activity_at = None
         self.bridge_routes_control = False
         self.bridge_control = None
         if backend == BACKEND_BRIDGE and (bridge is None or not bridge_mower_id):
@@ -183,17 +199,46 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         return True
 
     @property
-    def bridge_task_active(self) -> bool:
-        """A task runs according to the last successful bridge poll.
+    def bridge_activity_evidence(self) -> tuple[str, str, datetime | None] | None:
+        """The newest evidenced bridge activity as (activity, source, observed_at).
 
-        Only a reported mowing, paused or returning activity counts. A missing,
+        ``report`` is the reported status of the last successful poll. ``command``
+        is the activity a confirmed command reflected, while it is younger than
+        BRIDGE_COMMAND_ACTIVITY_MAX_AGE. The E15 answers queries without DP 107,
+        so after a command the polled status is usually missing. A missing,
+        invalid or unconfirmed status says nothing, and nothing is derived from
+        age or absence.
+        """
+        candidates: list[tuple[datetime | None, str, str]] = []
+        if self.bridge_status == "reported" and self.bridge_activity:
+            candidates.append((self.last_local_update, "report", self.bridge_activity))
+        observed_at = self.bridge_command_activity_at
+        if (
+            self.bridge_command_activity
+            and observed_at is not None
+            and dt_util.utcnow() - observed_at <= BRIDGE_COMMAND_ACTIVITY_MAX_AGE
+        ):
+            candidates.append((observed_at, "command", self.bridge_command_activity))
+        if not candidates:
+            return None
+        oldest = datetime.min.replace(tzinfo=dt_util.UTC)
+        newest = max(candidates, key=lambda candidate: candidate[0] or oldest)
+        return newest[2], newest[1], newest[0]
+
+    @property
+    def bridge_task_active(self) -> bool:
+        """A task runs according to the newest evidenced bridge activity.
+
+        Only a mowing, paused or returning activity counts, reported by the last
+        successful poll or reflected by a recent confirmed command. A missing,
         invalid or unconfirmed status, a failed poll and the age of an
         observation never do.
         """
+        evidence = self.bridge_activity_evidence
         return (
             self.last_update_success
-            and self.bridge_status == "reported"
-            and self.bridge_activity in BRIDGE_TASK_ACTIVITIES
+            and evidence is not None
+            and evidence[0] in BRIDGE_TASK_ACTIVITIES
         )
 
     def _require_control_enabled(self) -> None:
@@ -581,10 +626,15 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
                 ) from exc
             if refused_before_write(exc.code):
                 operation.finish("failed", exc.code)
+                if exc.code == "mower_command_already_set":
+                    # The library's fresh query contradicted the activity this
+                    # command was chosen from, so it is no longer evidence.
+                    self._clear_command_activity()
                 raise HomeAssistantError(
                     f"The mower bridge refused the command before sending it: {exc.code}"
                 ) from exc
             operation.finish("uncertain", exc.code)
+            self._clear_command_activity()
             raise HomeAssistantError(
                 f"The mower bridge did not answer the command ({exc.code}). The command "
                 "may have been written. Check the mower before repeating it."
@@ -607,15 +657,46 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         """
         if outcome.result == "confirmed":
             operation.finish("confirmed", f"bridge:{outcome.activity or outcome.payload}")
+            self._record_command_activity(outcome)
             return
         if outcome.result == "failed":
             operation.finish("rejected", f"bridge:{outcome.end}")
             raise HomeAssistantError("The mower rejected the command")
         operation.finish("uncertain", f"bridge:{outcome.end}")
+        self._clear_command_activity()
         raise HomeAssistantError(
             "The command was written, but the mower did not confirm it within the "
             "bridge's read-back window. Check the mower before repeating it."
         )
+
+    def _record_command_activity(self, outcome: BridgeCommandOutcome) -> None:
+        """Keep the activity a confirmed command reflected, with its report time.
+
+        A reflected activity is a fresh DP 107 report. The map-saving payload of
+        a confirmed stop is the dock arrival the library observed, so it records
+        ``docked``. A newer reported poll wins. The session history observes the
+        activity once, as it observes a reported status.
+        """
+        activity = outcome.activity or ("docked" if outcome.payload == "map_saving" else None)
+        observed_at = outcome.observed_at
+        if activity is None or observed_at is None:
+            return
+        if (
+            self.bridge_status == "reported"
+            and self.bridge_activity
+            and self.last_local_update is not None
+            and self.last_local_update >= observed_at
+        ):
+            return
+        self.bridge_command_activity = activity
+        self.bridge_command_activity_at = observed_at
+        if self.session_store:
+            self.session_store.observe_activity(activity, observed_at)
+
+    def _clear_command_activity(self) -> None:
+        """Forget the command activity once the mower's state is no longer known."""
+        self.bridge_command_activity = None
+        self.bridge_command_activity_at = None
 
     async def async_send_command(self, dp: str, value) -> None:
         """Write a single DPS value or raise a visible Home Assistant error."""
