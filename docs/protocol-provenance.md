@@ -46,10 +46,10 @@ version 0.8.1.
 ## DP 107 activity
 
 The mower declares DP 107 `robot_status` as a raw data point. Library
-`@keesmod/eufy-mega-client` 0.18.0, pinned by the mower bridge to the release
+`@keesmod/eufy-mega-client` 0.19.0, pinned by the mower bridge to the release
 tarball with SHA-256
-`52c1af2849bb43489171e56584cecd4795dec38459a0c5b9603923d5fb7aad2a` from source commit
-`1792bbc5bbe420adc54c6329bf9ea72e4e222a02`, confirms three payloads on the
+`982ef2e72167629333a86fab869a8f48439ae33909f30922b1ea8534308f2297` from source commit
+`80734ebecf1c83a001b1919bbf85a5ba6689f0c6`, confirms three payloads on the
 owned E15 (product code T2880, firmware 6.9.28, Anker eufy app 6.1.00): fields
 1 = 2 and 3 = 1 `mowing`, fields 1 = 2 and 3 = 2 `paused`, and fields 1 = 1 and
 3 = 1 `returning`. Each reached at least four app-correlated transitions across

@@ -168,7 +168,8 @@ function sessions(log: SessionLog, answer: (signal: AbortSignal) => Promise<Mowe
         throw new Error('not used by the bridge');
       },
       sendCommand: async (request, commandSignal) => {
-        log.commands.push({ ...request });
+        // Only the class: the progress callback is the bridge's own and checked where it matters.
+        log.commands.push({ kind: request.kind });
         if (!command) throw new EufyError('mower_commands_disabled');
         return command(request, commandSignal ?? signal);
       },
@@ -360,6 +361,7 @@ test('the state route serves the four typed fields with freshness, closes the se
     battery: { state: 'reported', value: { percent: 85 }, dp: ['8'], source: 'local-tuya-3.5', observedAt },
     progress: { state: 'unconfirmed' },
     network: { state: 'reported', value: { kind: 'wifi', signalPercent: 70 }, dp: ['134', '109'], source: 'local-tuya-3.5', observedAt },
+    command: null,
   });
   const list = (await f.get(MOWERS_PATH)).json as DiscoveryDocument;
   assert.equal(list.mowers[0]?.state_available, true);
@@ -597,6 +599,40 @@ test('a command after a lapse renews the session and discovers before its single
   assert.equal(refused.status, 503);
   assert.deepEqual(refused.json, { error: 'authentication_required' });
   assert.deepEqual(log.commands.map((request) => request.kind), ['start'], 'nothing is written without a session');
+});
+
+test('the state route serves the running command with its progress and nothing once it ended', async (t) => {
+  const log = sessionLog();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const at = new Date(T0).toISOString();
+  let f!: Fixture;
+  f = await fixture(t, { host: HOST_A, ...CONTROL_MODE }, {
+    openLocalSession: sessionsNeedingCloud(log, () => f, async (request) => {
+      // As on 2026-09-20: the control point at once, `returning` within a second, then the
+      // map-saving reflection at the dock arrival about 30 seconds later.
+      request.onProgress?.({ kind: 'acknowledged', observedAt: at, sequence: 11, dp: '104' });
+      request.onProgress?.({ kind: 'activity', observedAt: at, sequence: 12, value: 'returning' });
+      await gate;
+      return outcome(request.kind, 'reflected', at);
+    }),
+  });
+  await f.bridge.connect();
+  const statePath = `${MOWERS_PATH}/${ID_A}/state`;
+  assert.equal(((await f.get(statePath)).json as MowerStateDocument).command, null);
+  const stop = f.post(commandPath(ID_A, 'stop'));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const during = (await f.get(statePath)).json as MowerStateDocument;
+  assert.deepEqual(during.command, { command: 'stop', acknowledged_at: at, activity: { observed_at: at, sequence: 12, value: 'returning' } });
+  assert.deepEqual(during.status, { state: 'missing', dp: STATUS_DP }, 'the typed status stays what the query reported');
+  release();
+  const answer = await stop;
+  assert.equal(answer.status, 200);
+  assert.equal((answer.json as MowerCommandDocument).payload?.name, 'map_saving');
+  assert.equal(((await f.get(statePath)).json as MowerStateDocument).command, null, 'a finished command is never served');
+  assert.deepEqual(log.commands, [{ kind: 'stop' }], 'progress never sends a second command');
 });
 
 test('an adapter without the private binding capability reports mower_protocol_unavailable through the library', async (t) => {
