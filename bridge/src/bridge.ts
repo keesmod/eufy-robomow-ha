@@ -141,6 +141,17 @@ export interface TelemetryFields {
   network: MowerTelemetryField<{ kind?: MowerNetworkKind; signalDbm?: number; signalPercent?: number }>;
 }
 
+/**
+ * The command that owns a mower while its read-back runs, with the library's progress so far:
+ * the acknowledgement time and the latest confirmed DP 107 activity. After a `stop` on the owned
+ * E15 that activity is `returning` within a second, long before the outcome at the dock arrival.
+ */
+export interface InFlightCommandDocument {
+  command: RoutedCommandClass;
+  acknowledged_at: string | null;
+  activity: { observed_at: string; sequence: number; value: MowerActivity } | null;
+}
+
 /** Contract 1 of `GET /v1/mowers/{id}/state`. Freshness is measured against the bridge clock. */
 export interface MowerStateDocument extends TelemetryFields {
   contract: 1;
@@ -152,6 +163,8 @@ export interface MowerStateDocument extends TelemetryFields {
   stale: boolean;
   /** Stable code of the failed query when stale, otherwise null. */
   error: string | null;
+  /** The command running for this mower now, or null. Never a finished or replayed command. */
+  command: InFlightCommandDocument | null;
 }
 
 /** Contract 1 of `POST /v1/mowers/{id}/commands/{class}`. Raw reports and data points are never served. */
@@ -351,6 +364,8 @@ export class MowerBridge {
   #staleIds = new Set<string>();
   #queries = new Map<string, Promise<MowerStateDocument>>();
   #commands = new Map<string, Promise<MowerCommandDocument>>();
+  /** Progress of the running command per mower id, served by the state route until it ends. */
+  #inFlight = new Map<string, InFlightCommandDocument>();
   /** Present only with map provisioning. Construction does no I/O. */
   readonly #maps: MowerMaps | undefined;
 
@@ -627,7 +642,13 @@ export class MowerBridge {
       stale: error !== null,
       error,
       ...structuredClone(fields),
+      command: this.#inFlightDocument(id),
     };
+  }
+
+  #inFlightDocument(id: string): InFlightCommandDocument | null {
+    const running = this.#inFlight.get(id);
+    return running ? structuredClone(running) : null;
   }
 
   /**
@@ -676,10 +697,23 @@ export class MowerBridge {
       this.#dependencies.openLocalSession ?? ((target, options, signal) => mowers.openLocalSession(target, options, signal));
     const signal = this.#lifetime.signal;
     let outcome: MowerCommandOutcome;
+    const progress: InFlightCommandDocument = { command: kind, acknowledged_at: null, activity: null };
+    this.#inFlight.set(id, progress);
     try {
       const session = await open(id, { host, timeoutMs: this.#config.localTimeoutMs }, signal);
       try {
-        outcome = await session.sendCommand({ kind }, signal);
+        outcome = await session.sendCommand(
+          {
+            kind,
+            // Progress only informs the state route while the read-back runs. It never ends,
+            // repeats or changes the command, and the outcome stays the result.
+            onProgress: (event) => {
+              if (event.kind === 'acknowledged') progress.acknowledged_at ??= event.observedAt;
+              else progress.activity = { observed_at: event.observedAt, sequence: event.sequence, value: event.value };
+            },
+          },
+          signal,
+        );
       } finally {
         await session.disconnect();
       }
@@ -687,6 +721,8 @@ export class MowerBridge {
       const code = errorCode(error);
       // The library's typed refusals happen before any frame is written. Everything else is a transport or session failure.
       throw new ApiError(code.startsWith('mower_command') ? 409 : 503, code);
+    } finally {
+      if (this.#inFlight.get(id) === progress) this.#inFlight.delete(id);
     }
     return commandDocument(id, outcome);
   }

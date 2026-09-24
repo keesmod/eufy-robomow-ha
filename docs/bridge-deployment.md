@@ -3,9 +3,9 @@
 How to run the dedicated mower bridge from `bridge/` as a container or as a
 local Home Assistant app, and how to upgrade, restart, back up and roll it
 back. Everything here is local: no image is published and no app repository is
-listed. Version 0.8.0 serves state routes and, only behind the explicit
+listed. Version 0.9.0 serves state routes and, only behind the explicit
 `operating_mode: control` opt-in with a stop route, the start, pause, resume
-and stop routes. It pins library 0.18.0, which confirms the E15 activities
+and stop routes. It pins library 0.19.0, which confirms the E15 activities
 mowing, paused and returning and the start, pause, resume and stop commands.
 On the owned E15 a stop ends the task and returns the mower to the dock. With
 an operator-supplied map provisioning file it also serves the read-only map
@@ -49,7 +49,7 @@ in `ha_app/` (run `python3 scripts/prepare_ha_app.py`).
 ## Install with Docker
 
 ```bash
-docker build -t eufy-mower-bridge:0.8.0 ./bridge
+docker build -t eufy-mower-bridge:0.9.0 ./bridge
 ```
 
 ```bash
@@ -61,7 +61,7 @@ docker run -d --name eufy-mower-bridge --restart unless-stopped \
   -e EUFY_MOWER_PASSWORD=<eufy account password> \
   -e EUFY_MOWER_COUNTRY=NL \
   -e EUFY_MOWER_HOST=<mower LAN address> \
-  eufy-mower-bridge:0.8.0
+  eufy-mower-bridge:0.9.0
 ```
 
 Bind the published port to an address that only Home Assistant can reach, or
@@ -135,7 +135,7 @@ docker run -d --name eufy-mower-bridge --restart unless-stopped \
   -e EUFY_MOWER_PASSWORD=<eufy account password> \
   -e EUFY_MOWER_COUNTRY=NL \
   -e EUFY_MOWER_HOST=<mower LAN address> \
-  eufy-mower-bridge:0.8.0
+  eufy-mower-bridge:0.9.0
 ```
 
 Mount the directory rather than the file, so a file replaced by renaming
@@ -224,7 +224,7 @@ routes start, pause and resume through the bridge's opt-in command routes.
 Since integration 0.10.0 dock goes through the bridge's stop route as well,
 and since integration 0.11.0 the map entity can read the bridge's map route.
 Activity reports mowing, paused and returning from the E15 payloads confirmed
-in library 0.18.0, see [DP 107 activity](protocol-provenance.md#dp-107-activity).
+in library 0.19.0, see [DP 107 activity](protocol-provenance.md#dp-107-activity).
 Docked, charging, idle and error have no confirmed payload and are never
 inferred, mowing progress stays unconfirmed and a bridge-mode session cannot
 observe its end. Commands need two opt-ins: the integration's operating mode

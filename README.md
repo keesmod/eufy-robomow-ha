@@ -15,7 +15,8 @@ Version 0.11.0 lets the map entity read the mower bridge's read-only map route
 on library 0.18.0. Version 0.12.0 takes the mower activity in bridge mode from
 the last confirmed command, so resume works through Home Assistant. Version
 0.12.1 stops the local backend from reporting mowing while the mower rests in
-the dock with its task flag set.
+the dock with its task flag set. Version 0.13.0 shows the drive home after a
+dock in bridge mode.
 
 ---
 
@@ -183,7 +184,11 @@ Since 0.12.0 a confirmed command stands in for it. Its answer carries the fresh
 DP 107 report that reflected it and the time the library received that report:
 `mowing` after start or resume, `paused` after pause, and `docked` after a
 confirmed dock, whose map-saving payload is the dock arrival the library
-observed. The entity shows that activity for at most 30 minutes, because the
+observed. With bridge 0.9.0 on library 0.19.0 a poll during a running command
+also carries the command's latest confirmed activity, so the entity shows
+`returning` within about ten seconds of a dock instead of the earlier
+activity. An uncertain answer keeps a report the command itself produced and
+clears only older evidence. The entity shows that activity for at most 30 minutes, because the
 mower can change by itself afterwards, for example through its app schedule. A
 newer reported poll replaces it, and an uncertain command or a
 `mower_command_already_set` refusal clears it, because the mower's state is
@@ -374,6 +379,13 @@ protocol tests.
 
 ## Upgrade notes
 
+- **0.13.0, the drive home after a dock, and bridge 0.9.0.** With mower bridge
+  0.9.0 on library 0.19.0, a state poll during a running command carries the
+  command's latest confirmed activity. In bridge mode the entity therefore shows
+  `returning` during the drive home after a dock, where 0.12.1 kept showing
+  `mowing` until the arrival. An uncertain answer keeps a report the command
+  itself produced. An older bridge simply sends no progress. The local backend
+  is unchanged.
 - **0.12.1, resting in the dock is docked.** With account credentials the
   local backend reports `docked` instead of `mowing` while the mower rests in
   the dock with its task flag set, which on 2026-09-24 happened for about

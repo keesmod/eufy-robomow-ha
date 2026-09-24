@@ -182,6 +182,10 @@ class BridgeTelemetry:
     # The reported activity, only while ``status`` is ``reported``.
     activity: str | None
     dps: dict[str, Any]
+    # The latest confirmed activity of the command running on the bridge and when
+    # the library received that report, for example ``returning`` shortly after a
+    # dock. None without a running command or without progress yet.
+    command_activity: tuple[str, datetime] | None = None
 
 
 def _field(document: dict[str, Any], name: str) -> dict[str, Any]:
@@ -259,7 +263,25 @@ def parse_state_document(document: Any, mower_id: str) -> BridgeTelemetry:
         status=status["state"],
         activity=activity,
         dps=dps,
+        command_activity=_command_activity(document.get("command")),
     )
+
+
+def _command_activity(command: Any) -> tuple[str, datetime] | None:
+    """The running command's latest activity from bridge 0.9.0 or later, or None.
+
+    The field is optional progress. An older bridge omits it and a shape this
+    integration does not know is ignored instead of failing the poll.
+    """
+    if not isinstance(command, dict):
+        return None
+    activity = command.get("activity")
+    if not isinstance(activity, dict) or not isinstance(activity.get("value"), str):
+        return None
+    observed_at = _report_time(activity)
+    if observed_at is None:
+        return None
+    return activity["value"], observed_at
 
 
 @dataclass(frozen=True, slots=True)
