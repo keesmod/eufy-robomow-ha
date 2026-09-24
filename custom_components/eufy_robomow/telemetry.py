@@ -13,6 +13,10 @@ _ROBOT_STATUS_ACTIVITIES = (
     ({1: 2, 3: 2}, "paused"),
     ({1: 1, 3: 1}, "returning"),
 )
+# The map-saving payload: fields 2 = 5 and 3 = 1 as its only records. The library
+# reflects a stop with it, and on the owned E15 it follows every dock arrival and
+# every app Stop while the map is saved, before DP 1 turns false.
+_MAP_SAVING_FIELDS = {2: 5, 3: 1}
 _MAX_ROBOT_STATUS_BYTES = 64
 
 
@@ -31,11 +35,12 @@ def robot_status(value: Any) -> str | None:
     """Read one DP 107 ``robot_status`` payload as it arrives in the cloud DPS.
 
     Returns ``mowing``, ``paused`` or ``returning`` for the confirmed wire
-    definitions and ``idle`` for the default payload, zero bytes or a single
-    zero byte, as the library parses it. On 2026-09-24 the default payload held
-    in the cloud while the task flag DP 1 was true and the app showed the mower
-    charging or idle in the dock. Everything else, including the map-saving
-    payload and field 6, returns None and is never guessed.
+    definitions, ``map_saving`` for the exact map-saving payload and ``idle``
+    for the default payload, zero bytes or a single zero byte, as the library
+    parses it. On 2026-09-24 the default payload held in the cloud while the
+    task flag DP 1 was true and the app showed the mower charging or idle in
+    the dock. Everything else, such as field 6 or field 4, returns None and is
+    never guessed.
     """
     if not isinstance(value, str):
         return None
@@ -60,6 +65,8 @@ def robot_status(value: Any) -> str | None:
         if field_value is None:
             return None
         fields[number] = field_value
+    if fields == _MAP_SAVING_FIELDS:
+        return "map_saving"
     for match, activity in _ROBOT_STATUS_ACTIVITIES:
         if all(fields.get(number, 0) == expected for number, expected in match.items()):
             return activity

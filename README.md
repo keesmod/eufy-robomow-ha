@@ -118,9 +118,10 @@ opt in to control.
   fifteen minutes after each dock arrival and each evening while the mower
   rested in the dock and the app showed it idle or charging. A local status
   reply never carries DP 107, so in this shape the integration asks the cloud
-  at once and then every minute, also at night. A default DP 107 payload then
-  reports `docked`, the confirmed `paused` and `returning` payloads report
-  those activities, and anything else keeps `mowing`. Without account
+  at once and then every minute, also at night. A default DP 107 payload, or
+  the map-saving payload while the map is saved at the arrival before DP 1
+  turns false, then reports `docked`, the confirmed `paused` and `returning`
+  payloads report those activities, and anything else keeps `mowing`. Without account
   credentials or a cloud answer the reading stays `mowing`. The
   `robot_status` attribute shows DP 107 as the last cloud poll read it.
 - **bridge**: the integration reads state from the dedicated mower bridge
@@ -379,6 +380,12 @@ protocol tests.
 
 ## Upgrade notes
 
+- **0.13.1, the map save at the arrival is docked.** In the local backend a
+  status poll that catches the ten to twenty seconds after a dock arrival,
+  while DP 1 is still true and the map is saved, reported `mowing`, as seen
+  at 13:23 UTC on 2026-09-24. With the map-saving DP 107 payload from the
+  cloud it now reports `docked`. The `robot_status` attribute can read
+  `map_saving`.
 - **0.13.0, the drive home after a dock, and bridge 0.9.0.** With mower bridge
   0.9.0 on library 0.19.0, a state poll during a running command carries the
   command's latest confirmed activity. In bridge mode the entity therefore shows
