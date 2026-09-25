@@ -215,7 +215,8 @@ expires quickly, so it is not part of the bridge backup.
    an older version through an update as well, keeps the data directory and
    the options, and starts the app again when it was running. Restoring the
    app backup that the upgrade made is the alternative. It brings back the
-   previous version with its options and the data of that moment.
+   previous version with its options and the data of that moment. The
+   rehearsal of 2026-09-25 confirmed the update path on Supervisor 2026.09.2.
 3. When the previous version cannot read the newer session file, delete
    `mower-session.json` from the data directory and restart. The bridge signs
    in once. Keep `bridge-id`, the integration's mower id and unique IDs depend
