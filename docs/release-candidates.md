@@ -28,8 +28,9 @@ file. CI runs the
 tests on Home Assistant 2026.7.2, and the rehearsal ran on Home Assistant
 2026.9.3 with Supervisor 2026.09.2. The hardware evidence below comes from the
 owner's Home Assistant OS installation with the owned E15 (T2880) on firmware
-6.9.28, as read on 2026-09-20. The later windows did not read the firmware
-again.
+6.9.28. A read-only check of the owner's running Anker eufy app on
+2026-09-25 confirmed that version again. The earlier control and settings
+windows did not re-read the firmware during each window.
 
 ## Build and verify
 
@@ -158,7 +159,6 @@ on hardware in this programme.
   installation, which needs map provisioning. The backend and version
   migration passed its rehearsal on 2026-09-25.
 - The retirement plan of the Android map helper, which starts only after both.
-- A fresh read of the firmware for the candidate's record.
 - The licensing boundary and an explicit authorisation before any publication.
 
 ## Compatibility
