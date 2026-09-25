@@ -9,4 +9,4 @@ export const CLIENT_VERSION = '0.24.0';
 export const CLIENT_TARBALL = `https://github.com/keesmod/eufy-mega-client/releases/download/v${CLIENT_VERSION}/keesmod-eufy-mega-client-${CLIENT_VERSION}.tgz`;
 /** Subresource integrity of that tarball, as recorded in package-lock.json. */
 export const CLIENT_INTEGRITY =
-  'sha512-TbKsFd5+7IrOeyFNqTBa2zYs20hFCjisKOgJCvKDqeZ2RFBEzstvMjtR0KA2HqmxFvfCe4p0bEHdKjS3AW9+Mw==';
+  'sha512-K4WLKKdq3VkuBEV2Znfz/OLPRnNnxzSfi7SdH9ioedV2G6/d4dFDOi5WrYdGMvmitBtbPoE8uJjHeK3TyYEiSQ==';
