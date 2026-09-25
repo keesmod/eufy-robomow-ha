@@ -7,9 +7,17 @@ control owner and one map owner at any time. They keep the config entry, the
 entity ids, the unique ids and the session history, and they never retry or
 replay a command.
 
-The rehearsal of these procedures on the owner's installation is item 3 of
-[issue #8](https://github.com/keesmod/eufy-robomow-ha/issues/8), and its
-receipt is recorded there.
+These procedures were rehearsed on the owner's installation on 2026-09-25,
+without mower movement. The rehearsal covered:
+
+- A switch refused while the bridge was unreachable.
+- A bridge lost after the switch.
+- A restart in bridge mode without a running bridge.
+- A rollback and an upgrade of the integration and of the app.
+
+Every entity id, unique id, session and dashboard reference was kept, and no
+command was sent. See the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5832886365) in
+[issue #8](https://github.com/keesmod/eufy-robomow-ha/issues/8).
 
 ## One control owner, one map owner
 
@@ -70,7 +78,9 @@ Assistant.
 The app candidate starts with `boot: manual`, so it does not start by itself
 after a host restart. For lasting use of the bridge backend, enable
 **Start on boot** on the app's page. Without it, a restart of the host leaves
-the bridge backend unavailable until the app is started.
+the entry retrying its setup until the app is started. **Configure** also
+works on a retrying entry, so switching to `local` recovers the entities
+without the bridge. In the rehearsal that took 2 seconds.
 
 ## Switching the map source
 
@@ -122,7 +132,10 @@ A rollback is the same with the previous folder.
   the options. **Rebuild** is no rollback, because the Supervisor refuses it
   once the folder carries another version. Restoring the app backup that the
   upgrade made is the alternative. It brings back the previous version with its
-  options and the data of that moment.
+  options and the data of that moment. The rehearsal went from 0.10.1 to 0.10.0
+  and back this way on Supervisor 2026.09.2. Each update took about 20 seconds
+  with the build cache, and the bridge was unreachable for at most about 4
+  seconds.
 - Keep `mower-session.json` and `bridge-id` in the data directory. The mower id
   the integration stores depends on them. The library's changelog records no
   change of either from library 0.13.0 to 0.22.0.
