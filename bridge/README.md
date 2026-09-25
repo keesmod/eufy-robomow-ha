@@ -177,8 +177,9 @@ may contain only the keys below, as strings or integers, and must stay under
 | `EUFY_MOWER_CONTROL_STOP_ROUTE` | `control_stop_route` | in `control` mode | | 1 to 200 printable ASCII characters. The operator's own words for how the mower is stopped when a command misbehaves, for example `pause here, then Stop and Charge in the eufy app`. Passed to the library opt-in, never logged or served |
 | `EUFY_MOWER_CONTROL_MAX_STATE_AGE_MS` | `control_max_state_age_ms` | no | `30000` | 1000 to 300000. A command is refused when the last successful state observation of that mower is older |
 | `EUFY_MOWER_CONTROL_READ_BACK_MS` | `control_read_back_ms` | no | `20000` | 1000 to 60000. How long the library waits for fresh reports after every write |
-| `EUFY_MOWER_MAP_PROVISIONING_FILE` | `map_provisioning_file` | no | | Absolute path of the operator's private map provisioning file. Enables the read-only map route. Read for every acquisition, never logged or served |
-| `EUFY_MOWER_MAP_MOWER_ID` | `map_mower_id` | no | | 64-character id of the mower the provisioning belongs to. Required only when more than one mower is discovered, needs `map_provisioning_file` |
+| `EUFY_MOWER_MAP_PROVISIONING_MODE` | `map_provisioning_mode` | no | `file` | `cloud` obtains fresh private provisioning from the library for every acquisition. `file` retains the existing operator-supplied file route |
+| `EUFY_MOWER_MAP_PROVISIONING_FILE` | `map_provisioning_file` | no | | Absolute path of the private provisioning file in file mode. Enables the read-only map route. Cannot be combined with cloud mode |
+| `EUFY_MOWER_MAP_MOWER_ID` | `map_mower_id` | no | | 64-character id of the mower the provisioning belongs to. Required only when more than one mower is discovered and maps are enabled |
 
 Mower ids are the opaque 64-character identifiers from `GET /v1/mowers`. They
 are account-scoped and stable while the private session identity is kept. A
@@ -194,14 +195,31 @@ token, the credentials or the session.
 
 ### Map provisioning
 
+Bridge 0.12.0 can obtain fresh provisioning through library 0.24.0. Set
+`map_provisioning_mode: cloud` (Docker: `EUFY_MOWER_MAP_PROVISIONING_MODE=cloud`)
+and leave `map_provisioning_file` unset. This explicitly enables the read-only
+map route. Every due acquisition obtains a new RTC configuration for the
+selected mower. The existing cloud-session renewal runs before provisioning
+when needed. It never repeats the failed acquisition, changes a setting or
+enables physical commands. Provisioning failures keep the last complete map
+and mark it stale. Shutdown cancels a pending provisioning request.
+
+The library stores derived MQTT credentials in the existing private session
+file. Provisioning, local keys and raw RTC responses never enter the bridge
+API or logs. This path has software coverage, with fresh native hardware
+acceptance still required in #8. Keep the external Android map source
+recoverable and use one acquisition owner during the first trial.
+
+The default `file` mode preserves the existing route:
+
 The library's `PortableMapAcquisition` needs private provisioning from the
 verified account and the current relay route of the mower: the library's
 `MapSessionProvisioning` object with `expiresAt`, `accountUid`, `peer`,
 `localKey`, `password`, `motoId`, `preconnect`, `iceTokens`, `tcpToken`,
-`mqtt`, `mqttHeader`, `subscribeTopics` and `publishTopic`, see the library's
-[portable map acquisition](https://github.com/keesmod/eufy-mega-client/blob/1792bbc5bbe420adc54c6329bf9ea72e4e222a02/docs/MAP_ACQUISITION.md).
+`mqtt`, optional `mqttHeader`, `subscribeTopics` and `publishTopic`, see the library's
+[portable map acquisition](https://github.com/keesmod/eufy-mega-client/blob/3c21ac4731bb072305c25b590101b662354a4b60/docs/MAP_ACQUISITION.md).
 It expires, and the library refuses it when less than 65 seconds of validity
-remain. Neither the library nor this bridge obtains it. The operator writes it
+remain. In file mode the operator writes it
 as one JSON object into a file and keeps that file fresh, for example with a
 private tool of their own.
 

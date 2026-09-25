@@ -56,7 +56,7 @@ export interface BridgeConfig {
   host: string | null;
   /** Present only in `control` mode. The stop route is the operator's own words, passed to the library opt-in. */
   control: ControlConfig | null;
-  /** Present only when the operator supplies map provisioning. Enables the read-only map route. */
+  /** Present when cloud provisioning or a private provisioning file enables the read-only map route. */
   maps: MapConfig | null;
 }
 
@@ -70,8 +70,9 @@ export interface MapConfig {
   /**
    * Absolute path of the operator's private provisioning file, the library's
    * `MapSessionProvisioning` as JSON. Read afresh for every acquisition, never logged or served.
+   * Null selects fresh provisioning from the library's authenticated mower account.
    */
-  provisioningFile: string;
+  provisioningFile: string | null;
   /** The mower the provisioning belongs to. Null means the sole discovered mower. */
   mowerId: string | null;
 }
@@ -106,6 +107,7 @@ export const ENV = {
   control_max_state_age_ms: 'EUFY_MOWER_CONTROL_MAX_STATE_AGE_MS',
   control_read_back_ms: 'EUFY_MOWER_CONTROL_READ_BACK_MS',
   map_provisioning_file: 'EUFY_MOWER_MAP_PROVISIONING_FILE',
+  map_provisioning_mode: 'EUFY_MOWER_MAP_PROVISIONING_MODE',
   map_mower_id: 'EUFY_MOWER_MAP_MOWER_ID',
   options_file: 'EUFY_MOWER_OPTIONS_FILE',
 } as const;
@@ -130,6 +132,7 @@ const OPTION_KEYS: readonly OptionKey[] = [
   'control_max_state_age_ms',
   'control_read_back_ms',
   'map_provisioning_file',
+  'map_provisioning_mode',
   'map_mower_id',
 ];
 
@@ -235,19 +238,24 @@ export function resolveConfig(values: OptionValues): BridgeConfig {
 }
 
 /**
- * The read-only map route. It exists only when the operator names a provisioning file, because
- * the library's acquisition needs private provisioning that this bridge cannot obtain itself.
+ * Cloud provisioning is an explicit opt-in. Existing file configurations keep their behavior.
  */
 function maps(values: OptionValues): MapConfig | null {
   const provisioningFile = text(values, 'map_provisioning_file') ?? '';
   const mowerId = text(values, 'map_mower_id') ?? '';
+  const mode = text(values, 'map_provisioning_mode') ?? 'file';
+  if (mode !== 'file' && mode !== 'cloud') throw new ConfigError('map_provisioning_mode', 'must be file or cloud');
+  if (mowerId && !MOWER_ID.test(mowerId)) throw new ConfigError('map_mower_id', 'must be a 64-character mower id');
+  if (mode === 'cloud') {
+    if (provisioningFile) throw new ConfigError('map_provisioning_file', 'cannot be combined with cloud provisioning');
+    return { provisioningFile: null, mowerId: mowerId || null };
+  }
   if (!provisioningFile) {
     if (mowerId) throw new ConfigError('map_mower_id', 'requires map_provisioning_file');
     return null;
   }
   if (!isAbsolute(provisioningFile) || provisioningFile.includes('\0'))
     throw new ConfigError('map_provisioning_file', 'must be an absolute path');
-  if (mowerId && !MOWER_ID.test(mowerId)) throw new ConfigError('map_mower_id', 'must be a 64-character mower id');
   return { provisioningFile, mowerId: mowerId || null };
 }
 

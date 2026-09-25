@@ -280,7 +280,7 @@ function etagMatches(header: string | undefined, etag: string): boolean {
  * Nothing is replayed, and after a demand that published nothing the next one waits.
  */
 export class MowerMaps {
-  readonly #provisioningFile: string;
+  readonly #provision: (id: string, signal: AbortSignal) => Promise<MapSessionProvisioning>;
   readonly #create: CreateMapAcquisition;
   readonly #timings: MapTimings;
   readonly #now: () => number;
@@ -295,13 +295,13 @@ export class MowerMaps {
   #lastDemand: MapDemandSummary | null = null;
 
   constructor(options: {
-    provisioningFile: string;
+    provision: (id: string, signal: AbortSignal) => Promise<MapSessionProvisioning>;
     create: CreateMapAcquisition;
     timings: MapTimings;
     now: () => number;
     lifetime: AbortSignal;
   }) {
-    this.#provisioningFile = options.provisioningFile;
+    this.#provision = options.provision;
     this.#create = options.create;
     this.#timings = options.timings;
     this.#now = options.now;
@@ -378,15 +378,15 @@ export class MowerMaps {
 
   async #run(demand: Demand): Promise<void> {
     let maps: MapAcquisitionPort;
+    const signal = AbortSignal.any([this.#lifetime, demand.controller.signal]);
     try {
-      const provisioning = await readProvisioningFile(this.#provisioningFile);
-      if (this.#lifetime.aborted) throw new BridgeError('request_aborted');
-      maps = this.#create(provisioning as MapSessionProvisioning);
+      const provisioning = await this.#provision(demand.id, signal);
+      if (signal.aborted) throw new BridgeError('request_aborted');
+      maps = this.#create(provisioning);
     } catch (error) {
       this.#finish(errorCode(error));
       return;
     }
-    const signal = AbortSignal.any([this.#lifetime, demand.controller.signal]);
     const watch = setInterval(() => this.#watch(demand, maps), this.#timings.watchIntervalMs);
     let result: MapAcquisitionResult | undefined;
     let failure: string | null = null;
