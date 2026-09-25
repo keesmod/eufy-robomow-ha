@@ -46,10 +46,10 @@ version 0.8.1.
 ## DP 107 activity
 
 The mower declares DP 107 `robot_status` as a raw data point. Library
-`@keesmod/eufy-mega-client` 0.20.0, pinned by the mower bridge to the release
+`@keesmod/eufy-mega-client` 0.22.0, pinned by the mower bridge to the release
 tarball with SHA-256
-`a47771ef8cbde4f169b1e281cf0fa8d4b10b90284bd85cfed5c0b9a0bf531c93` from source commit
-`ac93dc8e4bcf21952d8d66cc74d41e7808fdae9c`, confirms three payloads on the
+`b4866314eb30a65bcd39970e2fa35e5e6c8868c0c9d5f9f31a72043b8d7de827` from source commit
+`25a43b0295f8b78c09ac37c1fe28faaebf0a0220`, confirms three payloads on the
 owned E15 (product code T2880, firmware 6.9.28, Anker eufy app 6.1.00): fields
 1 = 2 and 3 = 1 `mowing`, fields 1 = 2 and 3 = 2 `paused`, and fields 1 = 1 and
 3 = 1 `returning`. Each reached at least four app-correlated transitions across
@@ -62,15 +62,24 @@ The three activities are `confirmed`. Mower bridge 0.7.0 serves them in the
 maps them onto the mower entity, both with the observation time of the query
 that carried the payload.
 
-Exact remaining limits. No payload identifies `docked`, `charging`, `idle` or
-`error`, so neither the bridge nor bridge mode reports them and dock arrival is
-never inferred from inactivity. The mowing-progress source is unidentified and
-`progress` stays `unconfirmed`, DP 118 remains map-save progress. The app's
-Defogging phase shares the `mowing` payload. The transitional first frame, the
-map-saving payload, field 6 = 1 and the default payload are withheld, so a
-query that carries one of them reports `status` as `invalid`, and a query
-without DP 107 reports `missing`. Nothing is derived from the age of a report
-or the absence of a data point.
+Since 0.22.0 the library also reads DP 107 as the mower's mission status, with
+the source and evidence of the
+[mission status receipt](https://github.com/keesmod/eufy-mega-client/blob/main/docs/research/E15_MISSION_STATUS_SCHEMA_2026-09-25.md).
+Every mowing mission reports `mowing` or `paused`, the Box, zone and scheduled
+tasks included. A message without mission, sub-mission, state or error flag
+reports `idle`, the default payload, hibernation and field 6 = 1 included.
+Mower bridge 0.10.1 serves these readings, and bridge mode shows `idle` as
+docked and ends its session there.
+
+Exact remaining limits. No payload identifies `docked`, `charging` or `error`,
+and dock arrival is never inferred from inactivity. `idle` means no mission and
+also follows the app's Stop on the lawn. The mowing-progress source is
+unidentified and `progress` stays `unconfirmed`, DP 118 remains map-save
+progress. The app's Defogging phase shares the `mowing` payload. The
+transitional first frame, the map-saving payload, a paused return and missions
+that do not mow are withheld, so a query that carries one of them reports
+`status` as `invalid`, and a query without DP 107 reports `missing`. Nothing is
+derived from the age of a report or the absence of a data point.
 
 The local backend's status reply never carries DP 107, but the cloud DPS do.
 Since integration 0.12.1 the local backend reads DP 107 from them with the

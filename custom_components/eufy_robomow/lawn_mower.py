@@ -34,11 +34,12 @@ LOCAL_ACTIVITIES: dict[str, LawnMowerActivity] = {
 }
 
 # The library's typed activity, only when it is reported from a confirmed
-# definition. Nothing here is inferred from age, absence or inactivity. With
-# library 0.15.0 the E15 registry confirms only mowing, paused and returning.
-# No E15 payload identifies docked, charging, idle or error yet, so those
-# rows wait for a confirmed definition and a missing or invalid status field
-# leaves the activity unknown.
+# definition. Nothing here is inferred from age, absence or inactivity. Library
+# 0.22.0 reads DP 107 as the mower's mission status: every mowing mission reports
+# mowing or paused, the recharge mission returning, and a message without a
+# mission idle, which reads as docked like the local backend's idle task. No E15
+# payload identifies docked, charging or error, and a missing or invalid status
+# field leaves the activity unknown.
 BRIDGE_ACTIVITIES: dict[str, LawnMowerActivity] = {
     "mowing": LawnMowerActivity.MOWING,
     "paused": LawnMowerActivity.PAUSED,

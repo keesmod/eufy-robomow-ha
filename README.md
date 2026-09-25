@@ -22,7 +22,8 @@ without a running task. Version 0.13.4 confirms a start while the mower rests in
 the dock and shows the drive home right after a dock.
 Version 0.14.0 reads the local settings through the mower bridge and writes
 cut height, volume and two lawn options through its opt-in settings route.
-Version 0.14.1 reads DP 107 with the official app's mission status schema.
+Version 0.14.1 reads DP 107 with the official app's mission status schema. Version 0.14.2 runs
+with mower bridge 0.10.1 on library 0.22.0, which does the same in bridge mode.
 
 ---
 
@@ -366,7 +367,7 @@ issue or include them in diagnostics.
 [`bridge/`](bridge/README.md) contains the dedicated Node 24 mower bridge that
 later steps connect to this integration. It consumes
 [`@keesmod/eufy-mega-client`](https://github.com/keesmod/eufy-mega-client)
-0.20.0 as a library, pinned to the exact release tarball, and instantiates only
+0.22.0 as a library, pinned to the exact release tarball, and instantiates only
 the library's mower module. It has its own token, credentials, session file,
 data directory, port and lifecycle, and runs with no camera bridge present.
 
@@ -425,6 +426,12 @@ protocol tests.
 
 ## Upgrade notes
 
+- **0.14.2, bridge 0.10.1 on library 0.22.0.** Mower bridge 0.10.1 pins
+  library 0.22.0, which reads DP 107 as the mower's mission status like the
+  local backend since 0.14.1. In bridge mode a Box, zone or scheduled task now
+  reports `mowing` or `paused` instead of an invalid status, and a message
+  without a mission reports `idle`, which shows as `docked` and ends the
+  session. The integration's code is unchanged. Update the app with a backup.
 - **0.14.1, DP 107 read with the app's mission status schema.** The official
   app decodes DP 107 as the mower's mission status. Its fields are the mission,
   sub-mission, state, power mode and an error flag, and a flag for saving data.
