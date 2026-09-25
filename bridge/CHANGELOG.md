@@ -41,8 +41,11 @@ the previous version with its options and data.
   the library's cloud reading and is never retried.
 - Upgrade: update the app with a backup. No option change. Rollback: return
   to 0.10.1.
-- Evidence: software-verified. No work parameter has been written through the
-  bridge on hardware yet.
+- Evidence: on 2026-09-25 the state route served the owned E15's work
+  parameters from the library's cloud reading, and the settings route changed
+  and restored `mow_speed` and `blade_speed` through Home Assistant, each
+  write `confirmed` from a fresh report that kept the other fields
+  ([receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5833748272)).
 
 ## 0.10.1 - 2026-09-25
 

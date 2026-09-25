@@ -46,10 +46,13 @@ know, but saving the options there drops it.
   option change. With an older bridge the five entities in bridge mode have no
   value. Rollback: install 0.14.2. In bridge mode the five entities then
   become unavailable and keep their registry entries.
-- Evidence: software-verified. The display delay was seen in the settings
-  window of 2026-09-25
-  ([receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5832883255)).
-  No work parameter has been written through the bridge on hardware yet.
+- Evidence: the display delay was seen in the second settings window of
+  2026-09-25 ([receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5832883255)).
+  In the third, with bridge 0.11.0 on library 0.23.0, Travel Speed and Blade
+  Speed were each changed and restored through Home Assistant in bridge mode.
+  Every write was confirmed within 332 to 449 ms, Home Assistant showed each
+  value at once, the five entities matched the local backend and the cloud
+  matched every change ([receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5833748272)).
 
 ## 0.14.2 - 2026-09-25
 

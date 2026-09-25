@@ -102,6 +102,12 @@ Integration with the bridge backend:
   with bridge 0.10.1 on library 0.22.0, 2026-09-25).
 - The mow height changed from 40 to 45 mm and back, each value read back
   (0.14.2 with bridge 0.10.1 and `settings_mode: write`, 2026-09-25).
+- Volume, Smart No-Go Suggestions and Mow Yellow Grass changed and restored,
+  and the mow height set to both bounds, each value read back (0.14.2 with
+  bridge 0.10.1, 2026-09-25).
+- Travel Speed and Blade Speed changed and restored, each read back from a
+  fresh report, with the five DP 155 entities equal to the local backend's
+  (0.15.0 with bridge 0.11.0 on library 0.23.0, 2026-09-25).
 - The bridge renewed its lapsed cloud session by itself (bridge 0.8.0,
   2026-09-24).
 - No command was repeated after an uncertain answer, a bridge restart or a
@@ -111,8 +117,8 @@ Deployment:
 
 - The app candidate built and ran on a Supervisor (amd64), with its own
   configuration folder mounted read only, and was updated with a Supervisor
-  backup from 0.7.1 to 0.10.1 (2026-09-24 and 2026-09-25).
-- The integration was upgraded from 0.7.0 to 0.14.2 by replacing its folder.
+  backup from 0.7.1 to 0.11.0 (2026-09-24 and 2026-09-25).
+- The integration was upgraded from 0.7.0 to 0.15.0 by replacing its folder.
   The config entry and its entities were kept (2026-09-24 and 2026-09-25).
 - The migration and rollback rehearsal, see the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5832886365). It
   covered a switch refused while the bridge was unreachable, a bridge lost
@@ -131,12 +137,10 @@ on hardware in this programme.
   the operator supplies.
 - The `external` map source. It has been in daily use on the owner's
   installation since 0.5.0, but native map acceptance has not passed.
-- Writes of Volume, Smart No-Go Suggestions and Mow Yellow Grass through the
-  bridge.
 - The cloud settings of the local backend: edge distance, pad direction, path
   distance, travel speed and blade speed, inherited from upstream.
-- The same five in bridge mode since 0.15.0: travel and blade speed written
-  through the bridge, the other three read only there.
+- Edge distance, pad direction and path distance in bridge mode, read only
+  there since 0.15.0.
 - The standalone container image outside CI.
 - The opt-in planning package. Automatic mowing stays off.
 - Any model other than the E15. E18 support is not claimed.
@@ -148,8 +152,6 @@ on hardware in this programme.
   installation, which needs map provisioning. The backend and version
   migration passed its rehearsal on 2026-09-25.
 - The retirement plan of the Android map helper, which starts only after both.
-- A supervised write of the travel and blade speeds through the bridge, from
-  the settings workstream of #8.
 - A fresh read of the firmware for the candidate's record.
 - The licensing boundary and an explicit authorisation before any publication.
 
