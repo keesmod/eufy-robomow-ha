@@ -125,7 +125,8 @@ class _Content:
         self._body = body
 
     async def read(self, size: int) -> bytes:
-        return self._body[:size]
+        chunk, self._body = self._body[:size], self._body[size:]
+        return chunk
 
 
 class _Response:

@@ -372,9 +372,15 @@ class MapSource:
             ):
                 raise MapSourceError("Map source response exceeds 16 MiB")
 
-            encoded = await response.content.read(_MAX_BUNDLE_SIZE + 1)
-            if len(encoded) > _MAX_BUNDLE_SIZE:
-                raise MapSourceError("Map source response exceeds 16 MiB")
+            # read(n) can return a network fragment before EOF. Collect the
+            # complete archive, with one extra byte to detect oversized bodies.
+            encoded = bytearray()
+            while chunk := await response.content.read(
+                _MAX_BUNDLE_SIZE + 1 - len(encoded)
+            ):
+                encoded.extend(chunk)
+                if len(encoded) > _MAX_BUNDLE_SIZE:
+                    raise MapSourceError("Map source response exceeds 16 MiB")
             etag = response.headers.get("ETag")
             valid_etag = (
                 etag
@@ -385,7 +391,7 @@ class MapSource:
                 else None
             )
             return _MapFetch(
-                encoded, valid_etag, source_error=_source_error(response.headers)
+                bytes(encoded), valid_etag, source_error=_source_error(response.headers)
             )
 
 

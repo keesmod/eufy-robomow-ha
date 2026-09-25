@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime
 import hashlib
 from io import BytesIO
@@ -14,6 +15,8 @@ from unittest.mock import patch
 from zipfile import ZIP_STORED, ZipFile
 
 import aiohttp
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 import pytest
 
 from homeassistant.core import HomeAssistant
@@ -316,6 +319,7 @@ class _FakeResponse:
         status: int,
         body: bytes = b"",
         etag: str | None = None,
+        chunk_size: int | None = None,
     ) -> None:
         self.status = status
         self.headers = {
@@ -325,6 +329,8 @@ class _FakeResponse:
         self.content_length = len(body)
         self.content = self
         self._body = body
+        self._chunk_size = chunk_size
+        self.bytes_read = 0
 
     async def __aenter__(self) -> _FakeResponse:
         return self
@@ -333,7 +339,11 @@ class _FakeResponse:
         pass
 
     async def read(self, size: int) -> bytes:
-        return self._body
+        if self._chunk_size is not None:
+            size = min(size, self._chunk_size)
+        chunk, self._body = self._body[:size], self._body[size:]
+        self.bytes_read += len(chunk)
+        return chunk
 
 
 class _FakeSession:
@@ -345,6 +355,120 @@ class _FakeSession:
         headers = cast(dict[str, str], kwargs["headers"])
         self.request_headers.append(dict(headers))
         return self._responses.pop(0)
+
+
+@pytest.mark.parametrize("content_length", [True, False])
+def test_map_source_waits_for_complete_network_response(
+    tmp_path: Path, content_length: bool
+) -> None:
+    encoded = _bundle()
+    cache_file = tmp_path / "latest.mapbundle"
+
+    async def run() -> None:
+        first_read = asyncio.Event()
+        original_read = aiohttp.StreamReader.read
+
+        async def observed_read(reader: aiohttp.StreamReader, size: int = -1) -> bytes:
+            chunk = await original_read(reader, size)
+            if chunk:
+                first_read.set()
+            return chunk
+
+        async def serve(request: web.Request) -> web.StreamResponse:
+            response = web.StreamResponse(
+                headers={"Content-Type": MAP_BUNDLE_CONTENT_TYPE, "ETag": '"complete"'}
+            )
+            if content_length:
+                response.content_length = len(encoded)
+            await response.prepare(request)
+            await response.write(encoded[:64])
+            # Hold the rest until the client consumes the first network fragment.
+            await asyncio.wait_for(first_read.wait(), timeout=5)
+            await response.write(encoded[64:])
+            await response.write_eof()
+            return response
+
+        app = web.Application()
+        app.router.add_get("/v1/map", serve)
+        async with TestServer(app) as server, aiohttp.ClientSession() as session:
+            source = MapSource(
+                cast(HomeAssistant, _FakeHass()),
+                settings=replace(_settings(), base_url=str(server.make_url(""))),
+                device_id=_DEVICE_ID,
+                cache_file=cache_file,
+            )
+            with (
+                patch.object(aiohttp.StreamReader, "read", observed_read),
+                patch(
+                    "custom_components.eufy_robomow.map_source.async_get_clientsession",
+                    return_value=session,
+                ),
+            ):
+                loaded = await source.async_refresh()
+
+            assert loaded.snapshot.map_id == 539
+            assert source.status.state == "healthy"
+            assert source._etags == {False: '"complete"'}
+            assert read_cached_bundle(cache_file) == encoded
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("content_length", [True, False])
+def test_map_source_rejects_oversized_response_and_retains_cache(
+    tmp_path: Path, content_length: bool
+) -> None:
+    limit = 16 * 1024 * 1024
+    cached = _bundle()
+    cache_file = tmp_path / "latest.mapbundle"
+    write_cached_bundle(cache_file, cached)
+    response = _FakeResponse(
+        status=200,
+        body=b"x" * (limit + 1024),
+        chunk_size=1024 * 1024,
+        etag='"oversized"',
+    )
+    if not content_length:
+        response.content_length = None
+    source = MapSource(
+        cast(HomeAssistant, _FakeHass()),
+        settings=_settings(),
+        device_id=_DEVICE_ID,
+        cache_file=cache_file,
+    )
+
+    with patch(
+        "custom_components.eufy_robomow.map_source.async_get_clientsession",
+        return_value=_FakeSession([response]),
+    ):
+        loaded = asyncio.run(source.async_refresh())
+
+    assert loaded.snapshot.map_id == 539
+    assert source.status.state == "stale"
+    assert source.status.last_error == "Map source response exceeds 16 MiB"
+    assert response.bytes_read == (0 if content_length else limit + 1)
+    assert source._etags == {}
+    assert read_cached_bundle(cache_file) == cached
+
+
+def test_map_source_accepts_response_at_size_limit(tmp_path: Path) -> None:
+    encoded = b"x" * (16 * 1024 * 1024)
+    response = _FakeResponse(status=200, body=encoded, chunk_size=1024 * 1024)
+    response.content_length = None
+    source = MapSource(
+        cast(HomeAssistant, _FakeHass()),
+        settings=_settings(),
+        device_id=_DEVICE_ID,
+        cache_file=tmp_path / "latest.mapbundle",
+    )
+
+    with patch(
+        "custom_components.eufy_robomow.map_source.async_get_clientsession",
+        return_value=_FakeSession([response]),
+    ):
+        fetched = asyncio.run(source._async_fetch(streaming=False))
+
+    assert fetched.encoded == encoded
 
 
 def test_map_source_tracks_etags_per_mode(tmp_path: Path) -> None:
