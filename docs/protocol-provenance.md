@@ -108,6 +108,16 @@ in the app reported DP 107 field 1 = 17 with field 3 = 1, at times with field 2
 = 3, while the app showed Mowing…. That payload stays unread, and the local
 backend kept reading `mowing` from its local status.
 
+The same Box task then ended by itself after about ten minutes. DP 1 turned
+false, and the cloud showed the `returning` payload at once, the same payload
+as after a stop. The mower drove home for about 39 seconds before the map save
+at the arrival. The local backend showed `returning` from its first poll after
+DP 1 turned false until the map save and `docked` from then on. So the natural
+end of a task follows the same sequence as a stop. On integration 0.13.4 a
+start during the rest in the dock was confirmed from the cloud's `mowing`
+payload 12 seconds after the command. The poll that confirmed the following
+dock already showed `returning`.
+
 Field 4 = 2 as the only record of DP 107 is observed and not read. The cloud
 reported it while the mower stood docked with DP 1 false:
 
