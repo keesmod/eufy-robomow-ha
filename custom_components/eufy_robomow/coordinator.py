@@ -19,7 +19,7 @@ from .bridge_client import (
 )
 from .commands import MowerCommand
 from .sessions import SessionStore
-from .telemetry import read_local_activity, robot_status, status_shape, task_active
+from .telemetry import read_local_activity, robot_power_mode, robot_status, status_shape, task_active
 from .const import CMD_START, CMD_RESUME, CMD_PAUSE, CMD_DOCK
 from datetime import datetime, timedelta
 
@@ -130,6 +130,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
     # local status reply (see telemetry.status_shape) and since when it holds:
     # only a cloud poll taken since then decides the reading.
     cloud_robot_status: str | None = None
+    cloud_power_mode: str | None = None
     cloud_polled_at: datetime | None = None
     local_shape: str | None = None
     shape_since: datetime | None = None
@@ -205,6 +206,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         # Use float('-inf') so the first poll always fetches cloud DPS
         self._cloud_last_fetch: float = float("-inf")
         self.cloud_robot_status = None
+        self.cloud_power_mode = None
         self.cloud_polled_at = None
         self.local_shape = None
         self.shape_since = None
@@ -582,6 +584,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
                         self._cloud_last_fetch = now
                         self._cloud_consecutive_failures = 0
                         self.cloud_robot_status = robot_status(raw_cloud_dps.get("107"))
+                        self.cloud_power_mode = robot_power_mode(raw_cloud_dps.get("107"))
                         self.cloud_polled_at = dt_util.utcnow()
                         if command_cloud and self.command is not None:
                             self.command.observe_cloud(self.cloud_robot_status)

@@ -6,19 +6,33 @@ from typing import Any
 
 from .const import RETURNING_THRESHOLD
 
-# DP 107 ``robot_status`` wire definitions confirmed by the eufy-mega-client library
-# in owner-operated windows on the owned E15 (library 0.15.0, 2026-09-16 and
-# 2026-09-19): every listed field is a varint with exactly this value, an absent
-# field counting as zero. Other fields, such as field 2, do not take part.
-_ROBOT_STATUS_ACTIVITIES = (
-    ({1: 2, 3: 1}, "mowing"),
-    ({1: 2, 3: 2}, "paused"),
-    ({1: 1, 3: 1}, "returning"),
-)
-# The map-saving payload: fields 2 = 5 and 3 = 1 as its only records. The library
-# reflects a stop with it, and on the owned E15 it follows every dock arrival and
-# every app Stop while the map is saved, before DP 1 turns false.
-_MAP_SAVING_FIELDS = {2: 5, 3: 1}
+# DP 107 ``robot_status`` is the mower's mission status. The official app's product
+# script for the T2880 (Anker eufy 6.1.00, T2880.js with SHA-256 0be33785e7c7…,
+# read on the owner's Mac on 2026-09-25) decodes DP 107 as that message: field 1
+# is the mission, 2 the sub-mission, 3 the state, 4 the power mode, 5 an error
+# flag and 6 a saving-data flag, all varints, an absent field counting as zero.
+# The owned E15 confirmed on hardware: missions 1, 2 and 17, sub-missions 1, 3,
+# 5, 6 and 9, states 1 and 2, power mode 2 and the saving-data flag, each with
+# the app's display at the time (library windows of 2026-09-16 to 2026-09-20
+# and the window of 2026-09-25).
+_MISSION_IDLE = 0
+_MISSION_RECHARGE = 1
+# The missions that mow: the whole lawn (2), mapping while mowing (4), a
+# temporary task (5), remote-controlled mowing (7), the scheduled whole lawn (8),
+# scheduled mapping while mowing (9), a selected zone (10), a scheduled zone
+# (16), a drawn box (17, the app's Box), edge trimming (18) and scheduled edge
+# trimming (22). Missions 2 and 17 are confirmed on the owned E15.
+_MOWING_MISSIONS = frozenset({2, 4, 5, 7, 8, 9, 10, 16, 17, 18, 22})
+_SUB_MISSION_IDLE = 0
+_SUB_MISSION_SAVING_MAP = 5
+_STATE_IDLE = 0
+_STATE_RUNNING = 1
+_STATE_PAUSED = 2
+# Field 4: running, standby, or hibernate. Hibernate held in the cloud from 5 to
+# 15 minutes after a rest in the dock ended until the next rest, while the app
+# showed its idle controls.
+_POWER_MODES = {0: "running", 1: "standby", 2: "hibernate"}
+_ERROR_FIELD = 5
 _MAX_ROBOT_STATUS_BYTES = 64
 
 
@@ -97,16 +111,12 @@ def read_local_activity(dps: dict[str, Any], status: str | None) -> str | None:
     return "mowing"
 
 
-def robot_status(value: Any) -> str | None:
-    """Read one DP 107 ``robot_status`` payload as it arrives in the cloud DPS.
+def mission_status(value: Any) -> dict[int, int] | None:
+    """The varint fields of one DP 107 payload as it arrives in the cloud DPS.
 
-    Returns ``mowing``, ``paused`` or ``returning`` for the confirmed wire
-    definitions, ``map_saving`` for the exact map-saving payload and ``idle``
-    for the default payload, zero bytes or a single zero byte, as the library
-    parses it. On 2026-09-24 the default payload held in the cloud while the
-    task flag DP 1 was true and the app showed the mower charging or idle in
-    the dock. Everything else, such as field 6 or field 4, returns None and is
-    never guessed.
+    The default payload, zero bytes or a single zero byte, has no fields. None
+    when the value is not base64, too long, or not a flat record of distinct
+    varint fields.
     """
     if not isinstance(value, str):
         return None
@@ -117,7 +127,7 @@ def robot_status(value: Any) -> str | None:
     if len(raw) > _MAX_ROBOT_STATUS_BYTES:
         return None
     if raw in (b"", b"\x00"):
-        return "idle"
+        return {}
     fields: dict[int, int] = {}
     offset = 0
     while offset < len(raw):
@@ -131,12 +141,49 @@ def robot_status(value: Any) -> str | None:
         if field_value is None:
             return None
         fields[number] = field_value
-    if fields == _MAP_SAVING_FIELDS:
-        return "map_saving"
-    for match, activity in _ROBOT_STATUS_ACTIVITIES:
-        if all(fields.get(number, 0) == expected for number, expected in match.items()):
-            return activity
+    return fields
+
+
+def robot_status(value: Any) -> str | None:
+    """Read one DP 107 ``robot_status`` payload as an activity.
+
+    ``mowing`` and ``paused`` for a mowing mission that runs or pauses,
+    ``returning`` for the recharge mission while it runs, ``map_saving`` while
+    the map is saved without a mission, and ``idle`` without a mission,
+    sub-mission or state and without the error flag, whatever the power mode.
+    That covers the default payload, which held while the mower rested in the
+    dock with DP 1 true, hibernation (field 4 = 2) and the saving-data flag
+    after a map save. Anything else, such as the first frame of a start with
+    no state yet, returns None and is never guessed.
+    """
+    fields = mission_status(value)
+    if fields is None:
+        return None
+    mission = fields.get(1, _MISSION_IDLE)
+    sub_mission = fields.get(2, _SUB_MISSION_IDLE)
+    state = fields.get(3, _STATE_IDLE)
+    if mission == _MISSION_IDLE:
+        if sub_mission == _SUB_MISSION_SAVING_MAP and state == _STATE_RUNNING:
+            return "map_saving"
+        if sub_mission == _SUB_MISSION_IDLE and state == _STATE_IDLE and not fields.get(_ERROR_FIELD):
+            return "idle"
+        return None
+    if mission == _MISSION_RECHARGE and state == _STATE_RUNNING:
+        return "returning"
+    if mission in _MOWING_MISSIONS:
+        if state == _STATE_RUNNING:
+            return "mowing"
+        if state == _STATE_PAUSED:
+            return "paused"
     return None
+
+
+def robot_power_mode(value: Any) -> str | None:
+    """Field 4 of one DP 107 payload: ``running``, ``standby`` or ``hibernate``."""
+    fields = mission_status(value)
+    if fields is None:
+        return None
+    return _POWER_MODES.get(fields.get(4, 0))
 
 
 def _varint(raw: bytes, offset: int) -> tuple[int | None, int]:
