@@ -21,6 +21,21 @@ The session store has kept storage version 1 since 0.7.0 and the options have
 kept their keys since 0.11.0. An older version ignores an option it does not
 know, but saving the options there drops it.
 
+## 0.15.4 - 2026-09-25
+
+### Complete map downloads
+
+- Read the complete HTTP response before validating a map bundle. A response
+  arriving in separate network fragments could previously be rejected as an
+  invalid ZIP archive, leaving the last good map stale. Both map sources use
+  this reader. The 16 MiB limit and latest-good cache remain in force.
+- Upgrade: replace the integration folder, run the configuration check and
+  restart Home Assistant. The bridge app needs no update. Rollback: restore
+  0.15.3, which can reject fragmented responses again.
+- Evidence: software-verified with split HTTP responses, with and without
+  Content-Length, and responses at and above the size limit. Native map
+  recovery on the owned E15 remains part of issue #8.
+
 ## 0.15.3 - 2026-09-25
 
 ### Pathways inside the lawn
