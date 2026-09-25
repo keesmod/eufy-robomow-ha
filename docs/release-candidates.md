@@ -17,11 +17,13 @@ backends and rollback are described in
 
 | Component | Version | Pinned inputs |
 | --- | --- | --- |
-| Integration `eufy_robomow` | 0.14.2 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
-| Mower bridge, container image | 0.10.1 | `@keesmod/eufy-mega-client` 0.22.0 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
-| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.10.1 | the same inputs, built by the Supervisor on the host |
+| Integration `eufy_robomow` | 0.15.0 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
+| Mower bridge, container image | 0.11.0 | `@keesmod/eufy-mega-client` 0.23.0 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
+| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.11.0 | the same inputs, built by the Supervisor on the host |
 
-The checksums of every candidate that was built are recorded in #8. CI runs the
+The checksums of every candidate that was built are recorded in #8. The
+candidate of 0.15.0 and 0.11.0, built from `64ce862`, matched the folders
+deployed on the owner's installation file for file. CI runs the
 tests on Home Assistant 2026.7.2, and the rehearsal ran on Home Assistant
 2026.9.3 with Supervisor 2026.09.2. The hardware evidence below comes from the
 owner's Home Assistant OS installation with the owned E15 (T2880) on firmware
@@ -174,12 +176,14 @@ missing optional field: the `command` block is optional since integration
 | The drive home after a dock | 0.9.0 |
 | Setting entities | 0.10.0, writes with `settings_mode: write` |
 | Box, zone and scheduled tasks | 0.10.1 on library 0.22.0 |
+| Work parameters: travel and blade speed written, the other three read | 0.11.0 on library 0.23.0 |
 
 Combinations run on the owner's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
-| 0.14.2 | 0.10.1 (0.22.0) | the current candidate, bridge-mode check and settings window of 2026-09-25 |
+| 0.15.0 | 0.11.0 (0.23.0) | the current candidate, matched file for file after its deployment, speed window of 2026-09-25 |
+| 0.14.2 | 0.10.1 (0.22.0) | bridge-mode check, settings windows and migration rehearsal of 2026-09-25 |
 | 0.14.0 | 0.10.0 (0.20.0) | deployed with settings read only, 2026-09-25 |
 | 0.13.0 | 0.9.0 (0.19.0) | third control window, 2026-09-24 |
 | 0.12.0 | 0.8.0 (0.18.0) | second control window, 2026-09-24 |
