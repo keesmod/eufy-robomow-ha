@@ -686,7 +686,7 @@ Acquisition follows the requests, one demand at a time:
   next one.
 - After a demand that published nothing the next one waits a minute, in both
   modes.
-- Every demand reads the provisioning file, constructs one
+- Every demand obtains fresh provisioning from the configured source and constructs one
   `PortableMapAcquisition`, checks its retained files every second and
   publishes each newer complete snapshot that passes the gate. Afterwards it
   releases the library's retained bytes and shuts the instance down. An

@@ -50,13 +50,19 @@ and child protection stay read only in either mode.
 
 ## Read-only map
 
-The map route needs a private provisioning file that you supply and keep
-fresh, the app cannot obtain it. Put it in the app's configuration folder,
+Bridge 0.12.0 can obtain fresh private provisioning from the mower account for
+every download. Set `map_provisioning_mode` to `cloud` and leave
+`map_provisioning_file` unset. This enables only the read-only map route.
+Native hardware acceptance is still required, so keep the existing external
+source recoverable and use one acquisition owner during the first trial.
+
+The default `file` mode remains available. Supply and refresh a private
+provisioning file in the app's configuration folder,
 `/addon_configs/local_eufy_mower_bridge/` on the Home Assistant OS machine,
 owned by uid 1000 with mode `0600`, and set `map_provisioning_file` to
 `/config/map-provisioning.json`. The app sees that folder read-only at
 `/config`. Set `map_mower_id` only when your account has more than one mower.
-Then choose the map source `bridge` in the integration. The file's content,
-rules and the route are described in the
+After native acceptance, choose the map source `bridge` in the integration.
+The provisioning modes, file format and route are described in the
 [bridge README](https://github.com/keesmod/eufy-robomow-ha/blob/main/bridge/README.md#map-provisioning).
 This folder mapping has not been exercised on a Supervisor yet.
