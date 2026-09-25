@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 _MAX_VARINT_BYTES = 10
+# Map-record field 12 shapes whose boundary polygon is their outline: rectangle
+# 0, the default, and polygon 1. An ellipse (2) is described by its own message
+# with a float rotation of unconfirmed unit, which is never decoded.
+_OUTLINED_ZONE_SHAPES = frozenset((0, 1))
 
 
 class MapDecodeError(ValueError):
@@ -21,7 +25,12 @@ class Point:
 
 @dataclass(frozen=True, slots=True)
 class MapSnapshot:
-    """Confirmed read-only E15 geometry from one coherent map snapshot."""
+    """Confirmed read-only E15 geometry from one coherent map snapshot.
+
+    ``no_go_areas`` keeps its name but holds the obstacles of map-record field
+    11. ``forbidden_zones`` holds the outlines of field 12, the no-go zones that
+    the app draws in red.
+    """
 
     map_id: int
     boundary: tuple[Point, ...]
@@ -31,6 +40,7 @@ class MapSnapshot:
     cleaned_paths: tuple[tuple[Point, ...], ...]
     mower_position: Point | None
     tracking_position: Point | None = None
+    forbidden_zones: tuple[tuple[Point, ...], ...] = ()
 
 
 ProtoValue = int | bytes
@@ -102,11 +112,17 @@ def parse_map_snapshot(
             for polygon in (_decode_nested_polygon(area, polygon_field=2),)
             if polygon
         )
-        no_go_areas = tuple(
+        obstacles = tuple(
             polygon
-            for restriction in map_record.messages(11)
-            for polygon in (_decode_repeated_points(restriction, field_number=1),)
+            for obstacle in map_record.messages(11)
+            for polygon in (_decode_repeated_points(obstacle, field_number=1),)
             if polygon
+        )
+        forbidden_zones = tuple(
+            outline
+            for zone in map_record.messages(12)
+            for outline in (_decode_forbidden_zone(zone),)
+            if outline
         )
         pathways = tuple(
             path
@@ -123,11 +139,12 @@ def parse_map_snapshot(
         map_id=map_id,
         boundary=boundary,
         base_areas=base_areas,
-        no_go_areas=no_go_areas,
+        no_go_areas=obstacles,
         pathways=pathways,
         cleaned_paths=cleaned_paths,
         mower_position=mower_position,
         tracking_position=tracking_position,
+        forbidden_zones=forbidden_zones,
     )
 
 
@@ -268,6 +285,21 @@ def _unique_coverage_segments(
                     merged.append([start, end])
 
     return tuple(tuple(path) for path in merged)
+
+
+def _decode_forbidden_zone(zone: _ProtoMessage) -> tuple[Point, ...]:
+    """Return one field 12 zone's outline, or ``()`` when it cannot be drawn.
+
+    Rectangles and polygons carry their corners in the boundary polygon of
+    field 2. An ellipse, an unknown shape and a boundary with fewer than three
+    distinct corners are skipped.
+    """
+    if zone.integer(4, default=0) not in _OUTLINED_ZONE_SHAPES:
+        return ()
+    outline = _decode_nested_polygon(zone, polygon_field=2)
+    if len(set(outline)) < 3:
+        return ()
+    return outline
 
 
 def _decode_nested_polygon(
