@@ -10,6 +10,10 @@ This integration is under private-alpha development even though its working fork
 4. Run `python -m ruff check .` and `python -m pytest` with Python 3.14.
    For changes under `bridge/`, also run `npm run typecheck`, `npm run build` and `npm test` with Node 24.
 5. Describe scope, validation, risk, and rollback in the pull request.
+6. When a change bumps a version, add its entry on top of `CHANGELOG.md` for the
+   integration or `bridge/CHANGELOG.md` for the bridge and its app: a
+   `## x.y.z - YYYY-MM-DD` heading, the changes, and `Upgrade:`, `Rollback:` and
+   `Evidence:` lines. `tests/test_changelog.py` fails when an entry is missing.
 
 ## Protocol provenance
 
