@@ -42,7 +42,9 @@ height, volume, smart no-go zones and sparse lawn optimization. Rain and child
 protection and the bird-view capture stay read only in either mode. Version
 0.10.1 pins library 0.22.0, which reads DP 107 as the mower's mission status:
 every mowing mission, the Box, zone and scheduled tasks included, reports
-`mowing` or `paused`, and a message without a mission reports `idle`.
+`mowing` or `paused`, and a message without a mission reports `idle`. Version
+0.11.0 pins library 0.23.0: the state route serves the DP 155 work parameters,
+and the settings route also writes the mow speed and the blade speed.
 
 ## What it does
 
@@ -100,9 +102,10 @@ every mowing mission, the Box, zone and scheduled tasks included, reports
 
 ## What it does not do yet
 
-- No setting beyond the library's four writable ones: no DP 155 work
-  parameters, no edge distance and no other declared point. Rain and child
-  protection and the bird-view capture are read only, in either settings mode.
+- No setting beyond the library's four writable ones and its two work
+  parameter speeds: no edge distance, mow spacing or direction and no other
+  declared point. Rain and child protection and the bird-view capture are read
+  only, in either settings mode.
   Settings writes need no `control` mode and `control` mode opens no settings
   write. The map route exists only with map provisioning, which
   the bridge cannot obtain itself: the library's acquisition needs private,
@@ -330,7 +333,18 @@ Contract 1. One read-only local query, for example:
     "child_lock": { "state": "reported", "value": true, "writable": false },
     "bird_view_capture": { "state": "missing" }
   },
-  "command": null
+  "command": null,
+  "work_parameters": {
+    "state": "reported",
+    "source": "cloud",
+    "observed_at": "2026-09-25T08:59:00.000Z",
+    "error": null,
+    "mow_speed": { "value": "medium", "writable": true, "options": ["low", "medium", "adaptive_high"] },
+    "blade_speed": { "value": "medium", "writable": true, "options": ["low", "medium", "high"] },
+    "edge_distance": 120,
+    "mow_spacing": 70,
+    "direction": { "mode": "single", "single_angle": 30, "current_angle": 30 }
+  }
 }
 ```
 
@@ -349,6 +363,21 @@ settings route itself also needs `routes.settings`. The value settings carry
 the app's input bound narrowed by the mower's declaration and its unit.
 `rain_auto_return` and `child_lock` are the rain and child protection, read
 only in either settings mode.
+
+`work_parameters` holds the DP 155 work parameters, since 0.11.0. The mower's
+LAN replies do not carry DP 155, so they never come from the state query. The
+bridge takes one library cloud reading next to a state query when the last
+reading, failed attempt or confirmed write is older than five minutes, and a
+state answer waits at most three seconds for it. After a write confirmed
+through the settings route, the values come from the LAN report that
+reflected it, with `source: "local-tuya-3.5"`, until the next reading.
+`state` is the reading's `reported`, `missing` or `invalid`, or `unavailable`
+before any reading succeeded. `error` names the last failed reading while
+older values are served. `mow_speed` and `blade_speed` carry the library's
+name for the value, or `null`, the values the library writes as `options`,
+and `writable`, which is true when the served value is one of them. The
+integers are the device's own and no unit is confirmed by a source. The raw
+message is never served.
 
 `command` is the command that owns this mower right now, or `null`. While its
 read-back runs it carries the library's progress, for example
@@ -480,16 +509,19 @@ Contract 1. One opt-in setting write, `settings_mode: write` only, since
 0.10.0. The key is `mow_height`, `volume`, `smart_no_go_zones` or
 `sparse_lawn_optimization` in the path and the new value is the `value` query
 parameter, `true` or `false` for a switch and a plain integer for a number, for
-example `POST /v1/mowers/{id}/settings/mow_height?value=45`. Request bodies are
-ignored. Every check below runs on the bridge before the library is touched,
-in this order:
+example `POST /v1/mowers/{id}/settings/mow_height?value=45`. Since 0.11.0 the
+key can also be the work parameter `mow_speed`, with `low`, `medium` or
+`adaptive_high`, or `blade_speed`, with `low`, `medium` or `high`, see
+[Work parameter writes](#work-parameter-writes). Request bodies are ignored.
+Every check below runs on the bridge before the library is touched, in this
+order:
 
 | Status | Code                         | Reason                                                                                              |
 | ------ | ---------------------------- | --------------------------------------------------------------------------------------------------- |
 | `403`  | `settings_disabled`          | The bridge runs with `settings_mode: read_only`. Nothing else is checked                            |
-| `404`  | `not_found`                  | The key is not one of the seven settings the state route serves                                     |
-| `409`  | `mower_setting_read_only`    | `rain_auto_return`, `child_lock` or `bird_view_capture`, whatever the value                          |
-| `400`  | `invalid_setting_value`      | No `value`, or neither `true`, `false` nor an integer of at most six digits                          |
+| `404`  | `not_found`                  | The key is not one of the seven settings or two work parameter speeds the bridge writes or serves   |
+| `409`  | `mower_setting_read_only`    | `rain_auto_return`, `child_lock`, `bird_view_capture`, `edge_distance`, `mow_spacing` or `direction`, whatever the value |
+| `400`  | `invalid_setting_value`      | No `value`, or neither `true`, `false` nor an integer of at most six digits. For a speed, not one of the values the library writes |
 | `400`  | `invalid_mower_id`           | Not a 64-character id                                                                               |
 | `409`  | `command_in_progress`        | Another write, a command or a setting, owns this mower. One write per mower at a time               |
 | `404`  | `unknown_mower`              | Discovery did not return the id                                                                     |
@@ -540,7 +572,51 @@ checks. On 2026-09-25 the route changed the owned E15's mow height from 40 to
 the owner at the mower. Both writes were `confirmed`, a later fresh query
 reported each value and the official app showed each one, see the library's
 [settings window receipt](https://github.com/keesmod/eufy-mega-client/blob/main/docs/research/E15_SETTINGS_WINDOW_2026-09-25.md).
-Volume and the two switches have not been written on the mower yet.
+A second window the same day changed and restored the volume, both switches
+and the mow height at its bounds of 25 and 75 mm, every write `confirmed`
+([receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5832883255)).
+
+#### Work parameter writes
+
+A `mow_speed` or `blade_speed` write goes to the library's `setWorkParameter`,
+which takes one cloud reading for the value before the write, one fresh status
+query for the map-save refusal, writes one partial DP 155 message with only
+that field and reads fresh reports back. The same checks, codes and ownership
+apply. A `200` carries:
+
+```json
+{
+  "contract": 1,
+  "id": "<64 hex characters>",
+  "setting": "blade_speed",
+  "result": "confirmed",
+  "write": { "dp": "155", "code": "reserved_raw_155", "field": 6, "value": "high" },
+  "previous": "medium",
+  "cloud_observed_at": "2026-09-25T08:59:00.000Z",
+  "sent_at": "2026-09-25T09:00:00.100Z",
+  "stage": "reflected",
+  "end": "reflected",
+  "before_observed_at": "2026-09-25T09:00:00.050Z",
+  "reply": { "observed_at": "2026-09-25T09:00:00.120Z", "return_code_zero": true, "rejected": false },
+  "reflection": { "observed_at": "2026-09-25T09:00:00.300Z", "sequence": 81, "value": "high" },
+  "other": null,
+  "reports": 1
+}
+```
+
+`previous` is the value in the library's cloud reading and
+`cloud_observed_at` its receipt time. The reading is a cache, so right after
+a change in the app it can still hold the older value. `field` is the message
+field the write carried. The message itself, the raw reports and the data
+points are never served. A confirmed write replaces the served
+`work_parameters` with the reflecting report's values at once. The library
+refuses a missing, late or unusable cloud reading with
+`mower_setting_evidence_missing` before any frame. Evidence: the library's
+[work parameter contract](https://github.com/keesmod/eufy-mega-client/blob/main/docs/MOWER_WORK_PARAMETERS.md).
+On 2026-09-25 the owned E15 merged a partial DP 155 message written over the
+LAN outside the library and reported the complete message within about 0.2
+seconds. No work parameter has been written through the bridge on hardware
+yet.
 
 ### `GET /v1/mowers/{id}/map`
 

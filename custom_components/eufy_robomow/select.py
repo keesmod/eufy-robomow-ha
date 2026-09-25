@@ -31,7 +31,7 @@ async def async_setup_entry(
     """Set up select entities — cloud settings only (require cloud credentials)."""
     coordinator: EufyMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    if coordinator.writes_available and coordinator.cloud_client is not None:
+    if coordinator.work_parameter_entities_available:
         async_add_entities(
             [
                 EufyPathDistanceSelect(coordinator, entry),

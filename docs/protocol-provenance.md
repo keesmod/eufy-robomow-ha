@@ -46,10 +46,10 @@ version 0.8.1.
 ## DP 107 activity
 
 The mower declares DP 107 `robot_status` as a raw data point. Library
-`@keesmod/eufy-mega-client` 0.22.0, pinned by the mower bridge to the release
+`@keesmod/eufy-mega-client` 0.23.0, pinned by the mower bridge to the release
 tarball with SHA-256
-`b4866314eb30a65bcd39970e2fa35e5e6c8868c0c9d5f9f31a72043b8d7de827` from source commit
-`25a43b0295f8b78c09ac37c1fe28faaebf0a0220`, confirms three payloads on the
+`3ddf499b5d1899c3bf1979b7597deb88926d4560b07e5737ca165f5640432c75` from source commit
+`6d9427e3e2a1a9a9a1a800173f5347ade993bca6`, confirms three payloads on the
 owned E15 (product code T2880, firmware 6.9.28, Anker eufy app 6.1.00): fields
 1 = 2 and 3 = 1 `mowing`, fields 1 = 2 and 3 = 2 `paused`, and fields 1 = 1 and
 3 = 1 `returning`. Each reached at least four app-correlated transitions across
@@ -262,4 +262,39 @@ with the mower in the dock. Both writes were confirmed, a later fresh query
 reported each value and the app's Grass Height followed them, recorded in the
 library's
 [settings window receipt](https://github.com/keesmod/eufy-mega-client/blob/main/docs/research/E15_SETTINGS_WINDOW_2026-09-25.md).
-The other three writable settings are software-verified only.
+A second window the same day changed and restored the volume, both switches
+and the mow height at its bounds of 25 and 75 mm through the same versions.
+Every write was confirmed within 80 to 103 milliseconds and a fresh query
+reported each value
+([receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5832883255)).
+
+## Work parameters through the bridge
+
+Mower bridge 0.11.0 serves the DP 155 work parameters of library 0.23.0
+([work parameter contract](https://github.com/keesmod/eufy-mega-client/blob/main/docs/MOWER_WORK_PARAMETERS.md)).
+DP 155 is the official app's work parameter message. The library numbers its
+fields from the app's product script, and reads it from the cloud record,
+because the E15's LAN replies do not carry it. This integration's local
+backend reads the same point through its own cloud client:
+
+| Entity | DP 155 field | Bridge key | Written in bridge mode |
+| --- | --- | --- | --- |
+| Travel Speed | 2, mow speed | `mow_speed` | yes: slow, normal, fast as `low`, `medium`, `adaptive_high` |
+| Blade Speed | 6, blade disk speed | `blade_speed` | yes: slow, normal, fast as `low`, `medium`, `high` |
+| Edge Distance | 3, edge cutting distance | `edge_distance` | never |
+| Path Distance | 5, mow spacing | `mow_spacing` | never |
+| Pad Direction | 4, direction, single-mode angle | `direction.single_angle` | never |
+
+Bridge mode maps the values onto the local backend's data keys, so the
+entities keep their unique ids and show the same values on both backends.
+A write is one request that the library turns into one cloud reading for the
+value before it, one fresh LAN query, one partial message that carries only
+the speed, and a read-back from fresh LAN reports. It is never retried. The
+library has no permitted source for the bounds of the edge distance or the
+mow spacing, and a direction write would replace a nested configuration, so
+those three stay read only in bridge mode. The local backend still writes all
+five through its cloud client, as before. On 2026-09-25 the owned E15 merged
+a partial DP 155 message with only the blade speed, written over the LAN
+outside the library, and reported the complete message within about 0.2
+seconds ([receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5832883255)). No work parameter has
+been written through the bridge on hardware yet.

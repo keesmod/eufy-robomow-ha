@@ -21,6 +21,29 @@ files, because the mower id the integration stores depends on them. A rollback
 of the app restores the app backup that the update created, which brings back
 the previous version with its options and data.
 
+## 0.11.0 - 2026-09-25
+
+### Work parameters
+
+- Pins library 0.23.0, which reads the DP 155 work parameters from the cloud
+  record and writes the mow and blade speeds as one partial message each.
+- The state route serves `work_parameters`: `mow_speed` and `blade_speed` with
+  their value, `writable` flag and the values the library writes, and the
+  device's `edge_distance`, `mow_spacing` and `direction`. They come from a
+  cloud reading taken next to a state query at most every five minutes, or
+  from the report that confirmed a write through the bridge. A state answer
+  waits at most three seconds for a running reading. A failed reading keeps
+  the last values and names its code. Raw values are never served.
+- With `settings_mode: write` the settings route also writes `mow_speed`
+  (`low`, `medium`, `adaptive_high`) and `blade_speed` (`low`, `medium`,
+  `high`). `edge_distance`, `mow_spacing` and `direction` answer
+  `409 mower_setting_read_only`. The outcome carries the previous value from
+  the library's cloud reading and is never retried.
+- Upgrade: update the app with a backup. No option change. Rollback: return
+  to 0.10.1.
+- Evidence: software-verified. No work parameter has been written through the
+  bridge on hardware yet.
+
 ## 0.10.1 - 2026-09-25
 
 ### Library 0.22.0, the mission status

@@ -3,6 +3,7 @@ import type { Server } from 'node:http';
 import {
   EufyClient,
   EufyError,
+  WRITABLE_WORK_PARAMETERS,
   decodeMowerSettings,
   type AuthState,
   type ModuleLifecycleState,
@@ -26,6 +27,9 @@ import {
   type MowerSettingStage,
   type MowerTelemetry,
   type MowerTelemetryField,
+  type MowerWorkParameterName,
+  type MowerWorkParameterOutcome,
+  type MowerWorkParameters,
 } from '@keesmod/eufy-mega-client';
 import { MOWER_ID, SETTINGS_MODE_WRITE, type BridgeConfig, type ControlConfig } from './config.ts';
 import { ApiError, BridgeError } from './errors.ts';
@@ -107,6 +111,60 @@ export const WRITABLE_SETTING_KEYS = ['mow_height', 'volume', 'smart_no_go_zones
 const SETTING_VALUE = /^(true|false|-?\d{1,6})$/;
 
 /**
+ * The DP 155 work parameters the settings route writes, keyed in snake case, with the library
+ * parameter each one serves. A value is one of the library's names for it, for example `medium`.
+ */
+export const WORK_PARAMETER_KEYS = {
+  mow_speed: 'mowSpeed',
+  blade_speed: 'bladeSpeed',
+} as const satisfies Record<string, MowerWorkParameterName>;
+export type WorkParameterKey = keyof typeof WORK_PARAMETER_KEYS;
+/** Work parameters the state route serves that the library never writes. */
+export const READ_ONLY_WORK_PARAMETER_KEYS: readonly string[] = ['edge_distance', 'mow_spacing', 'direction'];
+/** Age after which the state route asks the cloud for the work parameters again, also after a failure. */
+export const DEFAULT_WORK_PARAMETERS_REFRESH_MS = 5 * 60_000;
+/** Longest a state answer waits for a running work parameter reading before it serves the last one. */
+export const DEFAULT_WORK_PARAMETERS_WAIT_MS = 3_000;
+
+/** One writable work parameter as the state route serves it. */
+export interface WorkParameterDocument {
+  /** The library's name for the value, or null when the reading has none or an unnamed one. */
+  value: string | null;
+  /** True when the library writes this parameter and the served value is one it can restore. */
+  writable: boolean;
+  /** The values the library writes, from its own table. */
+  options: string[];
+}
+
+/**
+ * DP 155 of one mower. The values come from the library's cloud reading, a cache, or after a
+ * confirmed write from the LAN report that reflected it. `state` is the reading's, or
+ * `unavailable` before any reading succeeded. The integers are the device's own and no unit is
+ * confirmed by a source. Raw values never leave the bridge.
+ */
+export interface WorkParametersDocument {
+  state: 'reported' | 'missing' | 'invalid' | 'unavailable';
+  source: 'cloud' | 'local-tuya-3.5' | null;
+  /** Receipt time of the cloud response or of the reflecting report, never device time. */
+  observed_at: string | null;
+  /** Stable code of the last failed cloud reading, otherwise null. */
+  error: string | null;
+  mow_speed: WorkParameterDocument;
+  blade_speed: WorkParameterDocument;
+  edge_distance: number | null;
+  mow_spacing: number | null;
+  direction: { mode: string | null; single_angle: number | null; current_angle: number | null } | null;
+}
+
+/** The work parameters one mower last reported, with where and when they were received. */
+interface StoredWorkParameters {
+  state: 'reported' | 'missing' | 'invalid';
+  source: 'cloud' | 'local-tuya-3.5';
+  observedAt: string;
+  parameters: MowerWorkParameters;
+}
+
+/**
  * One setting of one state query, as the library decoded it. Only `reported` carries a value.
  * `writable` means the library writes it and the device declares it writable. The route itself
  * also needs `settings_mode: write`, reported in `routes.settings`.
@@ -144,6 +202,8 @@ export interface BridgeDependencies {
   mapIdleIntervalMs?: number;
   mapRetryIntervalMs?: number;
   mapWatchIntervalMs?: number;
+  workParametersRefreshMs?: number;
+  workParametersWaitMs?: number;
   now?: () => number;
 }
 
@@ -202,6 +262,8 @@ export interface MowerStateDocument extends TelemetryFields {
   error: string | null;
   /** The command running for this mower now, or null. Never a finished or replayed command. */
   command: InFlightCommandDocument | null;
+  /** The DP 155 work parameters, since bridge 0.11.0. Their own source and time, never merged into the query. */
+  work_parameters: WorkParametersDocument;
 }
 
 /** Contract 1 of `POST /v1/mowers/{id}/commands/{class}`. Raw reports and data points are never served. */
@@ -259,6 +321,35 @@ export interface MowerSettingDocument {
   reflection: { observed_at: string; sequence: number; value: boolean | number } | null;
   /** The latest fresh report that carried another value. A value of another type is served as null. */
   other: { observed_at: string; sequence: number; value: boolean | number | null } | null;
+  /** Number of fresh reports received during the read-back. */
+  reports: number;
+}
+
+/**
+ * Contract 1 of `POST /v1/mowers/{id}/settings/{key}` for a work parameter, since bridge 0.11.0.
+ * The library wrote one field of DP 155. Raw reports, data points and messages are never served.
+ */
+export interface MowerWorkParameterDocument {
+  contract: 1;
+  id: string;
+  setting: WorkParameterKey;
+  /** As for a setting: only `confirmed` means a fresh report carried the written value. */
+  result: 'confirmed' | 'failed' | 'uncertain';
+  write: { dp: string; code: string; field: number; value: string };
+  /** The value in the cloud reading the write was decided on, the value a deliberate restore writes back. */
+  previous: string;
+  /** Receipt time of that cloud reading. */
+  cloud_observed_at: string;
+  sent_at: string;
+  stage: MowerSettingStage;
+  end: MowerSettingEnd;
+  /** Observation time of the fresh status query the library ran before the write. */
+  before_observed_at: string;
+  reply: { observed_at: string; return_code_zero: boolean; rejected: boolean } | null;
+  /** The first fresh report whose DP 155 carried the written value. */
+  reflection: { observed_at: string; sequence: number; value: string } | null;
+  /** The latest fresh report whose DP 155 carried another value. An unnamed value is served as null. */
+  other: { observed_at: string; sequence: number; value: string | null } | null;
   /** Number of fresh reports received during the read-back. */
   reports: number;
 }
@@ -438,6 +529,75 @@ function settingOutcomeDocument(id: string, key: SettingKey, outcome: MowerSetti
   };
 }
 
+/** The latest work parameters of one mower and the state of its cloud readings. */
+interface WorkParametersEntry {
+  stored: StoredWorkParameters | null;
+  /** Stable code of the last failed cloud reading, cleared by the next good one. */
+  error: string | null;
+  /** Bridge clock time of the last cloud reading or confirmed write. */
+  askedAt: number;
+  /** Raised by every confirmed write, so a cloud reading that began before it never replaces it. */
+  generation: number;
+}
+
+function workParameter(name: MowerWorkParameterName, stored: StoredWorkParameters | null): WorkParameterDocument {
+  const options = [...WRITABLE_WORK_PARAMETERS[name].values];
+  const raw = stored?.state === 'reported' ? stored.parameters[name] : undefined;
+  const value = typeof raw === 'string' ? raw : null;
+  return { value, writable: value !== null && options.includes(value), options };
+}
+
+function workParametersDocument(entry: WorkParametersEntry | undefined): WorkParametersDocument {
+  const stored = entry?.stored ?? null;
+  const parameters = stored?.state === 'reported' ? stored.parameters : undefined;
+  const direction = parameters?.direction;
+  return {
+    state: stored?.state ?? 'unavailable',
+    source: stored?.source ?? null,
+    observed_at: stored?.observedAt ?? null,
+    error: entry?.error ?? null,
+    mow_speed: workParameter('mowSpeed', stored),
+    blade_speed: workParameter('bladeSpeed', stored),
+    edge_distance: parameters?.edgeDistance ?? null,
+    mow_spacing: parameters?.mowSpacing ?? null,
+    direction: direction
+      ? {
+          mode: typeof direction.mode === 'string' ? direction.mode : null,
+          single_angle: direction.singleAngle ?? null,
+          current_angle: direction.currentAngle ?? null,
+        }
+      : null,
+  };
+}
+
+function workParameterOutcomeDocument(id: string, key: WorkParameterKey, outcome: MowerWorkParameterOutcome): MowerWorkParameterDocument {
+  const result = outcome.end === 'reflected' ? 'confirmed' : outcome.end === 'rejected' ? 'failed' : 'uncertain';
+  const other = outcome.other;
+  return {
+    contract: 1,
+    id,
+    setting: key,
+    result,
+    write: { dp: outcome.write.dp, code: outcome.write.code, field: outcome.write.field, value: outcome.write.value },
+    previous: outcome.previous,
+    cloud_observed_at: outcome.cloud.observedAt,
+    sent_at: outcome.sentAt,
+    stage: outcome.stage,
+    end: outcome.end,
+    before_observed_at: outcome.before.observedAt,
+    reply: outcome.reply
+      ? { observed_at: outcome.reply.observedAt, return_code_zero: outcome.reply.returnCodeZero, rejected: outcome.reply.rejected }
+      : null,
+    reflection: outcome.reflection
+      ? { observed_at: outcome.reflection.observedAt, sequence: outcome.reflection.sequence, value: outcome.reflection.value }
+      : null,
+    other: other
+      ? { observed_at: other.observedAt, sequence: other.sequence, value: typeof other.value === 'string' ? other.value : null }
+      : null,
+    reports: outcome.reports.length,
+  };
+}
+
 /** Stops accepting connections, lets in-flight responses finish briefly, then forces the rest closed. */
 function closeServer(server: Server, graceMs: number): Promise<void> {
   if (!server.listening) return Promise.resolve();
@@ -488,7 +648,11 @@ export class MowerBridge {
   #staleIds = new Set<string>();
   #queries = new Map<string, Promise<MowerStateDocument>>();
   /** The write, a command or a setting, that owns each mower now. A second write answers 409. */
-  #writes = new Map<string, Promise<MowerCommandDocument | MowerSettingDocument>>();
+  #writes = new Map<string, Promise<MowerCommandDocument | MowerSettingDocument | MowerWorkParameterDocument>>();
+  /** The DP 155 work parameters per mower id, from the cloud or from a confirmed write. */
+  #workParameters = new Map<string, WorkParametersEntry>();
+  /** The cloud reading running per mower id. Concurrent state queries join it. */
+  #workParameterReads = new Map<string, Promise<void>>();
   /** Progress of the running command per mower id, served by the state route until it ends. */
   #inFlight = new Map<string, InFlightCommandDocument>();
   /** Present only with map provisioning. Construction does no I/O. */
@@ -736,6 +900,8 @@ export class MowerBridge {
     const open: OpenLocalSession =
       this.#dependencies.openLocalSession ?? ((target, options, signal) => mowers.openLocalSession(target, options, signal));
     const signal = this.#lifetime.signal;
+    // The cloud reading of the work parameters runs next to the LAN query, never inside it.
+    const parameters = this.#refreshWorkParameters(mowers, id);
     try {
       const session = await open(id, { host, timeoutMs: this.#config.localTimeoutMs }, signal);
       let telemetry: MowerTelemetry;
@@ -758,13 +924,65 @@ export class MowerBridge {
       };
       this.#lastGood.set(id, fields);
       this.#staleIds.delete(id);
+      await this.#briefly(parameters);
       return this.#stateDocument(id, fields, null);
     } catch (error) {
       const code = errorCode(error);
       this.#staleIds.add(id);
+      await this.#briefly(parameters);
       const last = this.#lastGood.get(id);
       if (last) return this.#stateDocument(id, last, code);
       throw new ApiError(503, code);
+    }
+  }
+
+  /**
+   * Asks the cloud for one mower's work parameters once the last reading, the last failed attempt
+   * or the last confirmed write is older than the refresh age. Concurrent state queries join the
+   * running reading. Never rejects: a failure keeps the last values and records its code.
+   */
+  #refreshWorkParameters(mowers: MowerModule, id: string): Promise<void> {
+    const entry = this.#workParameters.get(id);
+    const age = this.#dependencies.workParametersRefreshMs ?? DEFAULT_WORK_PARAMETERS_REFRESH_MS;
+    if (entry && this.#now() - entry.askedAt < age) return Promise.resolve();
+    const running = this.#workParameterReads.get(id);
+    if (running) return running;
+    const askedAt = this.#now();
+    const generation = entry?.generation ?? 0;
+    const read = (async () => {
+      let stored: StoredWorkParameters | null = null;
+      let error: string | null = null;
+      try {
+        const reading = await mowers.queryWorkParameters(id, this.#lifetime.signal);
+        stored = {
+          state: reading.state,
+          source: 'cloud',
+          observedAt: reading.observedAt,
+          parameters: reading.state === 'reported' ? structuredClone(reading.parameters) : {},
+        };
+      } catch (failure) {
+        error = errorCode(failure);
+      }
+      const current = this.#workParameters.get(id);
+      // A write confirmed while this reading ran is newer evidence than the cloud's cache.
+      if (current && current.generation !== generation) return;
+      this.#workParameters.set(id, { stored: stored ?? current?.stored ?? null, error, askedAt, generation });
+    })();
+    this.#workParameterReads.set(id, read);
+    void read.finally(() => this.#workParameterReads.delete(id));
+    return read;
+  }
+
+  /** Waits for a running work parameter reading within the wait bound. A slower one lands later. */
+  async #briefly(reading: Promise<void>): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const wait = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, this.#dependencies.workParametersWaitMs ?? DEFAULT_WORK_PARAMETERS_WAIT_MS);
+    });
+    try {
+      await Promise.race([reading, wait]);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -779,6 +997,7 @@ export class MowerBridge {
       error,
       ...structuredClone(fields),
       command: this.#inFlightDocument(id),
+      work_parameters: workParametersDocument(this.#workParameters.get(id)),
     };
   }
 
@@ -813,7 +1032,7 @@ export class MowerBridge {
   }
 
   /** Records the write that owns a mower until it settles. */
-  #own(id: string, run: Promise<MowerCommandDocument | MowerSettingDocument>): void {
+  #own(id: string, run: Promise<MowerCommandDocument | MowerSettingDocument | MowerWorkParameterDocument>): void {
     this.#writes.set(id, run);
     void run.then(
       () => this.#writes.delete(id),
@@ -829,7 +1048,7 @@ export class MowerBridge {
    * fresh query, refusals, single write and read-back. The outcome is served as confirmed, failed
    * or uncertain, is never retried or replayed, and a restore is a second deliberate request.
    */
-  setting(id: string, key: string, value: string | null): Promise<MowerSettingDocument> {
+  setting(id: string, key: string, value: string | null): Promise<MowerSettingDocument | MowerWorkParameterDocument> {
     let mowers: MowerModule;
     try {
       mowers = this.#running();
@@ -837,6 +1056,8 @@ export class MowerBridge {
       return Promise.reject(error);
     }
     if (this.#config.settingsMode !== SETTINGS_MODE_WRITE) return Promise.reject(new ApiError(403, 'settings_disabled'));
+    if (Object.hasOwn(WORK_PARAMETER_KEYS, key)) return this.#workParameter(mowers, id, key as WorkParameterKey, value);
+    if (READ_ONLY_WORK_PARAMETER_KEYS.includes(key)) return Promise.reject(new ApiError(409, 'mower_setting_read_only'));
     if (!Object.hasOwn(SETTING_KEYS, key)) return Promise.reject(new ApiError(404, 'not_found'));
     if (!(WRITABLE_SETTING_KEYS as readonly string[]).includes(key))
       return Promise.reject(new ApiError(409, 'mower_setting_read_only'));
@@ -847,6 +1068,63 @@ export class MowerBridge {
     const run = this.#runSetting(mowers, id, key as SettingKey, parsed);
     this.#own(id, run);
     return run;
+  }
+
+  /**
+   * One work parameter write through the settings route, since bridge 0.11.0. The value must be one
+   * the library writes for the parameter. The library then takes its cloud reading, fresh query,
+   * refusals, single partial DP 155 write and read-back. A confirmed write updates the served work
+   * parameters from the reflecting report at once.
+   */
+  #workParameter(mowers: MowerModule, id: string, key: WorkParameterKey, value: string | null): Promise<MowerWorkParameterDocument> {
+    const name = WORK_PARAMETER_KEYS[key];
+    if (value === null || !WRITABLE_WORK_PARAMETERS[name].values.includes(value))
+      return Promise.reject(new ApiError(400, 'invalid_setting_value'));
+    if (!MOWER_ID.test(id)) return Promise.reject(new ApiError(400, 'invalid_mower_id'));
+    if (this.#writes.has(id)) return Promise.reject(new ApiError(409, 'command_in_progress'));
+    const run = this.#runWorkParameter(mowers, id, key, value);
+    this.#own(id, run);
+    return run;
+  }
+
+  async #runWorkParameter(mowers: MowerModule, id: string, key: WorkParameterKey, value: string): Promise<MowerWorkParameterDocument> {
+    // A renewal or discovery here runs before any write. The write itself is never repeated.
+    await this.#prepareLocal(mowers);
+    if (!this.#discovery) throw new ApiError(503, this.#discoveryError ?? 'mower_request_failed');
+    if (!this.#discovery.mowers.some((entry) => entry.id === id)) throw new ApiError(404, 'unknown_mower');
+    const host = this.#hostFor(id);
+    if (!host) throw new ApiError(503, 'mower_host_unconfigured');
+    const open: OpenLocalSession =
+      this.#dependencies.openLocalSession ?? ((target, options, signal) => mowers.openLocalSession(target, options, signal));
+    const signal = this.#lifetime.signal;
+    let outcome: MowerWorkParameterOutcome;
+    try {
+      const session = await open(id, { host, timeoutMs: this.#config.localTimeoutMs }, signal);
+      try {
+        outcome = await session.setWorkParameter({ name: WORK_PARAMETER_KEYS[key], value: value as MowerWorkParameterOutcome['previous'] }, signal);
+      } finally {
+        await session.disconnect();
+      }
+    } catch (error) {
+      const code = errorCode(error);
+      // The library's typed refusals happen before any frame is written. Everything else is a transport or session failure.
+      throw new ApiError(code.startsWith('mower_setting') ? 409 : 503, code);
+    }
+    if (outcome.reflection) {
+      const entry = this.#workParameters.get(id);
+      this.#workParameters.set(id, {
+        stored: {
+          state: 'reported',
+          source: 'local-tuya-3.5',
+          observedAt: outcome.reflection.observedAt,
+          parameters: structuredClone(outcome.reflection.parameters),
+        },
+        error: entry?.error ?? null,
+        askedAt: this.#now(),
+        generation: (entry?.generation ?? 0) + 1,
+      });
+    }
+    return workParameterOutcomeDocument(id, key, outcome);
   }
 
   async #runSetting(mowers: MowerModule, id: string, key: SettingKey, value: boolean | number): Promise<MowerSettingDocument> {

@@ -90,7 +90,7 @@ test('idle startup and shutdown keep observe_only, touch no cloud and leave no t
   assert.equal(state.operating_mode, 'observe_only');
   assert.equal(state.lifecycle, 'running');
   assert.deepEqual(state.auth, { state: 'disconnected', last_error: null, attempted_at: null });
-  assert.deepEqual(state.client, { package: '@keesmod/eufy-mega-client', version: '0.22.0', module: 'mowers', lifecycle: 'open', connected: false });
+  assert.deepEqual(state.client, { package: '@keesmod/eufy-mega-client', version: '0.23.0', module: 'mowers', lifecycle: 'open', connected: false });
   assert.deepEqual(state.mowers, { count: null, discovered_at: null, error: null });
   assert.deepEqual(state.routes, { discovery: true, state: true, control: false, maps: false, settings: false });
   assert.equal(state.maps, null, 'no map status without map provisioning');

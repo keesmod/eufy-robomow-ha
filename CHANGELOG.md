@@ -21,6 +21,36 @@ The session store has kept storage version 1 since 0.7.0 and the options have
 kept their keys since 0.11.0. An older version ignores an option it does not
 know, but saving the options there drops it.
 
+## 0.15.0 - 2026-09-25
+
+### Work parameters through the bridge, and settings shown at once
+
+- With mower bridge 0.11.0 on library 0.23.0, bridge mode creates Edge
+  Distance, Pad Direction, Path Distance, Travel Speed and Blade Speed with the
+  unique ids of the local backend, so a backend switch keeps every entity.
+  They read the bridge's work parameters, which come from a cloud reading at
+  most every five minutes or from the report that confirmed a write.
+- Travel Speed and Blade Speed are written through the bridge's settings
+  route, once each, in the integration's `control` mode and only while the
+  bridge reports `routes.settings`. Slow, normal and fast are the library's
+  low, medium and adaptive high mow speed, and its low, medium and high blade
+  speed.
+- Edge Distance, Pad Direction and Path Distance are read only in bridge mode
+  and refuse a change before any request. No permitted source gives the
+  library their bounds yet.
+- A setting write that the bridge confirms shows its new value at once. Before,
+  a second write within ten seconds, such as a restore, showed the old value
+  until the debounced refresh.
+- The local backend is unchanged.
+- Upgrade: update the bridge app to 0.11.0 first, then the integration. No
+  option change. With an older bridge the five entities in bridge mode have no
+  value. Rollback: install 0.14.2. In bridge mode the five entities then
+  become unavailable and keep their registry entries.
+- Evidence: software-verified. The display delay was seen in the settings
+  window of 2026-09-25
+  ([receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5832883255)).
+  No work parameter has been written through the bridge on hardware yet.
+
 ## 0.14.2 - 2026-09-25
 
 ### Bridge 0.10.1 on library 0.22.0

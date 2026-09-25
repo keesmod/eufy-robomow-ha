@@ -23,6 +23,7 @@ from custom_components.eufy_robomow.bridge_client import (
     parse_command_outcome,
     parse_setting_outcome,
     parse_state_document,
+    parse_work_parameter_outcome,
     refused_before_write,
     resolve_mower_id,
 )
@@ -696,3 +697,158 @@ def test_setting_outcome_never_takes_true_for_one() -> None:
     )
     with pytest.raises(BridgeClientError, match="invalid_document"):
         parse_setting_outcome(document, MOWER_ID, "sparse_lawn_optimization", True)
+
+
+# ── Work parameters, bridge 0.11.0 ─────────────────────────────────────────────
+
+
+def _speed(value: Any, writable: Any, options: list[str]) -> dict[str, Any]:
+    return {"value": value, "writable": writable, "options": options}
+
+
+MOW_SPEEDS = ["low", "medium", "adaptive_high"]
+BLADE_SPEEDS = ["low", "medium", "high"]
+WORK_PARAMETERS: dict[str, Any] = {
+    "state": "reported",
+    "source": "cloud",
+    "observed_at": "2026-09-25T09:00:00.000Z",
+    "error": None,
+    "mow_speed": _speed("medium", True, MOW_SPEEDS),
+    "blade_speed": _speed("high", True, BLADE_SPEEDS),
+    "edge_distance": 120,
+    "mow_spacing": 70,
+    "direction": {"mode": "single", "single_angle": 30, "current_angle": 30},
+}
+
+
+def _work_parameter_outcome(**overrides: Any) -> dict[str, Any]:
+    """A contract 1 work parameter answer as bridge 0.11.0 serves it, without raw data."""
+    document: dict[str, Any] = {
+        "contract": 1,
+        "id": MOWER_ID,
+        "setting": "blade_speed",
+        "result": "confirmed",
+        "write": {"dp": "155", "code": "reserved_raw_155", "field": 6, "value": "high"},
+        "previous": "medium",
+        "cloud_observed_at": "2026-09-25T08:59:00.000Z",
+        "sent_at": "2026-09-25T09:00:00.100Z",
+        "stage": "reflected",
+        "end": "reflected",
+        "before_observed_at": "2026-09-25T09:00:00.050Z",
+        "reply": {"observed_at": "2026-09-25T09:00:00.120Z", "return_code_zero": True, "rejected": False},
+        "reflection": {"observed_at": "2026-09-25T09:00:00.300Z", "sequence": 81, "value": "high"},
+        "other": None,
+        "reports": 1,
+    }
+    document.update(overrides)
+    return document
+
+
+def test_state_document_maps_the_work_parameters_onto_the_cloud_keys() -> None:
+    telemetry = parse_state_document(_document(work_parameters=WORK_PARAMETERS), MOWER_ID)
+    assert telemetry.dps == {
+        "8": 85, "134": "Wifi", "109": 70,
+        "cloud_travel_speed": "normal",
+        "cloud_blade_speed": "fast",
+        "cloud_edge_mm": 120,
+        "cloud_path_mm": 70,
+        "cloud_pad_direction": 30,
+    }, "the speeds use the integration's own options and the rest the device's integers"
+    assert telemetry.settings_writable == {"cloud_travel_speed": True, "cloud_blade_speed": True}
+    low = {**WORK_PARAMETERS, "mow_speed": _speed("low", True, MOW_SPEEDS), "blade_speed": _speed("low", True, BLADE_SPEEDS)}
+    assert parse_state_document(_document(work_parameters=low), MOWER_ID).dps["cloud_travel_speed"] == "slow"
+    fast = {**WORK_PARAMETERS, "mow_speed": _speed("adaptive_high", True, MOW_SPEEDS)}
+    assert parse_state_document(_document(work_parameters=fast), MOWER_ID).dps["cloud_travel_speed"] == "fast"
+
+
+def test_state_document_skips_work_parameters_it_cannot_read_without_failing_the_poll() -> None:
+    odd = {
+        **WORK_PARAMETERS,
+        "mow_speed": _speed("auto", False, MOW_SPEEDS),
+        "blade_speed": _speed(["high"], "yes", BLADE_SPEEDS),
+        "edge_distance": "120",
+        "mow_spacing": True,
+        "direction": {"mode": "single", "single_angle": None},
+    }
+    telemetry = parse_state_document(_document(work_parameters=odd), MOWER_ID)
+    assert telemetry.dps == {"8": 85, "134": "Wifi", "109": 70}, "an unnamed speed and bad shapes map to nothing"
+    assert telemetry.settings_writable == {}
+    for block in (None, [], "work", {**WORK_PARAMETERS, "state": "missing"}, {**WORK_PARAMETERS, "state": "unavailable"}):
+        parsed = parse_state_document(_document(work_parameters=block), MOWER_ID)
+        assert parsed.dps == {"8": 85, "134": "Wifi", "109": 70}
+        assert parsed.settings_writable == {}
+    not_writable = {**WORK_PARAMETERS, "blade_speed": _speed("high", "true", BLADE_SPEEDS)}
+    assert parse_state_document(_document(work_parameters=not_writable), MOWER_ID).settings_writable["cloud_blade_speed"] is False
+
+
+def test_client_posts_a_work_parameter_once_with_the_library_value_in_the_query() -> None:
+    session = _FakeSession([_FakeResponse(200, _json(_work_parameter_outcome()))])
+    client, patcher = _client(session)
+    with patcher:
+        outcome = asyncio.run(client.async_set_work_parameter(MOWER_ID, "blade_speed", "high"))
+    assert outcome == BridgeSettingOutcome(
+        result="confirmed",
+        stage="reflected",
+        end="reflected",
+        previous="medium",
+        observed_at=datetime(2026, 9, 25, 9, 0, 0, 300000, tzinfo=UTC),
+    )
+    assert [(method, url) for method, url, _ in session.requests] == [
+        ("POST", f"http://127.0.0.1:8090/v1/mowers/{MOWER_ID}/settings/blade_speed?value=high"),
+    ]
+    _, _, kwargs = session.requests[0]
+    assert "data" not in kwargs and "json" not in kwargs
+    assert kwargs["timeout"].total == 75
+
+
+@pytest.mark.parametrize(
+    ("mower_id", "key", "value", "code"),
+    [
+        (MOWER_ID, "edge_distance", "100", "not_found"),
+        (MOWER_ID, "travel_speed", "fast", "not_found"),
+        (MOWER_ID, "mow_speed", "fast", "invalid_setting_value"),
+        (MOWER_ID, "mow_speed", "auto", "invalid_setting_value"),
+        (MOWER_ID, "blade_speed", "adaptive_high", "invalid_setting_value"),
+        ("not-a-mower-id", "blade_speed", "high", "invalid_mower_id"),
+    ],
+)
+def test_client_refuses_unknown_work_parameters_and_values_before_any_request(
+    mower_id: str, key: str, value: str, code: str
+) -> None:
+    session = _FakeSession([])
+    client, patcher = _client(session)
+    with patcher, pytest.raises(BridgeClientError, match=code):
+        asyncio.run(client.async_set_work_parameter(mower_id, key, value))
+    assert session.requests == []
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"contract": 2},
+        {"id": OTHER_ID},
+        {"setting": "mow_speed"},
+        {"result": "done"},
+        {"end": None},
+        {"write": {"dp": "155", "code": "reserved_raw_155", "field": 6, "value": "medium"}},
+        {"write": None},
+        {"previous": "fast"},
+        {"previous": 1},
+        {"reflection": None},
+        {"reflection": {"observed_at": "2026-09-25T09:00:00.300Z", "sequence": 81, "value": "medium"}},
+    ],
+)
+def test_work_parameter_outcome_rejects_invalid_shapes(overrides: dict[str, Any]) -> None:
+    with pytest.raises(BridgeClientError, match="invalid_document"):
+        parse_work_parameter_outcome(_work_parameter_outcome(**overrides), MOWER_ID, "blade_speed", "high")
+
+
+def test_work_parameter_outcome_keeps_failed_and_uncertain_explicit() -> None:
+    for result, end in (("failed", "rejected"), ("uncertain", "timed_out")):
+        outcome = parse_work_parameter_outcome(
+            _work_parameter_outcome(result=result, stage="sent", end=end, reflection=None),
+            MOWER_ID,
+            "blade_speed",
+            "high",
+        )
+        assert (outcome.result, outcome.end, outcome.observed_at) == (result, end, None)

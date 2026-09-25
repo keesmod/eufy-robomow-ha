@@ -44,8 +44,9 @@ from custom_components.eufy_robomow.sessions import SessionHistory, SessionStore
 DEVICE = "synthetic-device"
 # One status both backends can report: battery, network, signal and the local settings.
 DATA = {"8": 85, "134": "Wifi", "109": 70, "110": 40, "26": 20, "101": True, "47": True, "132": True, "141": False, "133": False}
-# The cloud settings (DP 155) have no bridge route, so bridge mode does not create them.
-CLOUD_SETTINGS = {
+# The DP 155 work parameters. Since integration 0.15.0 bridge mode creates them too, from the
+# bridge's work parameters, so a switch keeps every entity.
+WORK_PARAMETER_ENTITIES = {
     f"{DEVICE}_edge_distance",
     f"{DEVICE}_pad_direction",
     f"{DEVICE}_path_mm",
@@ -101,11 +102,11 @@ def _unique_ids(backend: str) -> set[str]:
     return set(ids)
 
 
-def test_a_backend_switch_keeps_every_unique_id_and_hides_only_the_cloud_settings() -> None:
+def test_a_backend_switch_keeps_every_unique_id() -> None:
     local = _unique_ids(BACKEND_LOCAL)
     bridge = _unique_ids(BACKEND_BRIDGE)
-    assert bridge <= local, "bridge mode creates no entity the local backend lacks"
-    assert local - bridge == CLOUD_SETTINGS
+    assert bridge == local, "both backends create the same entities"
+    assert WORK_PARAMETER_ENTITIES <= bridge, "the DP 155 entities exist in bridge mode too"
     assert {f"{DEVICE}_mower", f"{DEVICE}_battery", f"{DEVICE}_mowing_session", f"{DEVICE}_cut_height"} <= bridge
     assert all(unique_id.startswith(f"{DEVICE}_") for unique_id in local), "ids come from the entry's device id"
 
