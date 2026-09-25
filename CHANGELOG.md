@@ -21,6 +21,24 @@ The session store has kept storage version 1 since 0.7.0 and the options have
 kept their keys since 0.11.0. An older version ignores an option it does not
 know, but saving the options there drops it.
 
+## 0.15.2 - 2026-09-25
+
+### Map identity
+
+- Read the map id from map-record field 1. Field 16 is the total area. Maps
+  with equal areas previously shared an identity, which could merge their
+  live coverage. An area change within the same map could also clear coverage.
+- The public map-source bundle format and entity ids stay unchanged. Position
+  interpretation remains part of the open native map acceptance in issue #8.
+- Upgrade: replace the integration folder, run the configuration check and
+  restart Home Assistant. The map title uses the actual map id. Rollback:
+  restore 0.15.1, which uses the total area as the identifier again.
+- Evidence: the original app's map schema, recorded in the library's
+  [map geometry](https://github.com/keesmod/eufy-mega-client/blob/ed6d3e2/docs/MAP_GEOMETRY.md).
+  Synthetic regressions cover equal-area map changes, area changes within
+  one map, a missing id and the bundle shared with the bridge. No physical
+  map change was performed for this fix.
+
 ## 0.15.1 - 2026-09-25
 
 ### No-go zones on the map
