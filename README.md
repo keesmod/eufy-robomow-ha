@@ -26,7 +26,7 @@ Version 0.14.1 reads DP 107 with the official app's mission status schema. Versi
 with mower bridge 0.10.1 on library 0.22.0, which does the same in bridge mode.
 Version 0.15.0 reads the DP 155 work parameters through mower bridge 0.11.0,
 writes Travel Speed and Blade Speed through it and shows a confirmed setting at
-once.
+once. Version 0.15.1 draws the app's no-go zones on the map.
 
 ---
 
@@ -53,7 +53,7 @@ once.
 | Child Protection | `switch` | Enable child/pet protection mode |
 | Smart No-Go Suggestions | `switch` | AI-assisted no-go zone suggestions |
 | Mow Yellow Grass | `switch` | Allow mowing on dry/yellow grass |
-| Map | `image` | Optional read-only E15 boundary, areas, pathways, mower and cleaning path |
+| Map | `image` | Optional read-only E15 boundary, areas, obstacles, no-go zones, pathways, mower and cleaning path |
 
 > **Cloud entities** (edge distance, pad direction, speeds, path distance) require your Eufy account credentials. They are polled every 5 minutes and written back via the Tuya mobile API.
 >
@@ -62,12 +62,13 @@ once.
 ### Map preview
 
 <p align="center">
-  <img src="docs/map-preview.svg" alt="Synthetic Eufy E15 map preview showing the boundary, live mowing coverage, mower, charging station, pathway and no-go area" width="480">
+  <img src="docs/map-preview.svg" alt="Synthetic Eufy E15 map preview showing the boundary, live mowing coverage, mower, charging station, pathway, obstacle and no-go zone" width="480">
 </p>
 
 The map image follows the live mowing session with two-second, change-aware
-updates. It shows the mapped boundary, charging area, external pathways, no-go
-areas, completed mowing lanes and the latest mower position. The preview above
+updates. It shows the mapped boundary, charging area, external pathways,
+obstacles, the app's no-go zones as red dashed zones, completed mowing lanes and
+the latest mower position. The preview above
 uses synthetic geometry; no private lawn map or device data is stored in this
 repository.
 
@@ -444,6 +445,10 @@ built and verified and what is confirmed on hardware.
 between the backends, rollback and the later retirement of the Android map
 helper.
 
+- **0.15.1, no-go zones on the map.** The map draws the no-go zones that the
+  eufy app shows in red, the forbidden zones of map-record field 12, as red
+  dashed zones. Rectangles and polygons are drawn, ellipse zones not yet.
+  Replace the integration folder. The bridge app is unchanged.
 - **0.15.0, work parameters through the bridge, and bridge 0.11.0.** With
   mower bridge 0.11.0 on library 0.23.0, bridge mode creates Edge Distance,
   Pad Direction, Path Distance, Travel Speed and Blade Speed with the unique

@@ -81,8 +81,12 @@ def render_map_svg(
         for area in snapshot.base_areas
     )
     elements.extend(
-        f'<polygon class="no-go-area" points="{_render_points(area, projection)}" />'
+        f'<polygon class="obstacle" points="{_render_points(area, projection)}" />'
         for area in snapshot.no_go_areas
+    )
+    elements.extend(
+        f'<polygon class="forbidden-zone" points="{_render_points(zone, projection)}" />'
+        for zone in snapshot.forbidden_zones
     )
     for pathway in pathways:
         rendered = _render_points(pathway, projection)
@@ -128,7 +132,8 @@ def render_map_svg(
     .background {{ fill: #020505; }}
     .boundary {{ fill: #153f16; stroke: #49a6ff; stroke-width: 5; stroke-linejoin: round; }}
     .base-area {{ fill: #347f91; fill-opacity: .9; stroke: #55aaff; stroke-width: 4; stroke-dasharray: 12 8; stroke-linejoin: round; }}
-    .no-go-area {{ fill: #050607; stroke: #626a74; stroke-width: 2; stroke-linejoin: round; }}
+    .obstacle {{ fill: #050607; stroke: #626a74; stroke-width: 2; stroke-linejoin: round; }}
+    .forbidden-zone {{ fill: #ff3b30; fill-opacity: .45; stroke: #ff3b30; stroke-width: 3; stroke-dasharray: 10 6; stroke-linejoin: round; }}
     .pathway {{ fill: none; stroke: #ffbd00; stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; }}
     .pathway-center {{ fill: none; stroke: #fff7cf; stroke-width: 1.5; stroke-dasharray: 8 8; stroke-linecap: round; }}
     .cleaned-area {{ opacity: .58; }}
@@ -230,6 +235,7 @@ def _visible_points(
         snapshot.boundary,
         *snapshot.base_areas,
         *snapshot.no_go_areas,
+        *snapshot.forbidden_zones,
         *pathways,
         *cleaned_paths,
     )

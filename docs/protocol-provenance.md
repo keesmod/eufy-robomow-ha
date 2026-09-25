@@ -213,6 +213,29 @@ The two readings differ, and which
 one matches the app on the owned E15 is part of the native map acceptance in
 issue #8. Until then both stay display only.
 
+## Map exclusion geometry
+
+Map-record field 11 holds the obstacles and field 12 the forbidden zones, the
+no-go zones that the eufy app draws in red. The numbering is the library's
+[map geometry](https://github.com/keesmod/eufy-mega-client/blob/main/docs/MAP_GEOMETRY.md),
+read from the app's own parser and capture-validated for both fields. A
+forbidden zone carries 1 id, 2 boundary, 3 isPolygon, 4 shape and 5 ellipse.
+The boundary is a polygon whose points carry x in field 1 and y in field 2 as
+sint32, like the lawn boundary. The shapes are rectangle 0, polygon 1 and
+ellipse 2.
+
+Integration 0.15.1 draws a rectangle or polygon zone from its boundary. It
+skips an ellipse, an unknown shape and a boundary with fewer than three
+distinct corners. The ellipse message holds a float rotation whose unit no
+source states, and the decoder never reads it. Earlier versions drew the
+obstacles under the name `no_go_areas`, which the snapshot keeps.
+
+On 2026-09-25 the app showed one red no-go zone that Home Assistant did not
+draw (#8). A read-only look at the owner's cached map bundle found one
+forbidden zone with only an id and a boundary of four distinct corners, so its
+shape is the default rectangle, and four obstacles of four points each. No
+coordinate was recorded.
+
 ## Map bundle through the bridge
 
 Mower bridge 0.7.0 serves the map bundle this integration already validates

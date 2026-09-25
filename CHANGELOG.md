@@ -21,6 +21,33 @@ The session store has kept storage version 1 since 0.7.0 and the options have
 kept their keys since 0.11.0. An older version ignores an option it does not
 know, but saving the options there drops it.
 
+## 0.15.1 - 2026-09-25
+
+### No-go zones on the map
+
+- The map draws the no-go zones that the eufy app shows in red. They are the
+  forbidden zones of map-record field 12, which the decoder ignored before. A
+  rectangle or polygon zone is drawn from the corners of its boundary as a red
+  dashed zone above the lawn, the areas and the obstacles, and below the
+  pathways and the markers.
+- An ellipse zone, a zone of unknown shape and a boundary with fewer than three
+  distinct corners are skipped, and the rest of the map still shows. A
+  malformed zone rejects the bundle like other malformed geometry, so the map
+  keeps its last valid snapshot.
+- The dark polygons of field 11 are the obstacles, as the app's parser names
+  them. They look as before, and the snapshot keeps their `no_go_areas` name.
+- No entity, unique id or option changes, and both map sources draw the zones.
+- Upgrade: replace the integration folder, run the configuration check and
+  restart Home Assistant. The bridge app needs no update. Rollback: install
+  0.15.0, and the map shows no no-go zones again.
+- Evidence: the owner's current map carries one forbidden zone with only an id
+  and a boundary of four distinct corners, and the app draws it as a red no-go
+  zone that Home Assistant did not show
+  ([comparison](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5834020227)).
+  The field numbering is the library's
+  [map geometry](https://github.com/keesmod/eufy-mega-client/blob/main/docs/MAP_GEOMETRY.md),
+  read from the app's own parser. Software-verified with synthetic geometry.
+
 ## 0.15.0 - 2026-09-25
 
 ### Work parameters through the bridge, and settings shown at once
