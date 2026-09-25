@@ -430,6 +430,11 @@ protocol tests.
 evidence, upgrade and rollback, and [bridge/CHANGELOG.md](bridge/CHANGELOG.md)
 does the same for the mower bridge and its app. The notes below cover what an
 upgrade changes for an existing installation.
+[Release candidates](docs/release-candidates.md) describes how a candidate is
+built and verified and what is confirmed on hardware.
+[Migration and rollback](docs/migration-and-rollback.md) covers the switch
+between the backends, rollback and the later retirement of the Android map
+helper.
 
 - **0.14.2, bridge 0.10.1 on library 0.22.0.** Mower bridge 0.10.1 pins
   library 0.22.0, which reads DP 107 as the mower's mission status like the

@@ -164,8 +164,11 @@ the manual recovery path.
 2. Back up first (below).
 3. Docker: build the new tag from the new checkout, stop and remove the old
    container, start the new one with the same variables and volume. App: replace
-   `/addons/eufy_mower_bridge` with the new `ha_app/`, then **Rebuild** in the
-   app page and start.
+   `/addons/eufy_mower_bridge` with the new `ha_app/`, run `ha store reload` and
+   update the app with a backup, `ha apps update local_eufy_mower_bridge
+   --backup` or **Update** on the app page. **Rebuild** only rebuilds the
+   installed version, and the Supervisor refuses it once the folder carries
+   another version.
 4. Verify with the health check and the integration's state. The `version`
    field in `GET /v1/state` must show the new version.
 
@@ -205,9 +208,14 @@ expires quickly, so it is not part of the bridge backup.
 
 ## Rollback
 
-1. Stop the current bridge.
-2. Docker: start the previous image tag with the same variables and volume.
-   App: restore the previous `ha_app/`, rebuild, start.
+1. Docker: stop the current container and start the previous image tag with
+   the same variables and volume.
+2. App: put the previous `ha_app/` in `/addons/eufy_mower_bridge`, run
+   `ha store reload` and update the app with a backup. The Supervisor installs
+   an older version through an update as well, keeps the data directory and
+   the options, and starts the app again when it was running. Restoring the
+   app backup that the upgrade made is the alternative. It brings back the
+   previous version with its options and the data of that moment.
 3. When the previous version cannot read the newer session file, delete
    `mower-session.json` from the data directory and restart. The bridge signs
    in once. Keep `bridge-id`, the integration's mower id and unique IDs depend
