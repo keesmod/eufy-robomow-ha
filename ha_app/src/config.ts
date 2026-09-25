@@ -8,6 +8,15 @@ export const OPERATING_MODE_OBSERVE_ONLY = 'observe_only';
 export const OPERATING_MODE_CONTROL = 'control';
 export type OperatingMode = typeof OPERATING_MODE_OBSERVE_ONLY | typeof OPERATING_MODE_CONTROL;
 
+/** Default. The state route reads the settings and the settings route answers 403. */
+export const SETTINGS_MODE_READ_ONLY = 'read_only';
+/**
+ * Explicit opt-in, separate from `operating_mode`. Enables the settings route for the library's
+ * writable settings. Rain and child protection stay read only in either mode.
+ */
+export const SETTINGS_MODE_WRITE = 'write';
+export type SettingsMode = typeof SETTINGS_MODE_READ_ONLY | typeof SETTINGS_MODE_WRITE;
+
 export const DEFAULT_PORT = 8090;
 export const DEFAULT_BIND_ADDRESS = '127.0.0.1';
 export const DEFAULT_DATA_DIR = '/data/eufy-mower';
@@ -35,6 +44,8 @@ export interface BridgeConfig {
   /** Private directory that holds the mower session and bridge identity. */
   dataDir: string;
   operatingMode: OperatingMode;
+  /** `write` enables the settings route and the library's settings opt-in. */
+  settingsMode: SettingsMode;
   /** Deadline for each Eufy Home/Tuya request issued by the library. */
   cloudTimeoutMs: number;
   /** Deadline for connecting to a mower on the LAN and for each local query. */
@@ -86,6 +97,7 @@ export const ENV = {
   bind_address: 'EUFY_MOWER_BIND_ADDRESS',
   data_dir: 'EUFY_MOWER_DATA_DIR',
   operating_mode: 'EUFY_MOWER_OPERATING_MODE',
+  settings_mode: 'EUFY_MOWER_SETTINGS_MODE',
   cloud_timeout_ms: 'EUFY_MOWER_CLOUD_TIMEOUT_MS',
   local_timeout_ms: 'EUFY_MOWER_LOCAL_TIMEOUT_MS',
   host: 'EUFY_MOWER_HOST',
@@ -109,6 +121,7 @@ const OPTION_KEYS: readonly OptionKey[] = [
   'bind_address',
   'data_dir',
   'operating_mode',
+  'settings_mode',
   'cloud_timeout_ms',
   'local_timeout_ms',
   'host',
@@ -198,6 +211,9 @@ export function resolveConfig(values: OptionValues): BridgeConfig {
   const operatingMode = text(values, 'operating_mode') || OPERATING_MODE_OBSERVE_ONLY;
   if (operatingMode !== OPERATING_MODE_OBSERVE_ONLY && operatingMode !== OPERATING_MODE_CONTROL)
     throw new ConfigError('operating_mode', `must be ${OPERATING_MODE_OBSERVE_ONLY} or ${OPERATING_MODE_CONTROL}`);
+  const settingsMode = text(values, 'settings_mode') || SETTINGS_MODE_READ_ONLY;
+  if (settingsMode !== SETTINGS_MODE_READ_ONLY && settingsMode !== SETTINGS_MODE_WRITE)
+    throw new ConfigError('settings_mode', `must be ${SETTINGS_MODE_READ_ONLY} or ${SETTINGS_MODE_WRITE}`);
   const cloudTimeoutMs = integer(values, 'cloud_timeout_ms', DEFAULT_CLOUD_TIMEOUT_MS, 1000, 60_000);
   const localTimeoutMs = integer(values, 'local_timeout_ms', DEFAULT_LOCAL_TIMEOUT_MS, 1000, 60_000);
   const single = text(values, 'host');
@@ -208,6 +224,7 @@ export function resolveConfig(values: OptionValues): BridgeConfig {
     bindAddress,
     dataDir,
     operatingMode,
+    settingsMode,
     cloudTimeoutMs,
     localTimeoutMs,
     hosts: hosts(values.hosts),
@@ -318,6 +335,7 @@ export function describeConfig(config: BridgeConfig): Record<string, string | nu
     bind_address: config.bindAddress,
     data_dir: config.dataDir,
     operating_mode: config.operatingMode,
+    settings_mode: config.settingsMode,
     country: config.credentials.country,
     cloud_timeout_ms: config.cloudTimeoutMs,
     local_timeout_ms: config.localTimeoutMs,

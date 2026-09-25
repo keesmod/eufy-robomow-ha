@@ -117,6 +117,25 @@ DP_REAL_LAWN_MAP = "133"  # bool  Real lawn map feature enabled
 DP_NETWORK = "134"  # str   "Wifi" or "Cellular"
 DP_MOW_YELLOW_GRASS = "141"  # bool  Allow mowing on yellow/dry grass
 
+# The mower bridge's setting keys for the local setting data points, bridge 0.10.0 and
+# later. Its state route reads all seven. Only the first four are written through its
+# settings route. Rain stop, child protection and the real lawn map stay read only in
+# bridge mode, decided in keesmod/eufy-robomow-ha#8 on 2026-09-25.
+BRIDGE_SETTING_KEYS: dict[str, str] = {
+    DP_CUT_HEIGHT: "mow_height",
+    DP_VOLUME: "volume",
+    DP_SMART_SUGGESTION: "smart_no_go_zones",
+    DP_MOW_YELLOW_GRASS: "sparse_lawn_optimization",
+    DP_RAIN_DETECTION: "rain_auto_return",
+    DP_CHILD_PROTECTION: "child_lock",
+    DP_REAL_LAWN_MAP: "bird_view_capture",
+}
+BRIDGE_WRITABLE_SETTING_DPS = frozenset(
+    {DP_CUT_HEIGHT, DP_VOLUME, DP_SMART_SUGGESTION, DP_MOW_YELLOW_GRASS}
+)
+# The settings that carry an integer. The others are switches.
+BRIDGE_NUMBER_SETTING_DPS = frozenset({DP_CUT_HEIGHT, DP_VOLUME})
+
 # ── Unmapped DPs for reverse engineering (all DPS exposed as sensors) ─────────
 # These are automatically discovered and added as generic sensors.
 

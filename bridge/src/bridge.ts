@@ -3,6 +3,7 @@ import type { Server } from 'node:http';
 import {
   EufyClient,
   EufyError,
+  decodeMowerSettings,
   type AuthState,
   type ModuleLifecycleState,
   type MowerActivity,
@@ -18,10 +19,15 @@ import {
   type MowerLocalSessionOptions,
   type MowerModule,
   type MowerNetworkKind,
+  type MowerSettingEnd,
+  type MowerSettingName,
+  type MowerSettingOutcome,
+  type MowerSettings,
+  type MowerSettingStage,
   type MowerTelemetry,
   type MowerTelemetryField,
 } from '@keesmod/eufy-mega-client';
-import { MOWER_ID, type BridgeConfig, type ControlConfig } from './config.ts';
+import { MOWER_ID, SETTINGS_MODE_WRITE, type BridgeConfig, type ControlConfig } from './config.ts';
 import { ApiError, BridgeError } from './errors.ts';
 import {
   DEFAULT_MAP_DEMAND_MS,
@@ -81,6 +87,35 @@ export const ROUTED_COMMAND_CLASSES = ['start', 'pause', 'resume', 'stop'] as co
 const COMMAND_CLASSES: readonly string[] = ['start', 'pause', 'resume', 'stop', 'return'] satisfies readonly MowerCommandKind[];
 type RoutedCommandClass = (typeof ROUTED_COMMAND_CLASSES)[number];
 
+/**
+ * The settings the state route reads, keyed in snake case, with the library setting each one
+ * serves. The library writes only the four in `WRITABLE_SETTING_KEYS`. Rain and child protection
+ * and the bird-view capture are read only in the library itself, whatever the settings mode.
+ */
+export const SETTING_KEYS = {
+  mow_height: 'mowHeight',
+  volume: 'volume',
+  smart_no_go_zones: 'smartNoGoZones',
+  sparse_lawn_optimization: 'sparseLawnOptimization',
+  rain_auto_return: 'rainAutoReturn',
+  child_lock: 'childLock',
+  bird_view_capture: 'birdViewCapture',
+} as const satisfies Record<string, MowerSettingName>;
+export type SettingKey = keyof typeof SETTING_KEYS;
+export const WRITABLE_SETTING_KEYS = ['mow_height', 'volume', 'smart_no_go_zones', 'sparse_lawn_optimization'] as const satisfies readonly SettingKey[];
+/** A switch value is `true` or `false`, a number setting a plain integer. Nothing else reaches the library. */
+const SETTING_VALUE = /^(true|false|-?\d{1,6})$/;
+
+/**
+ * One setting of one state query, as the library decoded it. Only `reported` carries a value.
+ * `writable` means the library writes it and the device declares it writable. The route itself
+ * also needs `settings_mode: write`, reported in `routes.settings`.
+ */
+export type SettingDocument =
+  | { state: 'reported'; value: boolean | number; writable: boolean; min?: number; max?: number; step?: number; unit?: string }
+  | { state: 'missing' }
+  | { state: 'invalid' };
+
 export type OpenLocalSession = (
   id: string,
   options: MowerLocalSessionOptions,
@@ -132,13 +167,15 @@ export interface DiscoveryDocument {
   mowers: DiscoveredMower[];
 }
 
-/** The four typed fields of one query. Raw data points are deliberately absent. */
+/** The typed fields and settings of one query. Raw data points are deliberately absent. */
 export interface TelemetryFields {
   observed_at: string;
   status: MowerTelemetryField<MowerActivity>;
   battery: MowerTelemetryField<{ percent: number }>;
   progress: MowerTelemetryField<{ percent: number }>;
   network: MowerTelemetryField<{ kind?: MowerNetworkKind; signalDbm?: number; signalPercent?: number }>;
+  /** The library's typed settings from the same query, since bridge 0.10.0. */
+  settings: Record<SettingKey, SettingDocument>;
 }
 
 /**
@@ -198,6 +235,34 @@ export interface MowerCommandDocument {
   reports: number;
 }
 
+/** Contract 1 of `POST /v1/mowers/{id}/settings/{key}`. Raw reports and data points are never served. */
+export interface MowerSettingDocument {
+  contract: 1;
+  id: string;
+  setting: SettingKey;
+  /**
+   * `confirmed` when a fresh report carried the written value, `failed` when the device rejected
+   * the control frame, `uncertain` when the bound passed or the report limit was reached after the
+   * write. An uncertain write happened and must never be repeated automatically.
+   */
+  result: 'confirmed' | 'failed' | 'uncertain';
+  write: { dp: string; code: string; value: boolean | number };
+  /** The value on the library's fresh query before the write, the value a deliberate restore writes back. */
+  previous: boolean | number;
+  sent_at: string;
+  stage: MowerSettingStage;
+  end: MowerSettingEnd;
+  /** Observation time of the fresh status query the library ran before the write. */
+  before_observed_at: string;
+  reply: { observed_at: string; return_code_zero: boolean; rejected: boolean } | null;
+  /** The first fresh report that carried the written value. */
+  reflection: { observed_at: string; sequence: number; value: boolean | number } | null;
+  /** The latest fresh report that carried another value. A value of another type is served as null. */
+  other: { observed_at: string; sequence: number; value: boolean | number | null } | null;
+  /** Number of fresh reports received during the read-back. */
+  reports: number;
+}
+
 export type BridgeLifecycle = 'created' | 'starting' | 'running' | 'stopping' | 'stopped';
 
 /**
@@ -228,8 +293,11 @@ export interface BridgeState {
     connected: boolean;
   };
   mowers: { count: number | null; discovered_at: string | null; error: string | null };
-  /** `control` is true only in `control` mode, `maps` only with a map provisioning file. */
-  routes: { discovery: true; state: true; control: boolean; maps: boolean };
+  /**
+   * `control` is true only in `control` mode, `maps` only with a map provisioning file and
+   * `settings` only with `settings_mode: write`.
+   */
+  routes: { discovery: true; state: true; control: boolean; maps: boolean; settings: boolean };
   /** The command opt-in in effect, or null in `observe_only`. The stop route text is not served. */
   control: { classes: RoutedCommandClass[]; max_state_age_ms: number; read_back_ms: number } | null;
   /** Map acquisition status without any geometry, or null without map provisioning. */
@@ -315,6 +383,61 @@ function commandDocument(id: string, outcome: MowerCommandOutcome): MowerCommand
   };
 }
 
+/** The library's typed settings as the state route serves them. */
+function settingsDocument(decoded: MowerSettings): Record<SettingKey, SettingDocument> {
+  const result = {} as Record<SettingKey, SettingDocument>;
+  for (const [key, name] of Object.entries(SETTING_KEYS) as [SettingKey, MowerSettingName][]) {
+    const field = decoded.settings[name];
+    if (field.state !== 'reported') {
+      result[key] = { state: field.state };
+      continue;
+    }
+    const setting: SettingDocument = { state: 'reported', value: field.value, writable: field.writable };
+    if (field.min !== undefined) setting.min = field.min;
+    if (field.max !== undefined) setting.max = field.max;
+    if (field.step !== undefined) setting.step = field.step;
+    if (field.unit !== undefined) setting.unit = field.unit;
+    result[key] = setting;
+  }
+  return result;
+}
+
+function settingValue(raw: string | null): boolean | number | undefined {
+  if (raw === null || !SETTING_VALUE.test(raw)) return undefined;
+  return raw === 'true' ? true : raw === 'false' ? false : Number(raw);
+}
+
+function settingOutcomeDocument(id: string, key: SettingKey, outcome: MowerSettingOutcome): MowerSettingDocument {
+  const result = outcome.end === 'reflected' ? 'confirmed' : outcome.end === 'rejected' ? 'failed' : 'uncertain';
+  const other = outcome.other;
+  return {
+    contract: 1,
+    id,
+    setting: key,
+    result,
+    write: { dp: outcome.write.dp, code: outcome.write.code, value: outcome.write.value },
+    previous: outcome.previous,
+    sent_at: outcome.sentAt,
+    stage: outcome.stage,
+    end: outcome.end,
+    before_observed_at: outcome.before.observedAt,
+    reply: outcome.reply
+      ? { observed_at: outcome.reply.observedAt, return_code_zero: outcome.reply.returnCodeZero, rejected: outcome.reply.rejected }
+      : null,
+    reflection: outcome.reflection
+      ? { observed_at: outcome.reflection.observedAt, sequence: outcome.reflection.sequence, value: outcome.reflection.value }
+      : null,
+    other: other
+      ? {
+          observed_at: other.observedAt,
+          sequence: other.sequence,
+          value: typeof other.value === 'boolean' || typeof other.value === 'number' ? other.value : null,
+        }
+      : null,
+    reports: outcome.reports.length,
+  };
+}
+
 /** Stops accepting connections, lets in-flight responses finish briefly, then forces the rest closed. */
 function closeServer(server: Server, graceMs: number): Promise<void> {
   if (!server.listening) return Promise.resolve();
@@ -333,8 +456,9 @@ function closeServer(server: Server, graceMs: number): Promise<void> {
  * identity and one private HTTP server. Startup, one explicit authentication attempt and
  * shutdown are each bounded. The library's cloud session is a bounded reuse window, so a route
  * that needs it renews a lapsed session through one bounded attempt, spaced after a failure and
- * never after a refused sign-in. Commands exist only behind the `control` opt-in, one per mower at
- * a time, and are never retried or replayed.
+ * never after a refused sign-in. Commands exist only behind the `control` opt-in and setting writes
+ * only behind `settings_mode: write`. One write owns a mower at a time and nothing is retried or
+ * replayed.
  */
 export class MowerBridge {
   readonly #config: BridgeConfig;
@@ -363,7 +487,8 @@ export class MowerBridge {
   /** Ids whose most recent state query failed, so their last good result is only served as stale. */
   #staleIds = new Set<string>();
   #queries = new Map<string, Promise<MowerStateDocument>>();
-  #commands = new Map<string, Promise<MowerCommandDocument>>();
+  /** The write, a command or a setting, that owns each mower now. A second write answers 409. */
+  #writes = new Map<string, Promise<MowerCommandDocument | MowerSettingDocument>>();
   /** Progress of the running command per mower id, served by the state route until it ends. */
   #inFlight = new Map<string, InFlightCommandDocument>();
   /** Present only with map provisioning. Construction does no I/O. */
@@ -428,7 +553,13 @@ export class MowerBridge {
         discovered_at: this.#discovery ? new Date(this.#discovery.at).toISOString() : null,
         error: this.#discoveryError,
       },
-      routes: { discovery: true, state: true, control: this.#config.control !== null, maps: this.#maps !== undefined },
+      routes: {
+        discovery: true,
+        state: true,
+        control: this.#config.control !== null,
+        maps: this.#maps !== undefined,
+        settings: this.#config.settingsMode === SETTINGS_MODE_WRITE,
+      },
       control: this.#config.control
         ? {
             classes: [...ROUTED_COMMAND_CLASSES],
@@ -608,8 +739,12 @@ export class MowerBridge {
     try {
       const session = await open(id, { host, timeoutMs: this.#config.localTimeoutMs }, signal);
       let telemetry: MowerTelemetry;
+      let settings: MowerSettings;
       try {
         telemetry = await session.queryTelemetry(signal);
+        // The settings come from the same snapshot, decoded with the device's own declaration.
+        const schema = session.schema;
+        settings = decodeMowerSettings(telemetry, schema ? { schema } : {});
       } finally {
         await session.disconnect();
       }
@@ -619,6 +754,7 @@ export class MowerBridge {
         battery: structuredClone(telemetry.battery),
         progress: structuredClone(telemetry.progress),
         network: structuredClone(telemetry.network),
+        settings: settingsDocument(settings),
       };
       this.#lastGood.set(id, fields);
       this.#staleIds.delete(id);
@@ -670,14 +806,73 @@ export class MowerBridge {
     if (!COMMAND_CLASSES.includes(kind)) return Promise.reject(new ApiError(404, 'not_found'));
     if (!(ROUTED_COMMAND_CLASSES as readonly string[]).includes(kind)) return Promise.reject(new ApiError(409, 'command_unsupported'));
     if (!MOWER_ID.test(id)) return Promise.reject(new ApiError(400, 'invalid_mower_id'));
-    if (this.#commands.has(id)) return Promise.reject(new ApiError(409, 'command_in_progress'));
+    if (this.#writes.has(id)) return Promise.reject(new ApiError(409, 'command_in_progress'));
     const run = this.#runCommand(mowers, control, id, kind as RoutedCommandClass);
-    this.#commands.set(id, run);
-    void run.then(
-      () => this.#commands.delete(id),
-      () => this.#commands.delete(id),
-    );
+    this.#own(id, run);
     return run;
+  }
+
+  /** Records the write that owns a mower until it settles. */
+  #own(id: string, run: Promise<MowerCommandDocument | MowerSettingDocument>): void {
+    this.#writes.set(id, run);
+    void run.then(
+      () => this.#writes.delete(id),
+      () => this.#writes.delete(id),
+    );
+  }
+
+  /**
+   * One opt-in setting write for one discovered mower, `POST /v1/mowers/{id}/settings/{key}` with
+   * the new value in the `value` query parameter. The settings mode, the key, the value's format,
+   * the mower and its host are checked on the bridge before the library is touched, and a
+   * read-only setting is refused there with the library's own code. The library then runs its
+   * fresh query, refusals, single write and read-back. The outcome is served as confirmed, failed
+   * or uncertain, is never retried or replayed, and a restore is a second deliberate request.
+   */
+  setting(id: string, key: string, value: string | null): Promise<MowerSettingDocument> {
+    let mowers: MowerModule;
+    try {
+      mowers = this.#running();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    if (this.#config.settingsMode !== SETTINGS_MODE_WRITE) return Promise.reject(new ApiError(403, 'settings_disabled'));
+    if (!Object.hasOwn(SETTING_KEYS, key)) return Promise.reject(new ApiError(404, 'not_found'));
+    if (!(WRITABLE_SETTING_KEYS as readonly string[]).includes(key))
+      return Promise.reject(new ApiError(409, 'mower_setting_read_only'));
+    const parsed = settingValue(value);
+    if (parsed === undefined) return Promise.reject(new ApiError(400, 'invalid_setting_value'));
+    if (!MOWER_ID.test(id)) return Promise.reject(new ApiError(400, 'invalid_mower_id'));
+    if (this.#writes.has(id)) return Promise.reject(new ApiError(409, 'command_in_progress'));
+    const run = this.#runSetting(mowers, id, key as SettingKey, parsed);
+    this.#own(id, run);
+    return run;
+  }
+
+  async #runSetting(mowers: MowerModule, id: string, key: SettingKey, value: boolean | number): Promise<MowerSettingDocument> {
+    // A renewal or discovery here runs before any write. The write itself is never repeated.
+    await this.#prepareLocal(mowers);
+    if (!this.#discovery) throw new ApiError(503, this.#discoveryError ?? 'mower_request_failed');
+    if (!this.#discovery.mowers.some((entry) => entry.id === id)) throw new ApiError(404, 'unknown_mower');
+    const host = this.#hostFor(id);
+    if (!host) throw new ApiError(503, 'mower_host_unconfigured');
+    const open: OpenLocalSession =
+      this.#dependencies.openLocalSession ?? ((target, options, signal) => mowers.openLocalSession(target, options, signal));
+    const signal = this.#lifetime.signal;
+    let outcome: MowerSettingOutcome;
+    try {
+      const session = await open(id, { host, timeoutMs: this.#config.localTimeoutMs }, signal);
+      try {
+        outcome = await session.setSetting({ name: SETTING_KEYS[key], value }, signal);
+      } finally {
+        await session.disconnect();
+      }
+    } catch (error) {
+      const code = errorCode(error);
+      // The library's typed refusals happen before any frame is written. Everything else is a transport or session failure.
+      throw new ApiError(code.startsWith('mower_setting') ? 409 : 503, code);
+    }
+    return settingOutcomeDocument(id, key, outcome);
   }
 
   async #runCommand(mowers: MowerModule, control: ControlConfig, id: string, kind: RoutedCommandClass): Promise<MowerCommandDocument> {
@@ -787,6 +982,7 @@ export class MowerBridge {
           ...(this.#config.control
             ? { commands: { enabled: true as const, stopRoute: this.#config.control.stopRoute, readBackMs: this.#config.control.readBackMs } }
             : {}),
+          ...(this.#config.settingsMode === SETTINGS_MODE_WRITE ? { settings: { enabled: true as const } } : {}),
         },
       });
       this.#server = createPrivateServer(this.#config.token, {
@@ -794,6 +990,7 @@ export class MowerBridge {
         discover: () => this.discover(),
         mowerState: (id) => this.mowerState(id),
         command: (id, kind) => this.command(id, kind),
+        setting: (id, key, value) => this.setting(id, key, value),
         map: (id, request) => this.map(id, request),
       });
       await listen(this.#server, this.#config.port, this.#config.bindAddress, bound.signal);
@@ -873,7 +1070,7 @@ export class MowerBridge {
     this.#lifetime.abort();
     this.#connecting?.controller.abort();
     await this.#connecting?.done;
-    await Promise.allSettled([this.#discovering, ...this.#queries.values(), ...this.#commands.values(), this.#maps?.close()]);
+    await Promise.allSettled([this.#discovering, ...this.#queries.values(), ...this.#writes.values(), this.#maps?.close()]);
     const server = this.#server;
     const client = this.#client;
     this.#server = undefined;

@@ -17,9 +17,11 @@ from custom_components.eufy_robomow.bridge_client import (
     BridgeClient,
     BridgeClientError,
     BridgeCommandOutcome,
+    BridgeSettingOutcome,
     BridgeSettings,
     BridgeSettingsError,
     parse_command_outcome,
+    parse_setting_outcome,
     parse_state_document,
     refused_before_write,
     resolve_mower_id,
@@ -515,7 +517,10 @@ def test_refusals_before_any_write_are_distinguished_from_uncertain_failures() -
         "mower_local_authentication_failed", "mower_local_key_invalid", "mower_local_busy",
         "unauthorized", "cannot_connect", "certificate_mismatch", "certificate_invalid",
         "mower_command_undeclared", "mower_command_evidence_missing", "mower_command_map_saving",
-        "mower_command_already_set",
+        "mower_command_already_set", "settings_disabled", "invalid_setting_value",
+        "mower_settings_disabled", "mower_setting_invalid", "mower_setting_read_only",
+        "mower_setting_undeclared", "mower_setting_evidence_missing", "mower_setting_map_saving",
+        "mower_setting_already_set",
     ):
         assert refused_before_write(code) is True, code
     for code in (
@@ -523,3 +528,171 @@ def test_refusals_before_any_write_are_distinguished_from_uncertain_failures() -
         "internal_error", "invalid_response", "invalid_document", "response_too_large", "http_500",
     ):
         assert refused_before_write(code) is False, code
+
+
+# ── Settings, bridge 0.10.0 ────────────────────────────────────────────────────
+
+
+def _reported_setting(value: Any, writable: bool, **bounds: Any) -> dict[str, Any]:
+    return {"state": "reported", "value": value, "writable": writable, **bounds}
+
+
+SETTINGS_BLOCK: dict[str, Any] = {
+    "mow_height": _reported_setting(40, True, min=25, max=75, step=1, unit="mm"),
+    "volume": _reported_setting(20, True, min=0, max=100, step=1, unit="%"),
+    "smart_no_go_zones": _reported_setting(True, True),
+    "sparse_lawn_optimization": _reported_setting(False, True),
+    "rain_auto_return": _reported_setting(True, False),
+    "child_lock": _reported_setting(True, False),
+    "bird_view_capture": _reported_setting(False, False),
+}
+
+
+def _setting_outcome(**overrides: Any) -> dict[str, Any]:
+    """A contract 1 setting answer as bridge 0.10.0 serves it, without raw data points."""
+    document: dict[str, Any] = {
+        "contract": 1,
+        "id": MOWER_ID,
+        "setting": "mow_height",
+        "result": "confirmed",
+        "write": {"dp": "110", "code": "mow_height", "value": 45},
+        "previous": 40,
+        "sent_at": "2026-09-25T09:00:00.100Z",
+        "stage": "reflected",
+        "end": "reflected",
+        "before_observed_at": "2026-09-25T09:00:00.050Z",
+        "reply": {"observed_at": "2026-09-25T09:00:00.120Z", "return_code_zero": True, "rejected": False},
+        "reflection": {"observed_at": "2026-09-25T09:00:00.600Z", "sequence": 71, "value": 45},
+        "other": None,
+        "reports": 1,
+    }
+    document.update(overrides)
+    return document
+
+
+def test_state_document_maps_reported_settings_onto_their_data_points() -> None:
+    telemetry = parse_state_document(_document(settings=SETTINGS_BLOCK), MOWER_ID)
+    assert telemetry.dps == {
+        "8": 85, "134": "Wifi", "109": 70,
+        "110": 40, "26": 20, "132": True, "141": False, "101": True, "47": True, "133": False,
+    }
+    assert telemetry.settings_writable == {
+        "110": True, "26": True, "132": True, "141": True, "101": False, "47": False, "133": False,
+    }
+    assert parse_state_document(_document(), MOWER_ID).settings_writable == {}, "an older bridge has no settings"
+
+
+def test_state_document_skips_settings_it_cannot_read_without_failing_the_poll() -> None:
+    odd = {
+        "mow_height": {"state": "invalid"},
+        "volume": {"state": "missing"},
+        "smart_no_go_zones": _reported_setting(1, True),
+        "sparse_lawn_optimization": _reported_setting("false", True),
+        "rain_auto_return": "reported",
+        "child_lock": _reported_setting(True, "yes"),
+    }
+    telemetry = parse_state_document(_document(settings=odd), MOWER_ID)
+    assert telemetry.dps == {"8": 85, "134": "Wifi", "109": 70, "47": True}
+    assert telemetry.settings_writable == {"47": False}, "only a boolean true is writable"
+    for block in (None, [], "settings", {"mow_height": _reported_setting(True, True)}):
+        assert parse_state_document(_document(settings=block), MOWER_ID).dps == {"8": 85, "134": "Wifi", "109": 70}
+
+
+def test_client_posts_a_setting_once_with_the_value_in_the_query() -> None:
+    switch = _setting_outcome(
+        setting="smart_no_go_zones",
+        write={"dp": "132", "code": "enable_smart_forbid_zone", "value": False},
+        previous=True,
+        reflection={"observed_at": "2026-09-25T09:00:00.600Z", "sequence": 72, "value": False},
+    )
+    session = _FakeSession([_FakeResponse(200, _json(_setting_outcome())), _FakeResponse(200, _json(switch))])
+    client, patcher = _client(session)
+    with patcher:
+        outcome = asyncio.run(client.async_set_setting(MOWER_ID, "mow_height", 45))
+        toggled = asyncio.run(client.async_set_setting(MOWER_ID, "smart_no_go_zones", False))
+    assert outcome == BridgeSettingOutcome(
+        result="confirmed",
+        stage="reflected",
+        end="reflected",
+        previous=40,
+        observed_at=datetime(2026, 9, 25, 9, 0, 0, 600000, tzinfo=UTC),
+    )
+    assert toggled.previous is True
+    assert [(method, url) for method, url, _ in session.requests] == [
+        ("POST", f"http://127.0.0.1:8090/v1/mowers/{MOWER_ID}/settings/mow_height?value=45"),
+        ("POST", f"http://127.0.0.1:8090/v1/mowers/{MOWER_ID}/settings/smart_no_go_zones?value=false"),
+    ], "each setting is sent exactly once"
+    for _, _, kwargs in session.requests:
+        assert kwargs["headers"] == {"Authorization": f"Bearer {TOKEN}", "Accept": "application/json"}
+        assert "data" not in kwargs and "json" not in kwargs, "the bridge ignores request bodies"
+        assert kwargs["timeout"].total == 75
+
+
+@pytest.mark.parametrize(
+    ("mower_id", "key", "value", "code"),
+    [
+        (MOWER_ID, "rain_auto_return", False, "mower_setting_read_only"),
+        (MOWER_ID, "child_lock", False, "mower_setting_read_only"),
+        (MOWER_ID, "bird_view_capture", True, "mower_setting_read_only"),
+        (MOWER_ID, "cut_height", 45, "not_found"),
+        (MOWER_ID, "mow_height", True, "invalid_setting_value"),
+        (MOWER_ID, "mow_height", "45", "invalid_setting_value"),
+        (MOWER_ID, "volume", 30.5, "invalid_setting_value"),
+        (MOWER_ID, "smart_no_go_zones", 1, "invalid_setting_value"),
+        ("not-a-mower-id", "mow_height", 45, "invalid_mower_id"),
+    ],
+)
+def test_client_refuses_read_only_and_malformed_settings_before_any_request(
+    mower_id: str, key: str, value: Any, code: str
+) -> None:
+    session = _FakeSession([])
+    client, patcher = _client(session)
+    with patcher, pytest.raises(BridgeClientError, match=code):
+        asyncio.run(client.async_set_setting(mower_id, key, value))
+    assert session.requests == []
+    assert refused_before_write(code) or code == "not_found"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({"result": "failed", "stage": "sent", "end": "rejected", "reflection": None}, ("failed", "rejected")),
+        ({"result": "uncertain", "stage": "sent", "end": "timed_out", "reflection": None}, ("uncertain", "timed_out")),
+    ],
+)
+def test_setting_outcome_keeps_failed_and_uncertain_explicit(overrides: dict[str, Any], expected: tuple[str, str]) -> None:
+    outcome = parse_setting_outcome(_setting_outcome(**overrides), MOWER_ID, "mow_height", 45)
+    assert (outcome.result, outcome.end) == expected
+    assert outcome.observed_at is None
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"contract": 2},
+        {"id": OTHER_ID},
+        {"setting": "volume"},
+        {"result": "done"},
+        {"stage": None},
+        {"write": {"dp": "110", "code": "mow_height", "value": 50}},
+        {"write": None},
+        {"previous": "40"},
+        {"previous": True},
+        {"reflection": None},
+        {"reflection": {"observed_at": "2026-09-25T09:00:00.600Z", "sequence": 71, "value": 50}},
+    ],
+)
+def test_setting_outcome_rejects_invalid_shapes(overrides: dict[str, Any]) -> None:
+    with pytest.raises(BridgeClientError, match="invalid_document"):
+        parse_setting_outcome(_setting_outcome(**overrides), MOWER_ID, "mow_height", 45)
+
+
+def test_setting_outcome_never_takes_true_for_one() -> None:
+    document = _setting_outcome(
+        setting="sparse_lawn_optimization",
+        write={"dp": "141", "code": "sparse_lawn_optimization", "value": 1},
+        previous=False,
+        reflection={"observed_at": "2026-09-25T09:00:00.600Z", "sequence": 71, "value": 1},
+    )
+    with pytest.raises(BridgeClientError, match="invalid_document"):
+        parse_setting_outcome(document, MOWER_ID, "sparse_lawn_optimization", True)

@@ -46,10 +46,10 @@ version 0.8.1.
 ## DP 107 activity
 
 The mower declares DP 107 `robot_status` as a raw data point. Library
-`@keesmod/eufy-mega-client` 0.19.0, pinned by the mower bridge to the release
+`@keesmod/eufy-mega-client` 0.20.0, pinned by the mower bridge to the release
 tarball with SHA-256
-`982ef2e72167629333a86fab869a8f48439ae33909f30922b1ea8534308f2297` from source commit
-`80734ebecf1c83a001b1919bbf85a5ba6689f0c6`, confirms three payloads on the
+`a47771ef8cbde4f169b1e281cf0fa8d4b10b90284bd85cfed5c0b9a0bf531c93` from source commit
+`ac93dc8e4bcf21952d8d66cc74d41e7808fdae9c`, confirms three payloads on the
 owned E15 (product code T2880, firmware 6.9.28, Anker eufy app 6.1.00): fields
 1 = 2 and 3 = 1 `mowing`, fields 1 = 2 and 3 = 2 `paused`, and fields 1 = 1 and
 3 = 1 `returning`. Each reached at least four app-correlated transitions across
@@ -173,3 +173,34 @@ acquisition adapter and the decoder are experimental software coverage and
 the decoder's numbering is capture-validated. A fresh acquisition decoded end
 to end on the owned E15, through the library or through the bridge, has not
 run. The bridge tests use synthetic snapshots only.
+
+## Settings through the bridge
+
+Mower bridge 0.10.0 serves the typed settings of library 0.20.0
+([settings contract](https://github.com/keesmod/eufy-mega-client/blob/main/docs/MOWER_SETTINGS.md)).
+The library names every data point, type and bound from two permitted
+sources: the owned E15's own declaration, read in a bounded read-only readout
+on 2026-09-25, and the official app's product script, recorded in its
+[settings schema receipt](https://github.com/keesmod/eufy-mega-client/blob/main/docs/research/E15_SETTINGS_SCHEMA_2026-09-25.md).
+They are the data points this integration's local backend already reads:
+
+| Entity | DP | Declared code | Bridge key | Written in bridge mode |
+| --- | --- | --- | --- | --- |
+| Cut Height | 110 | `mow_height`, 25 to 75 mm | `mow_height` | yes |
+| Volume | 26 | `volume_set`, 0 to 100 % | `volume` | yes |
+| Smart No-Go Suggestions | 132 | `enable_smart_forbid_zone` | `smart_no_go_zones` | yes |
+| Mow Yellow Grass | 141 | `sparse_lawn_optimization` | `sparse_lawn_optimization` | yes |
+| Stop on Rain Detection | 101 | `rain_auto_return` | `rain_auto_return` | never |
+| Child Protection | 47 | `child_lock` | `child_lock` | never |
+| Real Lawn Map | 133 | `enable_bird_view_capture` | `bird_view_capture` | never |
+
+Bridge mode maps each key onto its data point, so the entities keep their
+unique ids on both backends. Rain stop and child protection stay read only in
+bridge mode in either direction, as the owner decided on 2026-09-25 in issue
+#8, and so does the real lawn map, which the library leaves to the map work.
+The local backend's switches are unchanged. Every bridge write is one request
+that the library turns into one fresh query, one write and a read-back of the
+written value, and it is never retried. The mapping of the app's labels to DP
+141 and DP 133 is not established from the app's strings alone. The writes are
+software-verified. The supervised change, read-back and restore on the owned
+E15 is part of issue #8.
