@@ -33,7 +33,7 @@ the previous version with its options and data.
   marks it stale. Shutdown aborts a pending RTC request before any map
   connection opens. Account credentials and private map inputs remain outside
   public state, diagnostics and logs.
-- Software checks cover renewal, fresh inputs, concurrent requests, failure
+- Evidence: software checks cover renewal, fresh inputs, concurrent requests, failure
   retention, shutdown and file compatibility. Fresh E15 map transfer and the
   source-switch rehearsal remain acceptance work in #8.
 
