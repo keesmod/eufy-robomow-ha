@@ -151,6 +151,7 @@ class _FakeBridge:
         state: Any = None,
         command_answers: list[Any] | None = None,
         setting_answers: list[Any] | None = None,
+        work_parameter_answers: list[Any] | None = None,
     ) -> None:
         self.answers = answers
         self.requested: list[str] = []
@@ -160,6 +161,8 @@ class _FakeBridge:
         self.commands: list[tuple[str, str]] = []
         self.setting_answers = setting_answers or []
         self.settings: list[tuple[str, str, Any]] = []
+        self.work_parameter_answers = work_parameter_answers or []
+        self.work_parameters: list[tuple[str, str, str]] = []
         self.gate: asyncio.Event | None = None
 
     async def async_mower_state(self, mower_id: str) -> dict[str, Any]:
@@ -194,6 +197,15 @@ class _FakeBridge:
         from custom_components.eufy_robomow.bridge_client import parse_setting_outcome
 
         return parse_setting_outcome(answer, mower_id, key, value)
+
+    async def async_set_work_parameter(self, mower_id: str, key: str, value: str) -> Any:
+        self.work_parameters.append((mower_id, key, value))
+        answer = self.work_parameter_answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        from custom_components.eufy_robomow.bridge_client import parse_work_parameter_outcome
+
+        return parse_work_parameter_outcome(answer, mower_id, key, value)
 
 
 def _coordinator(hass: HomeAssistant, bridge: _FakeBridge, operating_mode: str = OPERATING_MODE_CONTROL) -> EufyMowerCoordinator:
@@ -261,8 +273,9 @@ def test_bridge_backend_owns_the_mower_without_a_local_device(tmp_path: Path) ->
             device.assert_not_called()
         assert coordinator.cloud_client is None
         assert coordinator.control_enabled is True
-        assert coordinator.writes_available is False, "cloud settings have no bridge route"
+        assert coordinator.writes_available is False, "the local backend's cloud client is never used"
         assert coordinator.setting_entities_available is True, "the local settings read through the bridge"
+        assert coordinator.work_parameter_entities_available is True, "the work parameters read through the bridge"
         assert coordinator.commands_available is False, "nothing before the bridge reports its mode"
 
         data = await coordinator._async_update_data()
@@ -282,8 +295,10 @@ def test_bridge_backend_owns_the_mower_without_a_local_device(tmp_path: Path) ->
             await coordinator.async_send_mower_command("start")
         with pytest.raises(HomeAssistantError, match="does not accept setting writes"):
             await coordinator.async_send_command("110", 40)
-        with pytest.raises(HomeAssistantError, match="bridge backend"):
+        with pytest.raises(HomeAssistantError, match="read only through the mower bridge"):
             await coordinator.async_set_cloud_setting(edge_mm=10)
+        with pytest.raises(HomeAssistantError, match="does not accept setting writes"):
+            await coordinator.async_set_cloud_setting(travel_speed="fast")
         assert bridge.settings == [], "a refused setting never reaches the bridge"
         device.assert_not_called()
         assert bridge.commands == [], "a refused command never reaches the bridge"
@@ -303,7 +318,7 @@ def test_bridge_backend_reads_routes_control_from_the_bridge_state(tmp_path: Pat
         assert coordinator.bridge_routes_control is True
         assert coordinator.bridge_control == CONTROL_BLOCK
         assert coordinator.commands_available is True
-        assert coordinator.writes_available is False, "cloud settings still have no bridge route"
+        assert coordinator.writes_available is False, "the local backend's cloud client is still never used"
         assert coordinator.bridge_routes_settings is False, "the control opt-in does not open the settings route"
         assert entity.supported_features == ALL_CONTROLS
         assert entity.supported_features & LawnMowerEntityFeature.DOCK, "dock goes through the bridge's stop route"
@@ -1213,11 +1228,17 @@ def test_bridge_settings_are_read_from_the_state_document_and_written_once(tmp_p
         assert coordinator.bridge_routes_control is False, "settings writes need no control mode on the bridge"
         assert coordinator.bridge_settings_writable["110"] is True
         assert coordinator.bridge_settings_writable["101"] is False
+        # Set as the coordinator's own refresh would, which the harness records instead.
+        coordinator.data = data
 
         await coordinator.async_send_command("110", 45)
+        assert coordinator.data["110"] == 45, "the confirmed value shows before the debounced refresh"
         await coordinator.async_send_command("132", False)
+        assert coordinator.data["132"] is False
         # A restore is a second, deliberate write with its own fresh query behind the bridge.
         await coordinator.async_send_command("110", 40)
+        assert coordinator.data["110"] == 40, "a restore within the refresh cooldown shows at once"
+        assert coordinator.data["26"] == 20, "only the written setting changes"
         assert bridge.settings == [
             (MOWER_ID, "mow_height", 45),
             (MOWER_ID, "smart_no_go_zones", False),
@@ -1282,36 +1303,142 @@ def test_bridge_setting_outcomes_and_failures_are_never_repeated(tmp_path: Path)
             ],
         )
         coordinator = _coordinator(hass, bridge)
-        await coordinator._async_update_data()
+        coordinator.data = await coordinator._async_update_data()
         for match in ("rejected the setting", "did not report it", "refused the setting before writing it", "may have been written"):
             with pytest.raises(HomeAssistantError, match=match):
                 await coordinator.async_send_command("26", 30)
         assert bridge.settings == [(MOWER_ID, "volume", 30)] * 4, "each write reached the bridge exactly once"
+        assert coordinator.data["26"] == 20, "an unconfirmed write never changes the shown value"
         assert cast(AsyncMock, coordinator.async_request_refresh).await_count == 4
 
     _run(scenario, tmp_path)
 
 
-def test_setting_entities_keep_their_unique_ids_and_exist_in_bridge_mode_without_cloud_entities() -> None:
+WORK_PARAMETERS_BLOCK: dict[str, Any] = {
+    "state": "reported",
+    "source": "cloud",
+    "observed_at": "2026-09-25T08:59:00.000Z",
+    "error": None,
+    "mow_speed": {"value": "medium", "writable": True, "options": ["low", "medium", "adaptive_high"]},
+    "blade_speed": {"value": "medium", "writable": True, "options": ["low", "medium", "high"]},
+    "edge_distance": 120,
+    "mow_spacing": 80,
+    "direction": {"mode": "single", "single_angle": 90, "current_angle": 90},
+}
+
+
+def _work_parameter_outcome(key: str, field: int, value: str, previous: str, result: str = "confirmed") -> dict[str, Any]:
+    """A contract 1 work parameter answer of bridge 0.11.0. Raw data points are never part of it."""
+    confirmed = result == "confirmed"
+    return {
+        "contract": 1,
+        "id": MOWER_ID,
+        "setting": key,
+        "result": result,
+        "write": {"dp": "155", "code": "reserved_raw_155", "field": field, "value": value},
+        "previous": previous,
+        "cloud_observed_at": "2026-09-25T08:59:00.000Z",
+        "sent_at": "2026-09-25T09:00:00.100Z",
+        "stage": "reflected" if confirmed else "sent",
+        "end": "reflected" if confirmed else ("rejected" if result == "failed" else "timed_out"),
+        "before_observed_at": "2026-09-25T09:00:00.050Z",
+        "reply": {"observed_at": "2026-09-25T09:00:00.120Z", "return_code_zero": True, "rejected": result == "failed"},
+        "reflection": {"observed_at": "2026-09-25T09:00:00.300Z", "sequence": 81, "value": value} if confirmed else None,
+        "other": None,
+        "reports": 1 if confirmed else 0,
+    }
+
+
+def test_bridge_work_parameter_speeds_are_written_once_and_shown_at_once(tmp_path: Path) -> None:
+    async def scenario(hass: HomeAssistant) -> None:
+        bridge = _FakeBridge(
+            [_document(settings=SETTINGS_BLOCK, work_parameters=WORK_PARAMETERS_BLOCK) for _ in range(2)],
+            state=_settings_state(),
+            work_parameter_answers=[
+                _work_parameter_outcome("mow_speed", 2, "adaptive_high", "medium"),
+                _work_parameter_outcome("blade_speed", 6, "low", "medium"),
+                _work_parameter_outcome("blade_speed", 6, "medium", "low", result="failed"),
+                _work_parameter_outcome("blade_speed", 6, "medium", "low", result="uncertain"),
+                BridgeClientError("mower_setting_evidence_missing", 409),
+                BridgeClientError("timeout"),
+            ],
+        )
+        coordinator = _coordinator(hass, bridge)
+        coordinator.data = await coordinator._async_update_data()
+        assert coordinator.data["cloud_travel_speed"] == "normal"
+        assert coordinator.data["cloud_pad_direction"] == 90
+        assert coordinator.bridge_settings_writable["cloud_travel_speed"] is True
+
+        await coordinator.async_set_cloud_setting(travel_speed="fast")
+        assert coordinator.data["cloud_travel_speed"] == "fast", "the confirmed option shows at once"
+        await coordinator.async_set_cloud_setting(blade_speed="slow")
+        assert coordinator.data["cloud_blade_speed"] == "slow"
+        assert bridge.work_parameters == [
+            (MOWER_ID, "mow_speed", "adaptive_high"),
+            (MOWER_ID, "blade_speed", "low"),
+        ], "the library's own names travel to the bridge"
+
+        for match in ("rejected the setting", "did not report it", "refused the setting before writing it", "may have been written"):
+            with pytest.raises(HomeAssistantError, match=match):
+                await coordinator.async_set_cloud_setting(blade_speed="normal")
+        assert coordinator.data["cloud_blade_speed"] == "slow", "an unconfirmed write never changes the shown option"
+        assert len(bridge.work_parameters) == 6, "each write reached the bridge exactly once"
+
+        # Edge distance, path distance and pad direction are read only, whatever the value.
+        for change in ({"edge_mm": 100}, {"path_mm": 100}, {"pad_direction": 180}):
+            with pytest.raises(HomeAssistantError, match="read only through the mower bridge"):
+                await coordinator.async_set_cloud_setting(**change)
+        with pytest.raises(HomeAssistantError, match="no value for this option"):
+            await coordinator.async_set_cloud_setting(travel_speed="turbo")
+        with pytest.raises(HomeAssistantError, match="one setting at a time"):
+            await coordinator.async_set_cloud_setting(travel_speed="fast", blade_speed="fast")
+        # A speed the library cannot restore is not writable, and a closed route refuses first.
+        coordinator.bridge_settings_writable["cloud_travel_speed"] = False
+        with pytest.raises(HomeAssistantError, match="not report this setting as writable"):
+            await coordinator.async_set_cloud_setting(travel_speed="slow")
+        coordinator.bridge_routes_settings = False
+        with pytest.raises(HomeAssistantError, match="does not accept setting writes"):
+            await coordinator.async_set_cloud_setting(blade_speed="fast")
+        assert len(bridge.work_parameters) == 6, "no refused write reached the bridge"
+        assert bridge.settings == [] and bridge.commands == []
+
+    _run(scenario, tmp_path)
+
+
+def test_setting_entities_keep_their_unique_ids_and_exist_in_bridge_mode() -> None:
     from custom_components.eufy_robomow import number, select, switch
 
     entry = _entry(**{CONF_BACKEND: BACKEND_BRIDGE})
-    for mode, expected_numbers, expected_switches in (
-        (OPERATING_MODE_CONTROL, ["synthetic-device_cut_height", "synthetic-device_volume"], 5),
-        (OPERATING_MODE_OBSERVE_ONLY, [], 0),
+    numbers = [
+        "synthetic-device_cut_height",
+        "synthetic-device_volume",
+        "synthetic-device_edge_distance",
+        "synthetic-device_pad_direction",
+    ]
+    selects = ["synthetic-device_path_mm", "synthetic-device_travel_speed", "synthetic-device_blade_speed"]
+    for mode, expected_numbers, expected_switches, expected_selects in (
+        (OPERATING_MODE_CONTROL, numbers, 5, selects),
+        (OPERATING_MODE_OBSERVE_ONLY, [], 0, []),
     ):
         coordinator = _bridge_coordinator(operating_mode=mode, cloud_client=None)
-        coordinator.data = {"8": 85, "110": 40, "26": 20, "101": True, "47": True, "132": True, "141": False, "133": False}
+        coordinator.data = {
+            "8": 85, "110": 40, "26": 20, "101": True, "47": True, "132": True, "141": False, "133": False,
+            "cloud_travel_speed": "normal", "cloud_blade_speed": "fast",
+            "cloud_edge_mm": 120, "cloud_path_mm": 80, "cloud_pad_direction": 90,
+        }
         hass = SimpleNamespace(data={DOMAIN: {entry.entry_id: coordinator}})
         added: dict[str, list[Any]] = {"number": [], "switch": [], "select": []}
         for name, platform in (("number", number), ("switch", switch), ("select", select)):
             asyncio.run(platform.async_setup_entry(cast(HomeAssistant, hass), cast(Any, entry), added[name].extend))
         assert [entity.unique_id for entity in added["number"]] == expected_numbers
         assert len(added["switch"]) == expected_switches
-        assert added["select"] == [], "the cloud selects have no bridge route"
+        assert [entity.unique_id for entity in added["select"]] == expected_selects
         if expected_switches:
-            height, volume = added["number"]
+            height, volume, edge, pad = added["number"]
             assert (height.native_value, volume.native_value) == (40.0, 20.0)
+            assert (edge.native_value, pad.native_value) == (12.0, 0.0), "the same reading as the local backend"
             by_id = {entity.unique_id: entity for entity in added["switch"]}
             assert by_id["synthetic-device_rain_detection"].is_on is True
             assert by_id["synthetic-device_mow_yellow_grass"].is_on is False
+            path, travel, blade = added["select"]
+            assert (path.current_option, travel.current_option, blade.current_option) == ("8 cm", "normal", "fast")

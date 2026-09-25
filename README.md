@@ -24,6 +24,9 @@ Version 0.14.0 reads the local settings through the mower bridge and writes
 cut height, volume and two lawn options through its opt-in settings route.
 Version 0.14.1 reads DP 107 with the official app's mission status schema. Version 0.14.2 runs
 with mower bridge 0.10.1 on library 0.22.0, which does the same in bridge mode.
+Version 0.15.0 reads the DP 155 work parameters through mower bridge 0.11.0,
+writes Travel Speed and Blade Speed through it and shows a confirmed setting at
+once.
 
 ---
 
@@ -190,9 +193,14 @@ what it cannot prove, writes once and confirms only a fresh report of the new
 value. Nothing is retried, and a change back is a second deliberate write.
 Stop on Rain Detection, Child Protection and Real Lawn Map stay read only in
 bridge mode: turning them on or off raises an error before any request, change
-them in the Eufy app. The cloud settings (Edge Distance, Pad Direction, Path
-Distance, Travel Speed and Blade Speed) have no bridge route and do not exist
-in bridge mode. The map entity has its own source choice, the bridge's map
+them in the Eufy app. Since 0.15.0 the cloud settings (Edge Distance, Pad
+Direction, Path Distance, Travel Speed and Blade Speed) exist in bridge mode
+too, with the same unique ids, read from the `work_parameters` of the bridge's
+state document (bridge 0.11.0 or later). The bridge takes them from a cloud
+reading at most every five minutes, or from the report that confirmed a write.
+Travel Speed and Blade Speed are written through the bridge's settings route
+under the same two opt-ins, once each. Edge Distance, Pad Direction and Path
+Distance are read only in bridge mode. The map entity has its own source choice, the bridge's map
 route or the external map source, see [Optional read-only map](#optional-read-only-map).
 
 Each command is one `POST` to the bridge, sent exactly once, and the bridge's
@@ -410,7 +418,7 @@ in [issue #12](https://github.com/keesmod/eufy-robomow-ha/issues/12). See
 
 - **Local polling** (every 10 s) via the [Tuya local protocol](https://github.com/jasonacox/tinytuya) for real-time status (battery, activity state, etc.). With the **bridge** backend the mower bridge polls the mower instead and Home Assistant reads its typed state every 10 s over an authenticated private HTTP connection.
 - **Cloud polling** (every 5 min) via the Tuya mobile API for settings stored as protobuf blobs in DP155.
-- **Writes**, when control is explicitly enabled, go to either the local mower or the cloud API depending on the setting. With the **bridge** backend start, pause, resume and dock go through the bridge's command routes instead, once each, dock through the bridge's stop route, and cut height, volume, smart no-go suggestions and mow yellow grass through its settings route, once each. Rain stop, child protection, the real lawn map and the cloud settings have no bridge write.
+- **Writes**, when control is explicitly enabled, go to either the local mower or the cloud API depending on the setting. With the **bridge** backend start, pause, resume and dock go through the bridge's command routes instead, once each, dock through the bridge's stop route, and cut height, volume, smart no-go suggestions and mow yellow grass through its settings route, once each. Rain stop, child protection, the real lawn map, edge distance, pad direction and path distance have no bridge write, and travel and blade speed go through the settings route too.
 - **Optional map acquisition** uses five-minute idle snapshots and two-second
   `ETag`-aware live pulls while mowing, then renders the validated geometry
   locally as a script-free SVG. With the **bridge** map source the bridge
@@ -436,6 +444,14 @@ built and verified and what is confirmed on hardware.
 between the backends, rollback and the later retirement of the Android map
 helper.
 
+- **0.15.0, work parameters through the bridge, and bridge 0.11.0.** With
+  mower bridge 0.11.0 on library 0.23.0, bridge mode creates Edge Distance,
+  Pad Direction, Path Distance, Travel Speed and Blade Speed with the unique
+  ids of the local backend. Travel Speed and Blade Speed are written through
+  the bridge's settings route, the other three are read only there. A setting
+  confirmed through the bridge now shows its new value at once instead of
+  after the debounced refresh. Update the app with a backup first, then the
+  integration.
 - **0.14.2, bridge 0.10.1 on library 0.22.0.** Mower bridge 0.10.1 pins
   library 0.22.0, which reads DP 107 as the mower's mission status like the
   local backend since 0.14.1. In bridge mode a Box, zone or scheduled task now

@@ -42,10 +42,11 @@ command was sent. See the [receipt](https://github.com/keesmod/eufy-robomow-ha/i
   `bridge.mapbundle`. The external URL stays stored while `bridge` is
   selected.
 
-The entities keep their unique ids on both backends. Bridge mode does not
-create the cloud settings: edge distance, pad direction, path distance, travel
-speed and blade speed. Those five show as unavailable while the bridge backend
-runs, keep their registry entries and return with the local backend.
+The entities keep their unique ids on both backends. Since integration 0.15.0
+with bridge 0.11.0 both backends create the same entities, the DP 155 work
+parameters included: edge distance, pad direction, path distance, travel speed
+and blade speed. With an older bridge those five show as unavailable in bridge
+mode, keep their registry entries and return with the local backend.
 `tests/test_migration.py` pins this.
 
 ## Switching the backend

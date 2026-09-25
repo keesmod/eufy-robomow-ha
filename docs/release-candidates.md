@@ -135,6 +135,8 @@ on hardware in this programme.
   bridge.
 - The cloud settings of the local backend: edge distance, pad direction, path
   distance, travel speed and blade speed, inherited from upstream.
+- The same five in bridge mode since 0.15.0: travel and blade speed written
+  through the bridge, the other three read only there.
 - The standalone container image outside CI.
 - The opt-in planning package. Automatic mowing stays off.
 - Any model other than the E15. E18 support is not claimed.
@@ -146,8 +148,8 @@ on hardware in this programme.
   installation, which needs map provisioning. The backend and version
   migration passed its rehearsal on 2026-09-25.
 - The retirement plan of the Android map helper, which starts only after both.
-- The work parameters of DP 155 in bridge mode, which the settings workstream
-  of #8 is adding.
+- A supervised write of the travel and blade speeds through the bridge, from
+  the settings workstream of #8.
 - A fresh read of the firmware for the candidate's record.
 - The licensing boundary and an explicit authorisation before any publication.
 

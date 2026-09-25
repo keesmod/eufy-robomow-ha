@@ -136,6 +136,19 @@ BRIDGE_WRITABLE_SETTING_DPS = frozenset(
 # The settings that carry an integer. The others are switches.
 BRIDGE_NUMBER_SETTING_DPS = frozenset({DP_CUT_HEIGHT, DP_VOLUME})
 
+# DP 155 work parameters through the mower bridge (bridge 0.11.0, library 0.23.0).
+# The library writes only the two speeds, each with its own names for the values.
+# The bridge serves edge distance, mow spacing and the direction read only.
+BRIDGE_WORK_PARAMETER_KEYS: dict[str, str] = {
+    CLOUD_TRAVEL_SPEED: "mow_speed",
+    CLOUD_BLADE_SPEED: "blade_speed",
+}
+# The integration's speed option for each value the library names.
+BRIDGE_SPEED_OPTIONS: dict[str, dict[str, str]] = {
+    "mow_speed": {"low": SPEED_SLOW, "medium": SPEED_NORMAL, "adaptive_high": SPEED_FAST},
+    "blade_speed": {"low": SPEED_SLOW, "medium": SPEED_NORMAL, "high": SPEED_FAST},
+}
+
 # ── Unmapped DPs for reverse engineering (all DPS exposed as sensors) ─────────
 # These are automatically discovered and added as generic sensors.
 

@@ -260,8 +260,12 @@ separate `settings_mode: write`, and only cut height, volume, smart no-go
 suggestions and mow yellow grass are written. Rain stop, child protection and
 the real lawn map stay read only there, see
 [Settings through the bridge](protocol-provenance.md#settings-through-the-bridge).
-The cloud settings (edge distance, pad direction, path distance, travel and
-blade speed) have no bridge route. The map
+Since integration 0.15.0 and bridge 0.11.0 the DP 155 work parameters (edge
+distance, pad direction, path distance, travel and blade speed) read the
+bridge's `work_parameters` in bridge mode, and the travel and blade speeds are
+written through the same settings route and opt-ins, see
+[Work parameters through the bridge](protocol-provenance.md#work-parameters-through-the-bridge).
+The map
 route is read-only, needs the operator's provisioning and has not acquired a
 live map through the bridge yet, that map acceptance is part of
 keesmod/eufy-robomow-ha#8 as well. Physical control keeps its explicit opt-in
