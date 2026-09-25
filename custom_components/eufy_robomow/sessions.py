@@ -15,9 +15,9 @@ from .telemetry import task_active
 MAX_SESSIONS = 50
 MAX_OBSERVATION_GAP = 45
 # The bridge's typed activities and what each one observes about the task. Only
-# these are evidence. Library 0.16.0 confirms mowing, paused and returning on
-# the E15, the inactive rows wait for a confirmed payload, so a bridge-mode
-# session cannot observe its end today. Anything else is ignored.
+# these are evidence. Library 0.22.0 reports mowing, paused, returning and, for
+# a mission status without a mission, idle on the E15, so a bridge-mode session
+# ends when idle is reported. Anything else is ignored.
 _ACTIVE_ACTIVITIES = frozenset({"mowing", "paused", "returning"})
 _INACTIVE_ACTIVITIES = frozenset({"docked", "charging", "idle"})
 

@@ -81,7 +81,7 @@ class DiscoveringAdapter implements MowerAdapter {
 }
 
 /** The three confirmed DP 107 definitions name this data point, so the library lists it once per definition. */
-const STATUS_DP = ['107', '107', '107'];
+const STATUS_DP = ['107', '107', '107', '107'];
 
 /**
  * One synthetic DP 107 payload: varint records derived from the library's confirmed field
@@ -461,7 +461,7 @@ test('the state route serves the four typed fields with freshness, closes the se
   assert.deepEqual(await settledHandles(handles), handles);
 });
 
-test('the pinned release confirms exactly the three DP 107 activities and no other status definition', () => {
+test('the pinned release confirms the three DP 107 wire activities and the mission status, and no other status definition', () => {
   const status = E15_TELEMETRY_DEFINITIONS.filter((definition) => definition.field === 'status');
   assert.deepEqual(
     status.map((definition) => [definition.dp, definition.level, definition.decode.kind === 'wire' ? definition.decode.match : null, definition.decode.kind === 'wire' ? definition.decode.activity : null]),
@@ -469,8 +469,17 @@ test('the pinned release confirms exactly the three DP 107 activities and no oth
       ['107', 'confirmed', { 1: 2, 3: 1 }, 'mowing'],
       ['107', 'confirmed', { 1: 2, 3: 2 }, 'paused'],
       ['107', 'confirmed', { 1: 1, 3: 1 }, 'returning'],
+      ['107', 'confirmed', null, null],
     ],
   );
+  // Library 0.22.0 reads DP 107 as the mower's mission status: every mowing mission, the Box,
+  // zone and scheduled tasks included, and the recharge mission.
+  const missionStatus = status[3]!.decode;
+  assert.equal(missionStatus.kind, 'mission_status');
+  if (missionStatus.kind === 'mission_status') {
+    assert.deepEqual(missionStatus.mowing, [2, 4, 5, 7, 8, 9, 10, 16, 17, 18, 22]);
+    assert.deepEqual(missionStatus.returning, [1]);
+  }
   assert.ok(E15_TELEMETRY_DEFINITIONS.every((definition) => definition.field !== 'progress'), 'mowing progress stays unconfirmed');
 });
 
@@ -505,11 +514,21 @@ test('the state route serves the confirmed activity with its observation time an
   // Absent DP 107 is missing, never an activity.
   robotStatus = undefined;
   assert.deepEqual(await status(), { state: 'missing', dp: STATUS_DP });
-  // Withheld shapes are invalid for that report: default, field 6, map-saving, transitional, malformed and wrongly typed.
+  // Since library 0.22.0 the mission status reads the Box task and the idle message, the
+  // default payload, hibernation and the saving-data flag included.
+  for (const [name, payload, activity] of [
+    ['a Box task', wirePayload({ 1: 17, 3: 1 }), 'mowing'],
+    ['a paused zone task', wirePayload({ 1: 10, 3: 2 }), 'paused'],
+    ['default empty', '', 'idle'],
+    ['default zero byte', Buffer.from([0]).toString('base64'), 'idle'],
+    ['hibernation', wirePayload({ 4: 2 }), 'idle'],
+    ['field 6', wirePayload({ 6: 1 }), 'idle'],
+  ] as const) {
+    robotStatus = payload;
+    assert.deepEqual(await status(), { state: 'reported', value: activity, dp: STATUS_DP, source: 'local-tuya-3.5', observedAt }, name);
+  }
+  // Withheld shapes are invalid for that report: map-saving, transitional, malformed and wrongly typed.
   for (const [name, payload] of [
-    ['default empty', ''],
-    ['default zero byte', Buffer.from([0]).toString('base64')],
-    ['field 6', wirePayload({ 6: 1 })],
     ['map saving', wirePayload({ 2: 5, 3: 1 })],
     ['transitional', wirePayload({ 1: 2 })],
     ['malformed', 'not base64!'],
@@ -518,7 +537,7 @@ test('the state route serves the confirmed activity with its observation time an
     robotStatus = payload;
     assert.deepEqual(await status(), { state: 'invalid', dp: STATUS_DP }, name);
   }
-  assert.equal(log.opened.length, 11, 'every request ran its own bounded query');
+  assert.equal(log.opened.length, 14, 'every request ran its own bounded query');
   // A later failure serves the last activity as stale with its original observation time. Age never changes it.
   robotStatus = wirePayload({ 1: 2, 3: 1 });
   await status();
