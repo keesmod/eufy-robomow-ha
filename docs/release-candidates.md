@@ -17,9 +17,9 @@ backends and rollback are described in
 
 | Component | Version | Pinned inputs |
 | --- | --- | --- |
-| Integration `eufy_robomow` | 0.15.2 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
-| Mower bridge, container image | 0.11.0 | `@keesmod/eufy-mega-client` 0.23.0 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
-| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.11.0 | the same inputs, built by the Supervisor on the host |
+| Integration `eufy_robomow` | 0.15.3 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
+| Mower bridge, container image | 0.12.0 | `@keesmod/eufy-mega-client` 0.24.0 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
+| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.12.0 | the same inputs, built by the Supervisor on the host |
 
 The checksums of every candidate that was built are recorded in #8. The
 candidates of 0.15.0 and 0.15.1 with bridge 0.11.0, built from `64ce862` and
@@ -29,7 +29,26 @@ installed files after the 2026-09-25 deployment. The configuration check
 passed before the Core restart. The entry loaded with all 23 enabled entities
 available, the mower docked and the external map source retained. Its archive
 SHA-256 is `94a59748161f72c8d2f6d8b949d9ab5ed8217df78bfcb799d539d45d67cbff9d`.
-Bridge 0.11.0 is unchanged. CI runs the
+The candidate from `97f0062` (#59) contains integration 0.15.3 and bridge/app
+0.12.0. The app was installed with a Supervisor backup on 2026-09-25 at
+15:58 UTC, after the configuration check passed. Its 17 source files matched
+the candidate. Runtime reported bridge 0.12.0 on library 0.24.0, with the same
+options and bridge identity. The integration's 25 installed files matched the
+0.15.3 candidate, its entry was loaded and all 23 enabled entities remained
+available. The mower was docked, the backend local and the external map source
+healthy. The bridge remained `observe_only`, with maps and settings writes
+disabled. No Core restart or physical command was needed for this app update.
+The app archive SHA-256 is
+`60c4781398cee506e4ce491bc3cf7cce518112f885171176cb52cd1d5a042401`.
+The integration archive SHA-256 is
+`a9a6a4273690eb9b1a90c1a772b059b017feeafcb3be5a9df68bef6f8d3282e5`.
+
+Library 0.24.0 was published separately with the owner's approval. Its
+[release](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.24.0)
+comes from `3c21ac4`, and the downloaded package matched its manifest and
+checksums. The mower candidates remain unpublished.
+
+CI runs the
 tests on Home Assistant 2026.7.2, and the rehearsal ran on Home Assistant
 2026.9.3 with Supervisor 2026.09.2. The hardware evidence below comes from the
 owner's Home Assistant OS installation with the owned E15 (T2880) on firmware
@@ -126,8 +145,8 @@ Deployment:
 
 - The app candidate built and ran on a Supervisor (amd64), with its own
   configuration folder mounted read only, and was updated with a Supervisor
-  backup from 0.7.1 to 0.11.0 (2026-09-24 and 2026-09-25).
-- The integration was upgraded from 0.7.0 to 0.15.0 by replacing its folder.
+  backup from 0.7.1 to 0.12.0 (2026-09-24 and 2026-09-25).
+- The integration was upgraded from 0.7.0 to 0.15.3 by replacing its folder.
   The config entry and its entities were kept (2026-09-24 and 2026-09-25).
 - The migration and rollback rehearsal, see the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5832886365). It
   covered a switch refused while the bridge was unreachable, a bridge lost
@@ -141,9 +160,10 @@ Deployment:
 These parts are software-verified or inherited. They have not been confirmed
 on hardware in this programme.
 
-- The bridge's read-only map route and the `bridge` map source. No live map has
-  been acquired through the bridge, and the route needs map provisioning that
-  the operator supplies.
+- The bridge's read-only map route and the `bridge` map source. Bridge 0.12.0
+  obtains fresh provisioning from library 0.24.0 in explicit cloud mode, or
+  reads an operator-supplied file in file mode. Fresh live acquisition with the
+  automatic producer still needs hardware acceptance.
 - The `external` map source. It has been in daily use on the owner's
   installation since 0.5.0, but native map acceptance has not passed.
 - The no-go zones on the map since 0.15.1, from map-record field 12. The
