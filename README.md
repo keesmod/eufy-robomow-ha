@@ -426,6 +426,11 @@ protocol tests.
 
 ## Upgrade notes
 
+[CHANGELOG.md](CHANGELOG.md) lists every integration version with its
+evidence, upgrade and rollback, and [bridge/CHANGELOG.md](bridge/CHANGELOG.md)
+does the same for the mower bridge and its app. The notes below cover what an
+upgrade changes for an existing installation.
+
 - **0.14.2, bridge 0.10.1 on library 0.22.0.** Mower bridge 0.10.1 pins
   library 0.22.0, which reads DP 107 as the mower's mission status like the
   local backend since 0.14.1. In bridge mode a Box, zone or scheduled task now
