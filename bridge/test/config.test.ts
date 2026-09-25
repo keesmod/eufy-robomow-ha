@@ -200,3 +200,15 @@ test('the map route needs an absolute provisioning file and optionally names its
   assert.equal(ENV.map_provisioning_file, 'EUFY_MOWER_MAP_PROVISIONING_FILE');
   assert.equal(ENV.map_mower_id, 'EUFY_MOWER_MAP_MOWER_ID');
 });
+
+test('cloud map provisioning is explicit and cannot also select a file', async () => {
+  const id = 'c'.repeat(64);
+  assert.deepEqual(resolveConfig(syntheticValues({ map_provisioning_mode: 'cloud' })).maps, { provisioningFile: null, mowerId: null });
+  assert.deepEqual(resolveConfig(syntheticValues({ map_provisioning_mode: 'cloud', map_mower_id: id })).maps, { provisioningFile: null, mowerId: id });
+  assert.equal(resolveConfig(syntheticValues({ map_provisioning_mode: 'file' })).maps, null);
+  rejects(syntheticValues({ map_provisioning_mode: 'automatic' }), 'map_provisioning_mode');
+  rejects(syntheticValues({ map_provisioning_mode: 'cloud', map_provisioning_file: '/private/map.json' }), 'map_provisioning_file');
+  rejects(syntheticValues({ map_provisioning_mode: 'cloud', map_mower_id: 'not-an-id' }), 'map_mower_id');
+  const result = await loadConfig({ [ENV.token]: TOKEN, [ENV.email]: EMAIL, [ENV.password]: PASSWORD, [ENV.country]: 'nl', [ENV.map_provisioning_mode]: 'cloud' });
+  assert.deepEqual(result.maps, { provisioningFile: null, mowerId: null });
+});

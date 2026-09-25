@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
-import type { AuthAnswer, AuthState, MowerAdapter, MowerDevice } from '@keesmod/eufy-mega-client';
+import { EufyError, type AuthAnswer, type AuthState, type MapSessionProvisioning, type MowerAdapter, type MowerDevice } from '@keesmod/eufy-mega-client';
 import { MowerBridge, type BridgeDependencies, type BridgeState } from '../src/bridge.ts';
 import { MAP_CONTENT_TYPE, libraryMapAcquisition } from '../src/maps.ts';
 import { MOWERS_PATH, STATE_PATH } from '../src/server.ts';
@@ -26,8 +26,14 @@ function device(id: string): MowerDevice {
 class Adapter implements MowerAdapter {
   connected = false;
   devices: MowerDevice[] = [device(ID_A)];
+  provisions: string[] = [];
+  connects = 0;
+  failProvision = false;
+  holdProvision = false;
+  provisionAborted = false;
 
   async connect(_answer: AuthAnswer | undefined, _signal: AbortSignal): Promise<AuthState> {
+    this.connects++;
     this.connected = true;
     return { state: 'connected' };
   }
@@ -39,12 +45,26 @@ class Adapter implements MowerAdapter {
   async discover(_signal: AbortSignal): Promise<MowerDevice[]> {
     return this.devices.map((entry) => ({ ...entry }));
   }
+
+  async provisionMapSession(id: string, signal: AbortSignal) {
+    this.provisions.push(id);
+    if (this.holdProvision) {
+      await new Promise<void>((_resolve, reject) => {
+        const abort = () => { this.provisionAborted = true; reject(new EufyError('request_aborted')); };
+        signal.addEventListener('abort', abort, { once: true });
+        if (signal.aborted) abort();
+      });
+    }
+    if (this.failProvision) throw new EufyError('mower_map_invalid_provisioning');
+    return { ...structuredClone(SYNTHETIC_PROVISIONING), expiresAt: Date.now() + 120_000 + this.provisions.length };
+  }
 }
 
 interface MapFixture {
   bridge: MowerBridge;
   clock: { now: number };
   maps: FakeMaps;
+  adapter: Adapter;
   provisioning: string;
   privateDirectory: string;
   get: (path: string, headers?: Record<string, string>) => Promise<Reply>;
@@ -53,7 +73,7 @@ interface MapFixture {
 
 async function mapFixture(
   t: TestContext,
-  options: { devices?: MowerDevice[]; mowerId?: string; configured?: boolean; provisioning?: boolean; dependencies?: Omit<BridgeDependencies, 'adapter' | 'now'> } = {},
+  options: { devices?: MowerDevice[]; mowerId?: string; configured?: boolean; provisioning?: boolean; cloud?: boolean; dependencies?: Omit<BridgeDependencies, 'adapter' | 'now'> } = {},
 ): Promise<MapFixture> {
   const directory = await temporaryDirectory();
   t.after(directory.remove);
@@ -64,7 +84,7 @@ async function mapFixture(
   const clock = { now: T0 };
   const maps = fakeMaps();
   const config = testConfig(directory.path, {
-    maps: options.configured === false ? null : { provisioningFile: provisioning, mowerId: options.mowerId ?? null },
+    maps: options.configured === false ? null : { provisioningFile: options.cloud ? null : provisioning, mowerId: options.mowerId ?? null },
   });
   const bridge = new MowerBridge(config, { adapter: () => adapter, now: () => clock.now, mapAcquisition: maps.create, mapWatchIntervalMs: 5, ...options.dependencies });
   t.after(() => bridge.stop().catch(() => {}));
@@ -74,7 +94,7 @@ async function mapFixture(
   assert.ok(address);
   const base = `http://127.0.0.1:${address.port}`;
   const get = (path: string, headers: Record<string, string> = {}) => call(base, path, { token: TOKEN, headers });
-  return { bridge, clock, maps, provisioning, privateDirectory, get, state: async () => (await get(STATE_PATH)).json as BridgeState };
+  return { bridge, clock, maps, adapter, provisioning, privateDirectory, get, state: async () => (await get(STATE_PATH)).json as BridgeState };
 }
 
 /** The demand reaches the library after the provisioning file was read, so wait for it. */
@@ -102,6 +122,71 @@ test('without map provisioning the route answers 404 and the state reports no ma
   const state = await f.state();
   assert.deepEqual(state.routes, { discovery: true, state: true, control: false, maps: false, settings: false });
   assert.equal(state.maps, null);
+  assert.equal(f.maps.created.length, 0);
+});
+
+test('cloud mode renews provisioning for each demand without reading an operator file', async (t) => {
+  const f = await mapFixture(t, { cloud: true, provisioning: false });
+  await Promise.all([f.get(mapPath(ID_A)), f.get(mapPath(ID_A))]);
+  const first = await nextDemand(f, 1);
+  assert.deepEqual(f.adapter.provisions, [ID_A]);
+  first.publish(streams({ name: LAWN_NAME }), f.clock.now);
+  first.end('demand_expired');
+  await settled(f);
+  assert.equal((await f.get(mapPath(ID_A))).status, 200);
+  assert.equal(f.adapter.provisions.length, 1);
+  f.clock.now += 300_001;
+  await f.get(mapPath(ID_A));
+  const second = await nextDemand(f, 2);
+  assert.deepEqual(f.adapter.provisions, [ID_A, ID_A]);
+  assert.notEqual((first.provisioning as MapSessionProvisioning).expiresAt, (second.provisioning as MapSessionProvisioning).expiresAt);
+  assert.equal(f.adapter.connects, 1);
+  assertPrivate(JSON.stringify(await f.state()));
+});
+
+test('cloud mode renews expired authentication before the next demand', async (t) => {
+  const f = await mapFixture(t, { cloud: true });
+  await f.get(mapPath(ID_A));
+  const first = await nextDemand(f, 1);
+  first.publish(streams(), f.clock.now);
+  first.end('demand_expired');
+  await settled(f);
+  f.adapter.connected = false;
+  f.clock.now += 300_001;
+  await f.get(mapPath(ID_A));
+  await nextDemand(f, 2);
+  assert.equal(f.adapter.connects, 2);
+  assert.equal(f.adapter.provisions.length, 2);
+});
+
+test('failed cloud provisioning retains the prior map and does not create an acquisition', async (t) => {
+  const f = await mapFixture(t, { cloud: true });
+  await f.get(mapPath(ID_A));
+  const first = await nextDemand(f, 1);
+  first.publish(streams(), f.clock.now);
+  first.end('demand_expired');
+  await settled(f);
+  const good = await f.get(mapPath(ID_A));
+  f.adapter.failProvision = true;
+  f.clock.now += 300_001;
+  await f.get(mapPath(ID_A));
+  await settled(f);
+  const stale = await f.get(mapPath(ID_A));
+  assert.equal(stale.status, 200);
+  assert.deepEqual(stale.raw, good.raw);
+  assert.equal(stale.headers['x-eufy-map-stale'], 'true');
+  assert.equal((await f.state()).maps?.error, 'mower_map_invalid_provisioning');
+  assert.equal(f.maps.created.length, 1);
+  assert.equal(f.adapter.provisions.length, 2);
+});
+
+test('bridge shutdown cancels a pending cloud provision before opening a map connection', async (t) => {
+  const f = await mapFixture(t, { cloud: true });
+  f.adapter.holdProvision = true;
+  await f.get(mapPath(ID_A));
+  await waitFor(() => f.adapter.provisions.length === 1, 'cloud provision to start');
+  await f.bridge.stop();
+  assert.equal(f.adapter.provisionAborted, true);
   assert.equal(f.maps.created.length, 0);
 });
 

@@ -6,6 +6,7 @@ import {
   WRITABLE_WORK_PARAMETERS,
   decodeMowerSettings,
   type AuthState,
+  type MapSessionProvisioning,
   type ModuleLifecycleState,
   type MowerActivity,
   type MowerAdapter,
@@ -42,6 +43,7 @@ import {
   MowerMaps,
   libraryMapAcquisition,
   mapMode,
+  readProvisioningFile,
   type CreateMapAcquisition,
   type MapMode,
   type MapStatus,
@@ -665,7 +667,14 @@ export class MowerBridge {
     this.#sessions = new MowerSessionFile(this.#directory);
     this.#maps = config.maps
       ? new MowerMaps({
-          provisioningFile: config.maps.provisioningFile,
+          provision: async (id, signal) => {
+            const file = config.maps?.provisioningFile;
+            if (file) return (await readProvisioningFile(file)) as MapSessionProvisioning;
+            const mowers = this.#running();
+            await this.#prepareLocal(mowers);
+            if (signal.aborted) throw new BridgeError('request_aborted');
+            return mowers.provisionMapSession(id, signal);
+          },
           create: dependencies.mapAcquisition ?? libraryMapAcquisition,
           timings: {
             demandMs: dependencies.mapDemandMs ?? DEFAULT_MAP_DEMAND_MS,
@@ -1250,6 +1259,7 @@ export class MowerBridge {
       this.#bridgeId = await bridgeIdentity(this.#directory);
       if (bound.signal.aborted) throw new BridgeError('startup_timeout');
       const home: MowerHomeOptions = { requestTimeoutMs: this.#config.cloudTimeoutMs };
+      if (this.#config.maps?.provisioningFile === null) home.mapProvisioning = true;
       if (this.#dependencies.fetch) home.fetch = this.#dependencies.fetch;
       this.#client = new EufyClient({
         mowers: {
