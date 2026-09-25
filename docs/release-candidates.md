@@ -17,14 +17,19 @@ backends and rollback are described in
 
 | Component | Version | Pinned inputs |
 | --- | --- | --- |
-| Integration `eufy_robomow` | 0.15.1 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
+| Integration `eufy_robomow` | 0.15.2 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
 | Mower bridge, container image | 0.11.0 | `@keesmod/eufy-mega-client` 0.23.0 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
 | Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.11.0 | the same inputs, built by the Supervisor on the host |
 
 The checksums of every candidate that was built are recorded in #8. The
 candidates of 0.15.0 and 0.15.1 with bridge 0.11.0, built from `64ce862` and
 `0ed3691`, matched the folders deployed on the owner's installation file for
-file. CI runs the
+file. Integration 0.15.2, built from `5b25e3f` (#56), also matched its 25
+installed files after the 2026-09-25 deployment. The configuration check
+passed before the Core restart. The entry loaded with all 23 enabled entities
+available, the mower docked and the external map source retained. Its archive
+SHA-256 is `94a59748161f72c8d2f6d8b949d9ab5ed8217df78bfcb799d539d45d67cbff9d`.
+Bridge 0.11.0 is unchanged. CI runs the
 tests on Home Assistant 2026.7.2, and the rehearsal ran on Home Assistant
 2026.9.3 with Supervisor 2026.09.2. The hardware evidence below comes from the
 owner's Home Assistant OS installation with the owned E15 (T2880) on firmware
