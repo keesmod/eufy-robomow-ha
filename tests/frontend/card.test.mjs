@@ -17,6 +17,11 @@ test('pending start cannot repeat, safety pause stays available', () => {
   assert.equal(controls(mower('mowing', {command:{state:'pending'}}), now).pause, true);
   assert.equal(controls(mower('mowing', {supported_features:1}), now).pause, false);
 });
+test('the drive home offers dock but no pause, which the E15 ignores', () => {
+  assert.equal(controls(mower('returning'), now).pause, false);
+  assert.equal(controls(mower('returning'), now).dock, true);
+  assert.equal(controls(mower('paused'), now).start, true);
+});
 test('old image is visibly cached even when image entity is available', () => {
   const image = {state:'2026-09-06T11:55:00Z', attributes:{acquisition_status:'healthy', acquisition_last_success:'2026-09-06T11:55:00Z'}};
   assert.equal(mapHealth(image, true, now).kind, 'warn');

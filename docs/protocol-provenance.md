@@ -87,6 +87,17 @@ seconds, then the map save. The library's stop window of 2026-09-20 recorded
 the matching LAN reports. The default payload means `docked` only in the
 first shape, where the app showed the mower idle or charging in the dock.
 
+A supervised window on 2026-09-25 measured this path on the owned E15 through
+the local backend. After each of two docks from Home Assistant the cloud DPS
+showed DP 1 false and the `returning` payload no later than 1.6 and 2.3
+seconds after the command, sampled every two seconds. The dock arrival followed after 34 and
+45 seconds with DP 1 true, DP 118 from 1 and the map-saving payload. Home
+Assistant showed `returning` from the first poll after the dock's confirming
+poll and `docked` at the map save. A pause, DP 2 true, written ten seconds into
+the second drive left DP 2 false and DP 107 `returning` until the arrival, so
+the E15 ignores a pause without a running task. A start from the dock right
+after an arrival set DP 1 true while DP 118 stayed at 100 from the map save.
+
 Field 4 = 2 as the only record of DP 107 is observed and not read. The cloud
 reported it while the mower stood docked with DP 1 false:
 
@@ -101,8 +112,9 @@ reported it while the mower stood docked with DP 1 false:
 When the rest in the dock began at 20:30 UTC on 2026-09-24 with DP 1 true, DP
 107 was the default payload again. DP 152 carried a top-level field 5 = 1
 alongside field 4 on 2026-09-06 and at 17:21 UTC on 2026-09-24, but not at
-06:47 UTC on 2026-09-25. What field 4 means and what the app shows at the same
-time are not established.
+06:47 UTC on 2026-09-25. At 07:30 UTC on 2026-09-25, with field 4 = 2 in the
+cloud and DP 1 false, the app showed its idle controls in the dock, as with the
+default payload. What field 4 means is not established.
 
 ## Current map-position interpretation
 

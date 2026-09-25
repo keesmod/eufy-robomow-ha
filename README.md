@@ -17,6 +17,8 @@ the last confirmed command, so resume works through Home Assistant. Version
 0.12.1 stops the local backend from reporting mowing while the mower rests in
 the dock with its task flag set. Version 0.13.0 shows the drive home after a
 dock in bridge mode. Version 0.13.2 shows the drive home in the local backend.
+Version 0.13.3 confirms a start right after a map save and refuses a pause
+without a running task.
 
 ---
 
@@ -241,12 +243,15 @@ is replayed on a switch.
 Set `view` to `overview`, `history`, `planning` or `settings` to show one section.
 Omitting it keeps the combined view for existing cards. Frontend version 0.7.1
 changes presentation only; it does not add zone commands or enable planning.
+Frontend version 0.7.2 offers pause only while the mower mows.
 
 The card supports map zoom/pan, battery and session telemetry, settings, and
 start/resume, pause and return commands. It shows pending, confirmed, failed and
 uncertain results. Start requires confirmation; unavailable or stale telemetry
 and observe-only mode disable controls. An inactive-task response to Return is
 not proof of physical arrival at the dock.
+Pause is offered only while mowing: during the drive home the E15 ignores a
+pause, so the local backend refuses one while the task flag is false.
 
 Fifty observed session summaries are stored privately in Home Assistant; the
 card shows the latest twenty. Pauses and telemetry gaps remain visible, and a
@@ -397,6 +402,15 @@ protocol tests.
 
 ## Upgrade notes
 
+- **0.13.3, start after a map save and pause during the drive home.** DP 118
+  stays at 100 after a map save, so a start from the dock shortly after an
+  arrival never showed DP 118 at 0, and the local backend reported a timeout
+  although the mower started. A start is now also confirmed by DP 1 turning
+  true, with evidence `task_started`, and a resume by DP 2 turning false,
+  with evidence `pause_cleared`. During the drive home the E15 ignores a
+  pause. The local backend refuses one while the task flag DP 1 is false, before
+  any write, and the card offers pause only while mowing. Update the
+  dashboard resource to `/eufy_robomow/eufy-mower-card.js?v=0.7.2`.
 - **0.13.2, the drive home in the local backend.** With account credentials
   the local backend reports `returning` while the mower drives to the dock
   after a stop or at the end of a task, where it reported `docked`, and

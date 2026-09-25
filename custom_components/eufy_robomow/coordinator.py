@@ -18,7 +18,7 @@ from .bridge_client import (
 )
 from .commands import MowerCommand
 from .sessions import SessionStore
-from .telemetry import read_local_activity, robot_status, status_shape
+from .telemetry import read_local_activity, robot_status, status_shape, task_active
 from .const import CMD_START, CMD_RESUME, CMD_PAUSE, CMD_DOCK
 from datetime import datetime, timedelta
 
@@ -660,8 +660,17 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self._require_writes_available()
         if action not in ("start", "resume", "pause", "dock"):
             raise HomeAssistantError("Unsupported mower command")
+        if action == "pause" and task_active(self.local_dps) is False:
+            # Without a running task the E15 ignores a pause. On 2026-09-25 a pause
+            # written during the drive home after a dock left DP 2 false and DP 107
+            # returning until the dock arrival, and the command timed out.
+            raise HomeAssistantError(
+                "The mower runs no task, so Home Assistant cannot pause it. During "
+                "the drive home the E15 ignores a pause. Use Pause or Stop in the "
+                "eufy app instead."
+            )
         self._supersede_pending(action)
-        operation = MowerCommand(action, self.local_generation)
+        operation = MowerCommand(action, self.local_generation, before=dict(self.local_dps))
         self.command = operation
         self.async_update_listeners()
         dp, value = {
