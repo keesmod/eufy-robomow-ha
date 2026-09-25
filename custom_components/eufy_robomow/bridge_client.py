@@ -29,7 +29,12 @@ from homeassistant.util import dt as dt_util
 from .const import (
     BRIDGE_NUMBER_SETTING_DPS,
     BRIDGE_SETTING_KEYS,
+    BRIDGE_SPEED_OPTIONS,
+    BRIDGE_WORK_PARAMETER_KEYS,
     BRIDGE_WRITABLE_SETTING_DPS,
+    CLOUD_EDGE_MM,
+    CLOUD_PAD_DIRECTION,
+    CLOUD_PATH_MM,
     DP_BATTERY,
     DP_NETWORK,
     DP_SIGNAL,
@@ -204,7 +209,8 @@ class BridgeTelemetry:
     command_activity: tuple[str, datetime] | None = None
     # Per reported setting data point, whether the library writes it and the mower
     # declares it writable. The values themselves are in ``dps``. Empty for a
-    # bridge older than 0.10.0.
+    # bridge older than 0.10.0. Since bridge 0.11.0 the two work parameter speeds
+    # appear here under their ``cloud_*`` keys too.
     settings_writable: dict[str, bool] = field(default_factory=dict)
 
 
@@ -277,6 +283,9 @@ def parse_state_document(document: Any, mower_id: str) -> BridgeTelemetry:
     _field(document, "progress")
     settings, writable = _settings(document.get("settings"))
     dps.update(settings)
+    work, work_writable = _work_parameters(document.get("work_parameters"))
+    dps.update(work)
+    writable.update(work_writable)
     return BridgeTelemetry(
         observed_at=observed_at,
         age_ms=age_ms,
@@ -314,6 +323,47 @@ def _settings(settings: Any) -> tuple[dict[str, Any], dict[str, bool]]:
             continue
         values[dp] = value
         writable[dp] = flag is True
+    return values, writable
+
+
+def _integer(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _work_parameters(parameters: Any) -> tuple[dict[str, Any], dict[str, bool]]:
+    """The DP 155 work parameters of bridge 0.11.0 or later, keyed like the cloud values.
+
+    The field is optional and served from the bridge's cloud reading or a confirmed
+    write, never from the state query. The speeds map onto the integration's own
+    options, and a value the library does not name maps to nothing. Edge distance,
+    mow spacing and the direction's single-mode angle are the device's integers,
+    as the local backend reads them. A shape this integration does not know is
+    skipped instead of failing the poll.
+    """
+    values: dict[str, Any] = {}
+    writable: dict[str, bool] = {}
+    if not isinstance(parameters, dict) or parameters.get("state") != "reported":
+        return values, writable
+    for data_key, key in BRIDGE_WORK_PARAMETER_KEYS.items():
+        parameter = parameters.get(key)
+        if not isinstance(parameter, dict):
+            continue
+        value = parameter.get("value")
+        option = BRIDGE_SPEED_OPTIONS[key].get(value) if isinstance(value, str) else None
+        if option is None:
+            continue
+        values[data_key] = option
+        writable[data_key] = parameter.get("writable") is True
+    edge = _integer(parameters.get("edge_distance"))
+    if edge is not None:
+        values[CLOUD_EDGE_MM] = edge
+    spacing = _integer(parameters.get("mow_spacing"))
+    if spacing is not None:
+        values[CLOUD_PATH_MM] = spacing
+    direction = parameters.get("direction")
+    angle = _integer(direction.get("single_angle")) if isinstance(direction, dict) else None
+    if angle is not None:
+        values[CLOUD_PAD_DIRECTION] = angle
     return values, writable
 
 
@@ -417,9 +467,9 @@ class BridgeSettingOutcome:
     stage: str
     # Why the write ended, for example ``reflected``, ``rejected`` or ``timed_out``.
     end: str
-    # The value the library read on its fresh query before the write, the value a
-    # deliberate restore writes back.
-    previous: bool | int
+    # The value the library read before the write, the value a deliberate restore
+    # writes back. A work parameter's value is the library's name for it.
+    previous: bool | int | str
     # When the library received the report that carried the written value.
     observed_at: datetime | None = None
 
@@ -453,6 +503,45 @@ def parse_setting_outcome(
     reflected_at: datetime | None = None
     if reflection is not None:
         if not isinstance(reflection, dict) or not _same_value(reflection.get("value"), value):
+            raise BridgeClientError("invalid_document")
+        reflected_at = _report_time(reflection)
+    if result == "confirmed" and reflection is None:
+        # Confirmed means a fresh report carried the written value.
+        raise BridgeClientError("invalid_document")
+    return BridgeSettingOutcome(
+        result=result, stage=stage, end=end, previous=previous, observed_at=reflected_at
+    )
+
+
+def parse_work_parameter_outcome(
+    document: Any, mower_id: str, key: str, value: str
+) -> BridgeSettingOutcome:
+    """Validate a contract 1 work parameter answer for exactly the parameter and value sent."""
+    if not isinstance(document, dict):
+        raise BridgeClientError("invalid_document")
+    if (
+        document.get("contract") != STATE_CONTRACT
+        or document.get("id") != mower_id
+        or document.get("setting") != key
+    ):
+        raise BridgeClientError("invalid_document")
+    result = document.get("result")
+    stage = document.get("stage")
+    end = document.get("end")
+    write = document.get("write")
+    previous = document.get("previous")
+    if result not in _SETTING_RESULTS:
+        raise BridgeClientError("invalid_document")
+    if not (isinstance(stage, str) and isinstance(end, str)):
+        raise BridgeClientError("invalid_document")
+    if not isinstance(write, dict) or write.get("value") != value:
+        raise BridgeClientError("invalid_document")
+    if previous not in BRIDGE_SPEED_OPTIONS[key]:
+        raise BridgeClientError("invalid_document")
+    reflection = document.get("reflection")
+    reflected_at: datetime | None = None
+    if reflection is not None:
+        if not isinstance(reflection, dict) or reflection.get("value") != value:
             raise BridgeClientError("invalid_document")
         reflected_at = _report_time(reflection)
     if result == "confirmed" and reflection is None:
@@ -575,6 +664,26 @@ class BridgeClient:
             "POST", f"/v1/mowers/{mower_id}/settings/{key}?value={encoded}", _COMMAND_TIMEOUT
         )
         return parse_setting_outcome(document, mower_id, key, value)
+
+    async def async_set_work_parameter(
+        self, mower_id: str, key: str, value: str
+    ) -> BridgeSettingOutcome:
+        """Write one work parameter speed exactly once and return the library's outcome.
+
+        Bridge 0.11.0 or later serves the mow and blade speeds on the settings
+        route, with the library's name for the value in the query. Only a value the
+        library writes is sent. The failure rules of :meth:`async_set_setting` apply.
+        """
+        if not _MOWER_ID_PATTERN.fullmatch(mower_id):
+            raise BridgeClientError("invalid_mower_id")
+        if key not in BRIDGE_SPEED_OPTIONS:
+            raise BridgeClientError("not_found")
+        if value not in BRIDGE_SPEED_OPTIONS[key]:
+            raise BridgeClientError("invalid_setting_value")
+        document = await self._async_request(
+            "POST", f"/v1/mowers/{mower_id}/settings/{key}?value={value}", _COMMAND_TIMEOUT
+        )
+        return parse_work_parameter_outcome(document, mower_id, key, value)
 
     async def _async_get(self, path: str) -> dict[str, Any]:
         return await self._async_request("GET", path, _REQUEST_TIMEOUT)

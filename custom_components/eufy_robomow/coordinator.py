@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from threading import Lock
 from typing import Any
 from homeassistant.util import dt as dt_util
@@ -44,6 +45,8 @@ from .const import (
     BACKEND_BRIDGE,
     BACKEND_LOCAL,
     BRIDGE_SETTING_KEYS,
+    BRIDGE_SPEED_OPTIONS,
+    BRIDGE_WORK_PARAMETER_KEYS,
     BRIDGE_WRITABLE_SETTING_DPS,
 )
 
@@ -231,13 +234,27 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
 
     @property
     def writes_available(self) -> bool:
-        """Cloud settings writes need explicit control and the local backend.
+        """Writes through the local backend's own cloud client need explicit control.
 
-        The bridge has no route for the cloud settings (DP 155), so their number
-        and select entities are created only with the local backend. The local
-        setting data points follow :attr:`setting_entities_available`.
+        The bridge backend never uses that client. Its DP 155 entities follow
+        :attr:`work_parameter_entities_available` and its local setting data
+        points :attr:`setting_entities_available`.
         """
         return self.control_enabled and self.backend != BACKEND_BRIDGE
+
+    @property
+    def work_parameter_entities_available(self) -> bool:
+        """The DP 155 number and select entities exist in control mode on either backend.
+
+        The local backend reads and writes them through its cloud client. The
+        bridge backend reads them from the bridge's state document and writes the
+        mow and blade speeds through its settings route, bridge 0.11.0 or later.
+        Edge distance, path distance and pad direction are read only there. The
+        entities keep their unique ids on both backends.
+        """
+        if self.backend == BACKEND_BRIDGE:
+            return self.control_enabled
+        return self.writes_available and self.cloud_client is not None
 
     @property
     def setting_entities_available(self) -> bool:
@@ -964,21 +981,71 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
                 "Rain stop, child protection and the real lawn map are read only "
                 "through the mower bridge. Change them in the Eufy app."
             )
+        self._require_bridge_setting_route(dp)
+        assert self.bridge is not None and self.bridge_mower_id is not None
+        bridge, mower_id = self.bridge, self.bridge_mower_id
+        await self._async_run_bridge_setting(
+            dp, value, lambda: bridge.async_set_setting(mower_id, key, value)
+        )
+
+    async def _async_set_bridge_work_parameter(self, changes: dict[str, Any]) -> None:
+        """Write one DP 155 work parameter through the bridge exactly once.
+
+        The selects and numbers pass one keyword each. Only the mow and blade
+        speeds have a route, on bridge 0.11.0 with library 0.23.0, which writes one
+        field of DP 155 and reads it back from a fresh report. Edge distance, path
+        distance and pad direction are read only. The checks and the outcome
+        rules of a local setting apply.
+        """
+        self._require_control_enabled()
+        if len(changes) != 1:
+            raise HomeAssistantError("The mower bridge writes one setting at a time.")
+        ((name, option),) = changes.items()
+        data_key = f"cloud_{name}"
+        key = BRIDGE_WORK_PARAMETER_KEYS.get(data_key)
+        if key is None:
+            raise HomeAssistantError(
+                "Edge distance, path distance and pad direction are read only through "
+                "the mower bridge. Change them in the Eufy app."
+            )
+        value = next(
+            (named for named, shown in BRIDGE_SPEED_OPTIONS[key].items() if shown == option),
+            None,
+        )
+        if value is None:
+            raise HomeAssistantError("The mower bridge has no value for this option.")
+        self._require_bridge_setting_route(data_key)
+        assert self.bridge is not None and self.bridge_mower_id is not None
+        bridge, mower_id = self.bridge, self.bridge_mower_id
+        await self._async_run_bridge_setting(
+            data_key, option, lambda: bridge.async_set_work_parameter(mower_id, key, value)
+        )
+
+    def _require_bridge_setting_route(self, data_key: str) -> None:
+        """The bridge's settings opt-in and the setting's writable flag from the last poll."""
         if not self.bridge_routes_settings:
             raise HomeAssistantError(
                 "The mower bridge does not accept setting writes. Set its settings "
                 "mode to write before changing settings through it."
             )
-        if not self.bridge_settings_writable.get(dp):
+        if not self.bridge_settings_writable.get(data_key):
             raise HomeAssistantError(
                 "The mower bridge does not report this setting as writable right now."
             )
-        assert self.bridge is not None and self.bridge_mower_id is not None
+
+    async def _async_run_bridge_setting(
+        self,
+        data_key: str,
+        shown: Any,
+        write: Callable[[], Awaitable[BridgeSettingOutcome]],
+    ) -> None:
+        """Send one bridge setting write, finish its outcome and refresh. Never repeated."""
         interrupted = False
         try:
             async with self._bridge_command_lock:
-                outcome = await self.bridge.async_set_setting(self.bridge_mower_id, key, value)
+                outcome = await write()
             self._finish_bridge_setting(outcome)
+            self._show_confirmed_setting(data_key, shown)
         except BridgeClientError as exc:
             if refused_before_write(exc.code):
                 raise HomeAssistantError(
@@ -1006,12 +1073,29 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
                 "bridge's read-back window. Check the setting before repeating it."
             )
 
+    def _show_confirmed_setting(self, data_key: str, value: Any) -> None:
+        """Show a confirmed value at once, before the refresh that follows the write.
+
+        That refresh is debounced, so a second write within its cooldown, such as
+        a restore, showed the value before it for up to ten seconds on 2026-09-25.
+        A confirmed outcome carries a fresh report of the written value, so the
+        value shown is observed, never assumed. Setting the data also ends the
+        cooldown, so the refresh that follows runs at once.
+        """
+        if self.data is not None:
+            self.async_set_updated_data({**self.data, data_key: value})
+
     async def async_set_cloud_setting(self, **kwargs) -> None:
         """Write one or more cloud settings via the Tuya mobile API.
 
         Keyword arguments: edge_mm, path_mm, travel_speed, blade_speed, pad_direction.
-        Raises a visible Home Assistant error when the write is not confirmed.
+        Raises a visible Home Assistant error when the write is not confirmed. In
+        bridge mode one speed goes through the bridge's settings route, see
+        :meth:`_async_set_bridge_work_parameter`.
         """
+        if self.backend == BACKEND_BRIDGE:
+            await self._async_set_bridge_work_parameter(kwargs)
+            return
         self._require_writes_available()
         if not self.cloud_client:
             raise HomeAssistantError(

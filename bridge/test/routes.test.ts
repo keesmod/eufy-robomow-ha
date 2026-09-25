@@ -19,6 +19,8 @@ import {
   type MowerSettingOutcome,
   type MowerSettingRequest,
   type MowerTelemetry,
+  type MowerWorkParameterOutcome,
+  type MowerWorkParameterRequest,
 } from '@keesmod/eufy-mega-client';
 import {
   MowerBridge,
@@ -28,7 +30,9 @@ import {
   type MowerCommandDocument,
   type MowerSettingDocument,
   type MowerStateDocument,
+  type MowerWorkParameterDocument,
   type OpenLocalSession,
+  type WorkParametersDocument,
 } from '../src/bridge.ts';
 import type { BridgeConfig, ControlConfig } from '../src/config.ts';
 import { MOWERS_PATH, STATE_PATH } from '../src/server.ts';
@@ -59,6 +63,11 @@ class DiscoveringAdapter implements MowerAdapter {
   devices: MowerDevice[] = [device(ID_A)];
   failWith: string | null = null;
   waitForAbort = false;
+  /**
+   * The library's internal cloud reading of DP 155, present only when a test sets it. Without it
+   * the library reports the capability as unavailable, like for any custom adapter.
+   */
+  readCloudWorkParameters?: (id: string, signal: AbortSignal) => Promise<{ observedAt: string; value: string | null | undefined }>;
 
   async connect(_answer: AuthAnswer | undefined, _signal: AbortSignal): Promise<AuthState> {
     this.connects += 1;
@@ -109,12 +118,14 @@ interface SessionLog {
   queries: number;
   commands: MowerCommandRequest[];
   settings: MowerSettingRequest[];
+  workParameters: MowerWorkParameterRequest[];
   disconnects: number;
   lastConnected: () => boolean;
 }
 
 type CommandAnswer = (request: MowerCommandRequest, signal: AbortSignal) => Promise<MowerCommandOutcome>;
 type SettingAnswer = (request: MowerSettingRequest, signal: AbortSignal) => Promise<MowerSettingOutcome>;
+type WorkParameterAnswer = (request: MowerWorkParameterRequest, signal: AbortSignal) => Promise<MowerWorkParameterOutcome>;
 
 /**
  * Synthetic command outcome in the library's shape. The `before` snapshot and the reports carry a
@@ -169,7 +180,7 @@ function sessions(
   answer: (signal: AbortSignal) => Promise<MowerTelemetry>,
   openFailure?: () => string | null,
   command?: CommandAnswer,
-  extra: { setting?: SettingAnswer; schema?: MowerDpSchemaEntry[] } = {},
+  extra: { setting?: SettingAnswer; workParameter?: WorkParameterAnswer; schema?: MowerDpSchemaEntry[] } = {},
 ): OpenLocalSession {
   return async (id, options, signal) => {
     const failure = openFailure?.();
@@ -200,6 +211,11 @@ function sessions(
         if (!extra.setting) throw new EufyError('mower_settings_disabled');
         return extra.setting(request, settingSignal ?? signal);
       },
+      setWorkParameter: async (request, parameterSignal) => {
+        log.workParameters.push({ ...request });
+        if (!extra.workParameter) throw new EufyError('mower_settings_disabled');
+        return extra.workParameter(request, parameterSignal ?? signal);
+      },
       sendCommand: async (request, commandSignal) => {
         // Only the class: the progress callback is the bridge's own and checked where it matters.
         log.commands.push({ kind: request.kind });
@@ -225,7 +241,7 @@ function sessions(
 }
 
 function sessionLog(): SessionLog {
-  return { opened: [], queries: 0, commands: [], settings: [], disconnects: 0, lastConnected: () => false };
+  return { opened: [], queries: 0, commands: [], settings: [], workParameters: [], disconnects: 0, lastConnected: () => false };
 }
 
 interface Fixture {
@@ -261,6 +277,22 @@ const commandPath = (id: string, kind: string) => `${MOWERS_PATH}/${id}/commands
 const settingPath = (id: string, key: string, value?: string) =>
   `${MOWERS_PATH}/${id}/settings/${key}${value === undefined ? '' : `?value=${encodeURIComponent(value)}`}`;
 const SETTINGS_WRITE: Partial<BridgeConfig> = { settingsMode: 'write' };
+
+/** The values the pinned library writes, from its own table. */
+const MOW_SPEEDS = ['low', 'medium', 'adaptive_high'];
+const BLADE_SPEEDS = ['low', 'medium', 'high'];
+/** The work parameters of a state answer while the adapter has no cloud reading, like any custom adapter. */
+const UNAVAILABLE_WORK_PARAMETERS: WorkParametersDocument = {
+  state: 'unavailable',
+  source: null,
+  observed_at: null,
+  error: 'mower_protocol_unavailable',
+  mow_speed: { value: null, writable: false, options: MOW_SPEEDS },
+  blade_speed: { value: null, writable: false, options: BLADE_SPEEDS },
+  edge_distance: null,
+  mow_spacing: null,
+  direction: null,
+};
 
 /** Every setting as the library reports it for a snapshot without the setting points. */
 const MISSING_SETTINGS = {
@@ -451,6 +483,7 @@ test('the state route serves the four typed fields with freshness, closes the se
     network: { state: 'reported', value: { kind: 'wifi', signalPercent: 70 }, dp: ['134', '109'], source: 'local-tuya-3.5', observedAt },
     settings: MISSING_SETTINGS,
     command: null,
+    work_parameters: UNAVAILABLE_WORK_PARAMETERS,
   });
   const list = (await f.get(MOWERS_PATH)).json as DiscoveryDocument;
   assert.equal(list.mowers[0]?.state_available, true);
@@ -1269,4 +1302,295 @@ test('shutdown aborts an in-flight setting write, answers it and leaves no handl
   assert.equal(log.disconnects, 1, 'the aborted setting session is closed');
   await assert.rejects(f.bridge.setting(ID_A, 'mow_height', '45'), { code: 'bridge_not_running' });
   assert.deepEqual(await settledHandles(handles), handles);
+});
+
+// ── Work parameters, bridge 0.11.0 ─────────────────────────────────────────────
+
+/** A tiny protobuf writer for synthetic DP 155 values: varints, tags and wrapper messages. */
+function varint(value: number): number[] {
+  const out: number[] = [];
+  let rest = value;
+  while (rest >= 0x80) {
+    out.push((rest & 0x7f) | 0x80);
+    rest = Math.floor(rest / 128);
+  }
+  out.push(rest);
+  return out;
+}
+const field = (number: number, ...content: number[][]): number[] => {
+  const bytes = content.flat();
+  return [...varint((number << 3) | 2), ...varint(bytes.length), ...bytes];
+};
+const int = (number: number, value: number): number[] => [...varint(number << 3), ...varint(value)];
+/** A wrapper around field 1, empty for zero like the app's proto3 encoder. */
+const wrapped = (number: number, value: number): number[] => (value === 0 ? field(number) : field(number, int(1, value)));
+/** A synthetic complete work parameter message with invented values. */
+function workValue(mowSpeed = 1, bladeSpeed = 0): string {
+  const bytes = [
+    ...wrapped(1, 55),
+    ...wrapped(2, mowSpeed),
+    ...wrapped(3, 120),
+    ...field(4, int(1, 0), field(2, int(1, 30)), int(5, 30)),
+    ...wrapped(5, 70),
+    ...wrapped(6, bladeSpeed),
+    ...int(7, 70),
+  ];
+  return Buffer.from(bytes).toString('base64');
+}
+const CLOUD_AT = new Date(T0 - 60_000).toISOString();
+const REPORTED_WORK_PARAMETERS: WorkParametersDocument = {
+  state: 'reported',
+  source: 'cloud',
+  observed_at: CLOUD_AT,
+  error: null,
+  mow_speed: { value: 'medium', writable: true, options: MOW_SPEEDS },
+  blade_speed: { value: 'low', writable: true, options: BLADE_SPEEDS },
+  edge_distance: 120,
+  mow_spacing: 70,
+  direction: { mode: 'single', single_angle: 30, current_angle: 30 },
+};
+
+/** Synthetic work parameter outcome in the library's shape. Snapshots carry a private raw data point. */
+function workParameterOutcome(
+  request: MowerWorkParameterRequest,
+  end: MowerWorkParameterOutcome['end'],
+  at: string,
+  previous: MowerWorkParameterOutcome['previous'],
+  other?: MowerWorkParameterOutcome['previous'],
+): MowerWorkParameterOutcome {
+  const snapshot = { source: 'local-tuya-3.5' as const, observedAt: at, dps: { '118': 100, '156': 'PRIVATE-BLOB' } };
+  const base = {
+    name: request.name,
+    write: { dp: '155' as const, code: 'reserved_raw_155' as const, field: request.name === 'mowSpeed' ? 2 : 6, value: request.value, encoded: 'PRIVATE-MESSAGE' },
+    cloud: { observedAt: CLOUD_AT, parameters: {} },
+    before: snapshot,
+    previous,
+    sentAt: at,
+    reply: { observedAt: at, returnCodeZero: true, rejected: false },
+  };
+  const report = { ...snapshot, kind: 'device-report' as const, sequence: 31, dps: { '156': 'PRIVATE-BLOB' } };
+  const otherField = other === undefined ? {} : { other: { observedAt: at, sequence: 30, value: other } };
+  if (end === 'reflected') {
+    const parameters = {
+      mowHeight: 55,
+      mowSpeed: request.name === 'mowSpeed' ? request.value : ('medium' as const),
+      edgeDistance: 120,
+      mowSpacing: 70,
+      bladeSpeed: request.name === 'bladeSpeed' ? request.value : ('low' as const),
+    } as MowerWorkParameterOutcome['cloud']['parameters'];
+    return { ...base, stage: 'reflected', end, reflection: { observedAt: at, sequence: 31, value: request.value, parameters }, reports: [report] };
+  }
+  if (end === 'rejected') return { ...base, stage: 'sent', end, reply: { observedAt: at, returnCodeZero: false, rejected: true }, reports: [] };
+  return { ...base, ...otherField, stage: 'sent', end, reports: [] };
+}
+
+test('the state route serves the work parameters from a cloud reading taken at most once per refresh age', async (t) => {
+  const log = sessionLog();
+  const f = await fixture(t, { host: HOST_A }, { openLocalSession: sessions(log, async () => telemetry(new Date(T0).toISOString())), workParametersRefreshMs: 60_000 });
+  let reads = 0;
+  let answer = async (): Promise<{ observedAt: string; value: string | null | undefined }> => ({ observedAt: CLOUD_AT, value: workValue() });
+  f.adapter.readCloudWorkParameters = async (id) => {
+    assert.equal(id, ID_A);
+    reads += 1;
+    return answer();
+  };
+  await f.bridge.connect();
+  const path = `${MOWERS_PATH}/${ID_A}/state`;
+  const first = await f.get(path);
+  assert.equal(first.status, 200);
+  assert.deepEqual((first.json as MowerStateDocument).work_parameters, REPORTED_WORK_PARAMETERS);
+  assert.ok(!first.text.includes(workValue()), 'the raw value is never served');
+  assert.equal(log.queries, 1, 'the LAN query is unchanged');
+  // Within the refresh age every answer reuses the reading.
+  await f.get(path);
+  assert.equal(reads, 1);
+  // A failed reading keeps the last values and names its code.
+  f.clock.now += 60_000;
+  answer = async () => {
+    throw new EufyError('mower_request_failed');
+  };
+  const failed = (await f.get(path)).json as MowerStateDocument;
+  assert.equal(reads, 2);
+  assert.deepEqual(failed.work_parameters, { ...REPORTED_WORK_PARAMETERS, error: 'mower_request_failed' });
+  assert.equal(failed.stale, false, 'a failed cloud reading never makes the LAN state stale');
+  // A named value the library does not write is served but not writable, a missing value as null.
+  f.clock.now += 60_000;
+  answer = async () => ({ observedAt: CLOUD_AT, value: workValue(3, 2) });
+  const auto = ((await f.get(path)).json as MowerStateDocument).work_parameters;
+  assert.deepEqual(auto.mow_speed, { value: 'auto', writable: false, options: MOW_SPEEDS });
+  assert.deepEqual(auto.blade_speed, { value: 'high', writable: true, options: BLADE_SPEEDS });
+  assert.equal(auto.error, null);
+  f.clock.now += 60_000;
+  answer = async () => ({ observedAt: CLOUD_AT, value: undefined });
+  const missing = ((await f.get(path)).json as MowerStateDocument).work_parameters;
+  assert.equal(missing.state, 'missing');
+  assert.deepEqual(missing.mow_speed, { value: null, writable: false, options: MOW_SPEEDS });
+  assert.equal(missing.edge_distance, null);
+  assert.equal(reads, 4);
+});
+
+test('a slow cloud reading never holds a state answer beyond the wait bound and lands later', async (t) => {
+  const log = sessionLog();
+  const f = await fixture(t, { host: HOST_A }, { openLocalSession: sessions(log, async () => telemetry(new Date(T0).toISOString())), workParametersWaitMs: 50 });
+  let release: () => void = () => {};
+  f.adapter.readCloudWorkParameters = () =>
+    new Promise((resolve) => {
+      release = () => resolve({ observedAt: CLOUD_AT, value: workValue() });
+    });
+  await f.bridge.connect();
+  const path = `${MOWERS_PATH}/${ID_A}/state`;
+  const started = Date.now();
+  const early = (await f.get(path)).json as MowerStateDocument;
+  assert.ok(Date.now() - started < 1_000);
+  assert.equal(early.work_parameters.state, 'unavailable');
+  assert.equal(early.work_parameters.error, null, 'a running reading is no failure');
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(((await f.get(path)).json as MowerStateDocument).work_parameters, REPORTED_WORK_PARAMETERS);
+});
+
+test('write mode routes one work parameter, serves the outcome and shows a confirmed value at once', async (t) => {
+  const handles = await baselineHandles();
+  const log = sessionLog();
+  let end: MowerWorkParameterOutcome['end'] = 'reflected';
+  let other: MowerWorkParameterOutcome['previous'] | undefined;
+  let failure: Error | null = null;
+  const at = new Date(T0 + 2_000).toISOString();
+  const f = await fixture(t, { host: HOST_A, ...SETTINGS_WRITE }, {
+    openLocalSession: sessions(log, async () => telemetry(new Date(T0).toISOString()), undefined, undefined, {
+      workParameter: async (request) => {
+        if (failure) throw failure;
+        return workParameterOutcome(request, end, at, request.name === 'bladeSpeed' ? 'low' : 'medium', other);
+      },
+    }),
+  });
+  let reads = 0;
+  f.adapter.readCloudWorkParameters = async () => {
+    reads += 1;
+    return { observedAt: CLOUD_AT, value: workValue() };
+  };
+  await f.bridge.connect();
+  const path = `${MOWERS_PATH}/${ID_A}/state`;
+  assert.deepEqual(((await f.get(path)).json as MowerStateDocument).work_parameters, REPORTED_WORK_PARAMETERS);
+  const changed = await f.post(settingPath(ID_A, 'blade_speed', 'high'));
+  assert.equal(changed.status, 200, changed.text);
+  assertNoSecrets(changed.text);
+  assert.ok(!changed.text.includes(HOST_A) && !changed.text.includes('PRIVATE') && !changed.text.includes('"dps"'), 'raw data, the message and the host are absent');
+  assert.deepEqual(changed.json as MowerWorkParameterDocument, {
+    contract: 1,
+    id: ID_A,
+    setting: 'blade_speed',
+    result: 'confirmed',
+    write: { dp: '155', code: 'reserved_raw_155', field: 6, value: 'high' },
+    previous: 'low',
+    cloud_observed_at: CLOUD_AT,
+    sent_at: at,
+    stage: 'reflected',
+    end: 'reflected',
+    before_observed_at: at,
+    reply: { observed_at: at, return_code_zero: true, rejected: false },
+    reflection: { observed_at: at, sequence: 31, value: 'high' },
+    other: null,
+    reports: 1,
+  });
+  assert.deepEqual(log.workParameters, [{ name: 'bladeSpeed', value: 'high' }]);
+  assert.equal(log.disconnects, log.opened.length, 'the write session is closed');
+  // The reflecting LAN report replaces the served values at once, without a cloud reading.
+  const after = ((await f.get(path)).json as MowerStateDocument).work_parameters;
+  assert.equal(after.source, 'local-tuya-3.5');
+  assert.equal(after.observed_at, at);
+  assert.deepEqual(after.blade_speed, { value: 'high', writable: true, options: BLADE_SPEEDS });
+  assert.equal(reads, 1);
+  // An uncertain write changes nothing that is served and names the other value it saw.
+  end = 'timed_out';
+  other = 'medium';
+  const uncertain = (await f.post(settingPath(ID_A, 'mow_speed', 'adaptive_high'))).json as MowerWorkParameterDocument;
+  assert.equal(uncertain.result, 'uncertain');
+  assert.deepEqual(uncertain.write, { dp: '155', code: 'reserved_raw_155', field: 2, value: 'adaptive_high' });
+  assert.deepEqual(uncertain.other, { observed_at: at, sequence: 30, value: 'medium' });
+  assert.equal(uncertain.reflection, null);
+  assert.equal(((await f.get(path)).json as MowerStateDocument).work_parameters.mow_speed.value, 'medium');
+  end = 'rejected';
+  other = undefined;
+  assert.equal(((await f.post(settingPath(ID_A, 'mow_speed', 'low'))).json as MowerWorkParameterDocument).result, 'failed');
+  // Values the library does not write and the read-only parameters never reach it.
+  for (const [key, value, status, code] of [
+    ['mow_speed', 'auto', 400, 'invalid_setting_value'],
+    ['mow_speed', 'fast', 400, 'invalid_setting_value'],
+    ['blade_speed', 'adaptive_high', 400, 'invalid_setting_value'],
+    ['blade_speed', 'HIGH', 400, 'invalid_setting_value'],
+    ['blade_speed', undefined, 400, 'invalid_setting_value'],
+    ['edge_distance', '100', 409, 'mower_setting_read_only'],
+    ['mow_spacing', '100', 409, 'mower_setting_read_only'],
+    ['direction', '90', 409, 'mower_setting_read_only'],
+  ] as const) {
+    const refused = await f.post(settingPath(ID_A, key, value));
+    assert.equal(refused.status, status, `${key} ${value}`);
+    assert.deepEqual(refused.json, { error: code });
+  }
+  // The library's typed refusals map to 409, other failures to 503.
+  failure = new EufyError('mower_setting_evidence_missing');
+  const refused = await f.post(settingPath(ID_A, 'blade_speed', 'medium'));
+  assert.equal(refused.status, 409);
+  assert.deepEqual(refused.json, { error: 'mower_setting_evidence_missing' });
+  failure = new EufyError('mower_local_disconnected');
+  assert.equal((await f.post(settingPath(ID_A, 'blade_speed', 'medium'))).status, 503);
+  assert.equal(log.workParameters.length, 5, 'every routed write reached the library exactly once');
+  assert.equal(log.settings.length, 0);
+  await f.bridge.stop();
+  assert.deepEqual(await settledHandles(handles), handles);
+});
+
+test('read_only settings mode refuses the work parameters with 403 before the library', async (t) => {
+  const log = sessionLog();
+  const f = await fixture(t, { host: HOST_A }, {
+    openLocalSession: sessions(log, async () => telemetry(new Date(T0).toISOString()), undefined, undefined, {
+      workParameter: async (request) => workParameterOutcome(request, 'reflected', new Date(T0).toISOString(), 'low'),
+    }),
+  });
+  await f.bridge.connect();
+  for (const [key, value] of [
+    ['mow_speed', 'low'],
+    ['blade_speed', 'high'],
+    ['edge_distance', '100'],
+  ] as const) {
+    const refused = await f.post(settingPath(ID_A, key, value));
+    assert.equal(refused.status, 403, key);
+    assert.deepEqual(refused.json, { error: 'settings_disabled' });
+  }
+  assert.equal(log.opened.length, 0);
+  assert.equal(log.workParameters.length, 0);
+});
+
+test('a cloud reading that began before a confirmed write never replaces the reflected values', async (t) => {
+  const log = sessionLog();
+  const at = new Date(T0 + 2_000).toISOString();
+  const f = await fixture(t, { host: HOST_A, ...SETTINGS_WRITE }, {
+    openLocalSession: sessions(log, async () => telemetry(new Date(T0).toISOString()), undefined, undefined, {
+      workParameter: async (request) => workParameterOutcome(request, 'reflected', at, 'low'),
+    }),
+    workParametersRefreshMs: 60_000,
+    workParametersWaitMs: 20,
+  });
+  let release: () => void = () => {};
+  f.adapter.readCloudWorkParameters = async () => ({ observedAt: CLOUD_AT, value: workValue() });
+  await f.bridge.connect();
+  const path = `${MOWERS_PATH}/${ID_A}/state`;
+  await f.get(path);
+  // The next reading hangs, and the write confirms while it runs.
+  f.clock.now += 60_000;
+  f.adapter.readCloudWorkParameters = () =>
+    new Promise((resolve) => {
+      release = () => resolve({ observedAt: new Date(T0 + 60_000).toISOString(), value: workValue() });
+    });
+  const during = ((await f.get(path)).json as MowerStateDocument).work_parameters;
+  assert.equal(during.blade_speed.value, 'low', 'the older values while the reading runs');
+  const written = (await f.post(settingPath(ID_A, 'blade_speed', 'high'))).json as MowerWorkParameterDocument;
+  assert.equal(written.result, 'confirmed');
+  // The cloud's cache still holds the older value when the reading finally answers.
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  const after = ((await f.get(path)).json as MowerStateDocument).work_parameters;
+  assert.equal(after.source, 'local-tuya-3.5');
+  assert.equal(after.blade_speed.value, 'high');
 });

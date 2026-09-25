@@ -61,7 +61,7 @@ async def async_setup_entry(
         EufyVolumeNumber(coordinator, entry),
     ]
 
-    if coordinator.writes_available and coordinator.cloud_client is not None:
+    if coordinator.work_parameter_entities_available:
         entities.append(EufyEdgeDistanceNumber(coordinator, entry))
         entities.append(EufyPadDirectionNumber(coordinator, entry))
 
