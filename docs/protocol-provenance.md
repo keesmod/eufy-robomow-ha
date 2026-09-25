@@ -98,6 +98,16 @@ the second drive left DP 2 false and DP 107 `returning` until the arrival, so
 the E15 ignores a pause without a running task. A start from the dock right
 after an arrival set DP 1 true while DP 118 stayed at 100 from the map save.
 
+A start from Home Assistant during the rest in the dock, with DP 1 already true
+and DP 118 at 100, started the mower as well. The cloud showed DP 107 turn from
+the default payload through field 1 = 2 into the `mowing` payload within 4
+seconds, while the local status stayed unchanged. Since 0.13.4 the local backend
+confirms such a start from the cloud's `mowing` payload read after the write.
+This is the only command confirmation that uses the cloud. A Box task started
+in the app reported DP 107 field 1 = 17 with field 3 = 1, at times with field 2
+= 3, while the app showed Mowing…. That payload stays unread, and the local
+backend kept reading `mowing` from its local status.
+
 Field 4 = 2 as the only record of DP 107 is observed and not read. The cloud
 reported it while the mower stood docked with DP 1 false:
 

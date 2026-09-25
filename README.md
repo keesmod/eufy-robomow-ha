@@ -18,7 +18,8 @@ the last confirmed command, so resume works through Home Assistant. Version
 the dock with its task flag set. Version 0.13.0 shows the drive home after a
 dock in bridge mode. Version 0.13.2 shows the drive home in the local backend.
 Version 0.13.3 confirms a start right after a map save and refuses a pause
-without a running task.
+without a running task. Version 0.13.4 confirms a start while the mower rests in
+the dock and shows the drive home right after a dock.
 
 ---
 
@@ -243,7 +244,8 @@ is replayed on a switch.
 Set `view` to `overview`, `history`, `planning` or `settings` to show one section.
 Omitting it keeps the combined view for existing cards. Frontend version 0.7.1
 changes presentation only; it does not add zone commands or enable planning.
-Frontend version 0.7.2 offers pause only while the mower mows.
+Frontend version 0.7.2 offers pause only while the mower mows. Frontend version 0.7.3 labels
+the cloud confirmation of a start.
 
 The card supports map zoom/pan, battery and session telemetry, settings, and
 start/resume, pause and return commands. It shows pending, confirmed, failed and
@@ -402,6 +404,18 @@ protocol tests.
 
 ## Upgrade notes
 
+- **0.13.4, start while resting in the dock and the first poll of the drive
+  home.** About five minutes after each arrival the mower rests in the dock
+  with DP 1 true and DP 118 at 100. A start then works, but it leaves the
+  local status unchanged, so 0.13.3 reported a timeout and showed `docked`
+  until it. In that shape a pending start or resume now asks the cloud at
+  every local poll, and a fresh confirmed `mowing` payload confirms it with
+  evidence `cloud_mowing_reported`. This is the only command the cloud
+  confirms. The poll that confirms a dock now also asks for the drive home,
+  so `returning` shows at once instead of ten seconds later. A command
+  confirmed during a refresh that then outlasts the 35-second bound stays
+  confirmed. Update the dashboard resource to
+  `/eufy_robomow/eufy-mower-card.js?v=0.7.3`.
 - **0.13.3, start after a map save and pause during the drive home.** DP 118
   stays at 100 after a map save, so a start from the dock shortly after an
   arrival never showed DP 118 at 0, and the local backend reported a timeout
