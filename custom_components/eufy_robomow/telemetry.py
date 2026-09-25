@@ -4,6 +4,8 @@ import base64
 import binascii
 from typing import Any
 
+from .const import RETURNING_THRESHOLD
+
 # DP 107 ``robot_status`` wire definitions confirmed by the eufy-mega-client library
 # in owner-operated windows on the owned E15 (library 0.15.0, 2026-09-16 and
 # 2026-09-19): every listed field is a varint with exactly this value, an absent
@@ -28,7 +30,71 @@ def task_ambiguous(dps: dict[str, Any]) -> bool:
     minutes after each dock arrival and each evening while the mower rested in
     the dock, so a local status reply cannot tell the two apart. Only DP 107 can.
     """
-    return task_active(dps) is True and dps.get("2", False) is False and dps.get("118") == 100
+    return status_shape(dps) == "ambiguous"
+
+
+def status_shape(dps: dict[str, Any]) -> str:
+    """Name the shape of one local status reply that the activity depends on.
+
+    ``unknown`` without a task flag, ``no_task`` with DP 1 false, ``paused`` with
+    DP 1 and DP 2 true. With DP 1 true and DP 2 false, DP 118 decides: between
+    5 and 99 it is ``map_save``, at 100 ``ambiguous``, otherwise ``task``. DP 118
+    is map-save progress: on the owned E15 it rises from 1 to 100 in about
+    eighteen seconds at each dock arrival and after the app's Stop, while DP 1
+    is true, and the drive home itself runs with DP 1 false.
+    """
+    active = task_active(dps)
+    if active is None:
+        return "unknown"
+    if not active:
+        return "no_task"
+    if dps.get("2", False):
+        return "paused"
+    progress = dps.get("118")
+    if progress == 100:
+        return "ambiguous"
+    if isinstance(progress, int) and RETURNING_THRESHOLD <= progress < 100:
+        return "map_save"
+    return "task"
+
+
+def read_local_activity(dps: dict[str, Any], status: str | None) -> str | None:
+    """The local backend's activity from one status reply and DP 107.
+
+    ``status`` is DP 107 as :func:`robot_status` read it from a cloud poll taken
+    since the status reply took its current shape, or None. A local reply never
+    carries DP 107. Returns ``mowing``, ``paused``, ``returning``, ``docked`` or
+    None while the task flag is unknown.
+
+    DP 1 turns false as soon as a task ends or a stop is sent, and the mower
+    then drives home with DP 1 false, so only the confirmed ``returning`` payload
+    shows the drive. The map-saving payload marks the map save at the dock
+    arrival and after the app's Stop, which reads as docked, as the ambiguous
+    shape has since 0.13.1. Without a fresh payload each shape keeps its earlier
+    local reading: DP 118 between 5 and 99 reads as returning, the other task
+    shapes as mowing. Nothing is inferred from age or absence.
+    """
+    shape = status_shape(dps)
+    if shape == "unknown":
+        return None
+    if shape == "no_task":
+        return "returning" if status == "returning" else "docked"
+    if shape == "paused":
+        return "paused"
+    if status == "returning":
+        return "returning"
+    if status == "map_saving":
+        return "docked"
+    if shape == "ambiguous":
+        # Resting in the dock with the task flag set reads the default payload.
+        if status == "idle":
+            return "docked"
+        if status == "paused":
+            return "paused"
+        return "mowing"
+    if shape == "map_save":
+        return "returning"
+    return "mowing"
 
 
 def robot_status(value: Any) -> str | None:

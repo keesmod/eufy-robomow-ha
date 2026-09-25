@@ -16,7 +16,7 @@ on library 0.18.0. Version 0.12.0 takes the mower activity in bridge mode from
 the last confirmed command, so resume works through Home Assistant. Version
 0.12.1 stops the local backend from reporting mowing while the mower rests in
 the dock with its task flag set. Version 0.13.0 shows the drive home after a
-dock in bridge mode.
+dock in bridge mode. Version 0.13.2 shows the drive home in the local backend.
 
 ---
 
@@ -28,7 +28,7 @@ dock in bridge mode.
 | Battery | `sensor` | Battery level (%) |
 | Mowed Area | `sensor` | Area covered in the current or last session |
 | Mowing Progress | `sensor` | Real-time session completion % (from DP113 telemetry blob) |
-| Return Progress | `sensor` | Return-to-base progress (%) |
+| Return Progress | `sensor` | DP 118, the map-save progress (%) at the dock arrival and after a Stop |
 | Session Distance | `sensor` | Distance traveled in the current session (m) |
 | Network | `sensor` | WiFi / Cellular connection type |
 | Signal Strength | `sensor` | WiFi signal strength (%), the mower's own declared percentage |
@@ -124,6 +124,23 @@ opt in to control.
   payloads report those activities, and anything else keeps `mowing`. Without account
   credentials or a cloud answer the reading stays `mowing`. The
   `robot_status` attribute shows DP 107 as the last cloud poll read it.
+
+  The local status does not show the drive home either. After a stop or at
+  the end of a task DP 1 turns false while the mower drives to the dock, 25 to
+  60 seconds on the owned E15, and at the arrival DP 1 is true again for about
+  eighteen seconds while the map is saved and DP 118 rises from 1 to 100. When
+  DP 1 turns false after a mowing, paused or returning reading, the
+  integration asks the cloud at once and at every local poll for two minutes,
+  also at night, and after that every minute while DP 107 still reads
+  returning. The confirmed `returning` payload then reports `returning`. The
+  map-saving payload reports `docked` while the map is saved, which the
+  arrival and every map save ask the cloud for once. After the app's Stop the
+  mower saves the map where it stands on the lawn and reads `docked` as well,
+  as it did right afterwards before, because Home Assistant has no activity
+  for a mower standing on the lawn. Only a cloud poll taken since the local
+  status took its shape decides, and without one each shape keeps its earlier
+  reading: `docked` with DP 1 false and `returning` while DP 118 is between 5
+  and 99.
 - **bridge**: the integration reads state from the dedicated mower bridge
   described below and creates no local connection and no cloud client of its
   own. Enter the bridge URL (`http` or `https`, for example
@@ -380,6 +397,15 @@ protocol tests.
 
 ## Upgrade notes
 
+- **0.13.2, the drive home in the local backend.** With account credentials
+  the local backend reports `returning` while the mower drives to the dock
+  after a stop or at the end of a task, where it reported `docked`, and
+  `docked` while the map is saved at the arrival, where it reported
+  `returning` and sometimes `mowing` for one poll. Automations that wait for
+  `docked` after a stop now see it at the arrival instead of at the stop. The
+  cloud is asked at every local poll for up to two minutes after DP 1 turns
+  false and once per map save, about five to ten requests for each drive
+  home. Bridge mode is unchanged.
 - **0.13.1, the map save at the arrival is docked.** In the local backend a
   status poll that catches the ten to twenty seconds after a dock arrival,
   while DP 1 is still true and the map is saved, reported `mowing`, as seen

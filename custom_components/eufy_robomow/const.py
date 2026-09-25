@@ -104,10 +104,10 @@ DP_LIVE_VIEW = "114"  # int   Live-view/camera state:
 #       32  = idle (no live view)
 #       103 = camera enabled (user opened live view)
 #       104 = camera disabled (user closed live view)
-DP_PROGRESS = "118"  # int   0–100 % progress of current action
+DP_PROGRESS = "118"  # int   0–100 % map-save progress
 #       0   = idle / mowing
-#       1-99 = saving map or returning to base
-#       100 = docked / fully done
+#       1-99 = saving the map, at the dock arrival or after the app's Stop
+#       100 = map saved, often kept afterwards, also while a later task mows
 DP_TOTAL_TIME = "125"  # int   Total mow time — ~6.6 sec/unit
 #       36149 units ≈ 66h (app: 2d 18h) ✓
 DP_AREA = "126"  # int   Mowed area counter (exact unit unconfirmed)
@@ -137,21 +137,29 @@ CUT_HEIGHT_MAX = 75  # mm (confirmed app maximum)
 CUT_HEIGHT_STEP = 5  # mm
 
 # ── Activity state logic ──────────────────────────────────────────────────────
-# Confirmed via live DPS monitoring:
+# The local status reply carries DP1, DP2 and DP118 but never DP107. DP107 comes
+# from a cloud poll taken since the reply took its shape (telemetry.py):
 #
 #  DP1 absent,  DP2 absent                    → DOCKED  (cold / never started)
+#  DP1=True,    DP2=True                      → PAUSED
 #  DP1=True,    DP2=False,  DP118=0           → MOWING
-#  DP1=True,    DP2=False,  DP118 5–99        → RETURNING (progress back to base)
+#  DP1=True,    DP2=False,  DP118 5–99        → RETURNING, the earlier reading. DP118
+#                                               is map-save progress: it rises from
+#                                               1 to 100 in about 18 s at each dock
+#                                               arrival and after the app's Stop
 #  DP1=True,    DP2=False,  DP118=100         → ambiguous: DP118 stays at 100 after
 #                                               a map save, so a later task mows with
 #                                               it, and on 2026-09-24 the mower also
 #                                               rested in the dock with DP1=True for
 #                                               about 15 min after each dock arrival
-#                                               and each evening. DP107 from a fresh
-#                                               cloud poll decides: the default
-#                                               payload → DOCKED, paused → PAUSED,
-#                                               returning → RETURNING, otherwise MOWING
-#  DP1 absent/False                           → DOCKED  (no active session)
-#  DP1=True,    DP2=True                      → PAUSED
+#                                               and each evening. The default payload
+#                                               → DOCKED, paused → PAUSED, otherwise
+#                                               MOWING
+#  DP1=True,    DP2=False, any DP118          → DP107 returning → RETURNING and the
+#                                               map-saving payload → DOCKED
+#  DP1 absent/False                           → DOCKED  (no active session), but
+#                                               DP107 returning → RETURNING: after a
+#                                               stop or at the end of a task the
+#                                               mower drives home with DP1=False
 #
-RETURNING_THRESHOLD = 5  # DP118 ≥ this value while DP1 active = RETURNING
+RETURNING_THRESHOLD = 5  # DP118 ≥ this value while DP1 active: the map save, read as RETURNING
