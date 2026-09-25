@@ -18,8 +18,8 @@ backends and rollback are described in
 | Component | Version | Pinned inputs |
 | --- | --- | --- |
 | Integration `eufy_robomow` | 0.15.3 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
-| Mower bridge, container image | 0.12.0 | `@keesmod/eufy-mega-client` 0.24.0 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
-| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.12.0 | the same inputs, built by the Supervisor on the host |
+| Mower bridge, container image | 0.12.1 | `@keesmod/eufy-mega-client` 0.24.0 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
+| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.12.1 | the same inputs, built by the Supervisor on the host |
 
 The checksums of every candidate that was built are recorded in #8. The
 candidates of 0.15.0 and 0.15.1 with bridge 0.11.0, built from `64ce862` and
@@ -47,6 +47,15 @@ Library 0.24.0 was published separately with the owner's approval. Its
 [release](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.24.0)
 comes from `3c21ac4`, and the downloaded package matched its manifest and
 checksums. The mower candidates remain unpublished.
+
+App 0.12.1 from `422a8f4` (#61) corrects the bootstrap's missing forwarding of
+the cloud-map option. It replaced 0.12.0 with a Supervisor backup and passing
+configuration check. All 17 app files matched the candidate and runtime
+reported 0.12.1 on library 0.24.0. The app archive SHA-256 is
+`424ef6f21121918a26109cf1c2ee4784bfce119cb56f5a1ee43aa23f84fb792e`.
+Integration 0.15.3 is unchanged. The
+[native trial receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5835828129)
+records the two successful docked downloads, restart and restored configuration.
 
 CI runs the
 tests on Home Assistant 2026.7.2, and the rehearsal ran on Home Assistant
@@ -160,10 +169,14 @@ Deployment:
 These parts are software-verified or inherited. They have not been confirmed
 on hardware in this programme.
 
-- The bridge's read-only map route and the `bridge` map source. Bridge 0.12.0
+- The broader native map acceptance and the `bridge` map source. Bridge 0.12.1
   obtains fresh provisioning from library 0.24.0 in explicit cloud mode, or
-  reads an operator-supplied file in file mode. Fresh live acquisition with the
-  automatic producer still needs hardware acceptance.
+  reads an operator-supplied file in file mode. Two fresh docked acquisitions
+  passed on 2026-09-25 with Android stopped and a bridge restart between them.
+  Both matched the external source's static geometry and confirmed cancellation
+  and cleanup. The timestamps were 7.639 seconds apart. Continuous updates while
+  mowing, native-source outage/recovery and the actual HA map-source switch
+  remain unverified. Android and the original options were restored.
 - The `external` map source. It has been in daily use on the owner's
   installation since 0.5.0, but native map acceptance has not passed.
 - The no-go zones on the map since 0.15.1, from map-record field 12. The
