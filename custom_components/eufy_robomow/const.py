@@ -171,7 +171,8 @@ CUT_HEIGHT_STEP = 5  # mm
 #                                               it, and on 2026-09-24 the mower also
 #                                               rested in the dock with DP1=True for
 #                                               about 15 min after each dock arrival
-#                                               and each evening. The default payload
+#                                               and each evening. DP107 without a
+#                                               mission (default, hibernate)
 #                                               → DOCKED, paused → PAUSED, otherwise
 #                                               MOWING
 #  DP1=True,    DP2=False, any DP118          → DP107 returning → RETURNING and the

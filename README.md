@@ -22,6 +22,7 @@ without a running task. Version 0.13.4 confirms a start while the mower rests in
 the dock and shows the drive home right after a dock.
 Version 0.14.0 reads the local settings through the mower bridge and writes
 cut height, volume and two lawn options through its opt-in settings route.
+Version 0.14.1 reads DP 107 with the official app's mission status schema.
 
 ---
 
@@ -123,12 +124,14 @@ opt in to control.
   fifteen minutes after each dock arrival and each evening while the mower
   rested in the dock and the app showed it idle or charging. A local status
   reply never carries DP 107, so in this shape the integration asks the cloud
-  at once and then every minute, also at night. A default DP 107 payload, or
-  the map-saving payload while the map is saved at the arrival before DP 1
-  turns false, then reports `docked`, the confirmed `paused` and `returning`
-  payloads report those activities, and anything else keeps `mowing`. Without account
-  credentials or a cloud answer the reading stays `mowing`. The
-  `robot_status` attribute shows DP 107 as the last cloud poll read it.
+  at once and then every minute, also at night. A DP 107 payload without a
+  mission, such as the default payload or hibernation, or the map-saving
+  payload while the map is saved at the arrival before DP 1 turns false, then
+  reports `docked`. A paused mowing mission and the running recharge mission
+  report `paused` and `returning`, and anything else keeps `mowing`. Without
+  account credentials or a cloud answer the reading stays `mowing`. The
+  `robot_status` attribute shows DP 107 as the last cloud poll read it, and
+  `robot_power_mode` its power mode: `running`, `standby` or `hibernate`.
 
   The local status does not show the drive home either. After a stop or at
   the end of a task DP 1 turns false while the mower drives to the dock, 25 to
@@ -422,6 +425,15 @@ protocol tests.
 
 ## Upgrade notes
 
+- **0.14.1, DP 107 read with the app's mission status schema.** The official
+  app decodes DP 107 as the mower's mission status. Its fields are the mission,
+  sub-mission, state, power mode and an error flag, and a flag for saving data.
+  The local backend now reads every mowing mission, such as the Box task
+  (mission 17) and scheduled or zone tasks, as `mowing` or `paused`. A payload
+  without a mission reads as `idle`, whatever its power mode, and
+  hibernation (field 4 = 2) shows in the new `robot_power_mode` attribute.
+  A start in Box mode while the mower rests in the dock is now confirmed
+  from the cloud as well. Bridge mode is unchanged.
 - **0.14.0, settings through the bridge, and bridge 0.10.0.** With mower
   bridge 0.10.0 on library 0.20.0 the bridge backend reads Cut Height, Volume
   and the five local switches from the bridge's state document, with the same

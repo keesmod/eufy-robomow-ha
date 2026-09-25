@@ -26,7 +26,9 @@ from custom_components.eufy_robomow.const import (
 from custom_components.eufy_robomow.coordinator import EufyMowerCoordinator
 from custom_components.eufy_robomow.lawn_mower import EufyRobomowEntity
 from custom_components.eufy_robomow.telemetry import (
+    mission_status,
     read_local_activity,
+    robot_power_mode,
     robot_status,
     status_shape,
     task_ambiguous,
@@ -61,6 +63,8 @@ MOWING_PAYLOAD = _b64(0x08, 0x02, 0x18, 0x01)
 RETURNING_PAYLOAD = _b64(0x08, 0x01, 0x18, 0x01)
 MAP_SAVING_PAYLOAD = _b64(0x10, 0x05, 0x18, 0x01)
 FIELD_4_PAYLOAD = _b64(0x20, 0x02)
+# The first frame of a start: the whole-lawn mission without a state yet.
+UNREAD_PAYLOAD = _b64(0x08, 0x02)
 
 
 def test_robot_status_reads_the_confirmed_definitions_and_the_default_payload() -> None:
@@ -74,13 +78,39 @@ def test_robot_status_reads_the_confirmed_definitions_and_the_default_payload() 
     assert robot_status(MAP_SAVING_PAYLOAD) == "map_saving"
 
 
+def test_robot_status_reads_the_app_mission_status_schema() -> None:
+    # DP 107 is the app's mission status: field 1 mission, 2 sub-mission, 3 state,
+    # 4 power mode, 5 error flag, 6 saving-data flag.
+    assert robot_status(FIELD_4_PAYLOAD) == "idle", "hibernating in the dock, 2026-09-24 and 2026-09-25"
+    assert robot_status(_b64(0x20, 0x01)) == "idle", "standby"
+    assert robot_status(_b64(0x30, 0x01)) == "idle", "the saving-data flag after a map save"
+    assert robot_status(_b64(0x10, 0x05, 0x18, 0x01, 0x30, 0x01)) == "map_saving"
+    assert robot_status(_b64(0x08, 0x11, 0x18, 0x01)) == "mowing", "the app's Box task, 2026-09-25"
+    assert robot_status(_b64(0x08, 0x11, 0x10, 0x03, 0x18, 0x01)) == "mowing", "leaving the dock for a Box task"
+    assert robot_status(_b64(0x08, 0x11, 0x18, 0x02)) == "paused"
+    assert robot_status(_b64(0x08, 0x0A, 0x18, 0x01)) == "mowing", "a selected zone"
+    assert robot_status(_b64(0x08, 0x08, 0x18, 0x01)) == "mowing", "the scheduled whole lawn"
+    assert robot_status(_b64(0x08, 0x02, 0x10, 0x09, 0x18, 0x01, 0x20, 0x00)) == "mowing", "defogging"
+    assert robot_status(_b64(0x08, 0x01, 0x10, 0x01, 0x18, 0x01)) == "returning", "positioning on the way home"
+    assert mission_status(FIELD_4_PAYLOAD) == {4: 2}
+    assert mission_status(DEFAULT_PAYLOAD) == {}
+    assert robot_power_mode(FIELD_4_PAYLOAD) == "hibernate"
+    assert robot_power_mode(_b64(0x20, 0x01)) == "standby"
+    assert robot_power_mode(DEFAULT_PAYLOAD) == "running"
+    assert robot_power_mode(MOWING_PAYLOAD) == "running"
+    assert robot_power_mode(_b64(0x20, 0x07)) is None, "an unknown power mode"
+    assert robot_power_mode("not base64!") is None
+
+
 def test_robot_status_never_guesses() -> None:
     for value in (
-        _b64(0x10, 0x05, 0x18, 0x02),  # not exactly the map-saving payload
-        _b64(0x10, 0x05, 0x18, 0x01, 0x30, 0x01),  # map saving with another record
-        _b64(0x30, 0x01),  # field 6
-        FIELD_4_PAYLOAD,  # field 4, seen while docked idle on 2026-09-06 and 2026-09-24
-        _b64(0x08, 0x02),  # field 3 absent counts as zero, no definition matches
+        _b64(0x10, 0x05, 0x18, 0x02),  # the map save paused, never observed
+        UNREAD_PAYLOAD,  # a mission without a state: the first frame of a start
+        _b64(0x08, 0x03, 0x18, 0x01),  # mission 3 maps without mowing
+        _b64(0x08, 0x15, 0x18, 0x01),  # mission 21 drives to a target point
+        _b64(0x08, 0x01, 0x18, 0x02),  # a paused return, never observed
+        _b64(0x28, 0x01),  # the error flag without a mission
+        _b64(0x10, 0x09),  # a sub-mission without a mission or state
         _b64(0x08, 0x02, 0x08, 0x02, 0x18, 0x01),  # a repeated field
         _b64(0x0A, 0x01, 0x00),  # a length-delimited record
         _b64(0x08),  # truncated
@@ -191,6 +221,7 @@ def test_a_fresh_default_payload_makes_the_ambiguous_shape_docked() -> None:
     assert _local_entity(MOWING, "idle", fresh).activity == LawnMowerActivity.MOWING, "an unambiguous shape keeps the local reading"
     assert _local_entity(DOCKED, "mowing", fresh).activity == LawnMowerActivity.DOCKED
     assert _local_entity(RESTING_IN_DOCK, "idle", fresh).extra_state_attributes["robot_status"] == "idle"
+    assert _local_entity(RESTING_IN_DOCK, "idle", fresh).extra_state_attributes["robot_power_mode"] is None
 
 
 def test_the_entity_shows_the_drive_home_and_the_map_save_from_a_fresh_payload() -> None:
@@ -397,7 +428,7 @@ def test_the_watch_ends_after_two_minutes_unless_the_mower_still_drives_home(tmp
         assert cloud.calls == 2, "afterwards an unread payload ends the watch"
         assert entity.activity == LawnMowerActivity.DOCKED
 
-    _run(tmp_path, [FIELD_4_PAYLOAD, FIELD_4_PAYLOAD], unread)
+    _run(tmp_path, [UNREAD_PAYLOAD, UNREAD_PAYLOAD], unread)
 
     async def returning(coordinator: EufyMowerCoordinator, entity: EufyRobomowEntity, cloud: _FakeCloud, poll: Poll) -> None:
         await poll(MOWING, 1000)

@@ -105,8 +105,9 @@ seconds, while the local status stayed unchanged. Since 0.13.4 the local backend
 confirms such a start from the cloud's `mowing` payload read after the write.
 This is the only command confirmation that uses the cloud. A Box task started
 in the app reported DP 107 field 1 = 17 with field 3 = 1, at times with field 2
-= 3, while the app showed Mowing…. That payload stays unread, and the local
-backend kept reading `mowing` from its local status.
+= 3, while the app showed Mowing…. Integration 0.13.4 left that payload unread,
+and the local backend kept reading `mowing` from its local status. Since
+0.14.1 it reads as `mowing`, see the mission status below.
 
 The same Box task then ended by itself after about ten minutes. DP 1 turned
 false, and the cloud showed the `returning` payload at once, the same payload
@@ -118,8 +119,52 @@ start during the rest in the dock was confirmed from the cloud's `mowing`
 payload 12 seconds after the command. The poll that confirmed the following
 dock already showed `returning`.
 
-Field 4 = 2 as the only record of DP 107 is observed and not read. The cloud
-reported it while the mower stood docked with DP 1 false:
+### The mission status schema
+
+The official app's product script for the T2880, `T2880.js` of Anker eufy
+6.1.00 with SHA-256
+`0be33785e7c70d2c2e890d0f3b9d4ee512dca527b447ca95651ba683d5ef048d`, is the
+same script whose map numbering keesmod/eufy-mega-client#51 used. It was read
+on the owner's Mac on 2026-09-25 and decodes DP 107 as the mower's mission
+status. The script is not copied here. Only the facts the integration uses
+follow, all varints with an absent field counting as zero:
+
+- **Field 1, mission.** 0 is none and 1 is the recharge mission. The mowing
+  missions are the whole lawn (2), mapping while mowing (4), a temporary task
+  (5), remote-controlled mowing (7), the scheduled whole lawn (8), scheduled
+  mapping while mowing (9), a selected zone (10), a scheduled zone (16), a
+  drawn box (17), edge trimming (18) and scheduled edge trimming (22). Other
+  values, such as mapping without mowing (3), are not read.
+- **Field 2, sub-mission.** Relocation (1), leaving the station (3), saving the
+  map (5), setting the blade height (6) and defogging (9), among others.
+- **Field 3, state.** Idle (0), running (1), paused (2), aborted (3) and
+  complete (4).
+- **Field 4, power mode.** Running (0), standby (1) and hibernate (2).
+- **Field 5** flags an error and **field 6** flags data being saved.
+
+The library's three confirmed payloads are the running whole-lawn mission, the
+paused one and the running recharge mission. The map-saving payload is
+saving the map without a mission. On the owned E15 the windows of 2026-09-16
+to 2026-09-25 observed the following values. Where the app's display was
+recorded at the time, it agreed:
+
+- missions 1, 2 and 17, the last as Mowing… during a Box task;
+- sub-missions 1 (Positioning…), 3 and 6 while leaving the dock, 5 (Saving the
+  map) and 9 (Defogging…);
+- states 1 and 2;
+- power mode 2;
+- the saving-data flag right after each map save.
+
+Since 0.14.1 the local backend reads a running or paused mowing mission as
+`mowing` or `paused` and the running recharge mission as `returning`. Saving
+the map while running without a mission reads as `map_saving`. A payload
+without a mission, sub-mission, state or error flag reads as `idle`,
+whatever its power mode. The `robot_power_mode` attribute shows field 4.
+
+### Hibernation, field 4 = 2
+
+The cloud reported field 4 = 2 as the only record of DP 107 while the mower
+stood docked with DP 1 false:
 
 - on 2026-09-06 after an app selection in the Zone mode, see
   [zone-control-research.md](zone-control-research.md);
@@ -134,7 +179,7 @@ When the rest in the dock began at 20:30 UTC on 2026-09-24 with DP 1 true, DP
 alongside field 4 on 2026-09-06 and at 17:21 UTC on 2026-09-24, but not at
 06:47 UTC on 2026-09-25. At 07:30 UTC on 2026-09-25, with field 4 = 2 in the
 cloud and DP 1 false, the app showed its idle controls in the dock, as with the
-default payload. What field 4 means is not established.
+default payload. The mission status schema names field 4 = 2 hibernate.
 
 ## Current map-position interpretation
 
