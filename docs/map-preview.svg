@@ -8,7 +8,8 @@
     .background { fill: #020505; }
     .boundary { fill: #153f16; stroke: #49a6ff; stroke-width: 5; stroke-linejoin: round; }
     .base-area { fill: #347f91; fill-opacity: .9; stroke: #55aaff; stroke-width: 4; stroke-dasharray: 12 8; stroke-linejoin: round; }
-    .no-go-area { fill: #050607; stroke: #626a74; stroke-width: 2; stroke-linejoin: round; }
+    .obstacle { fill: #050607; stroke: #626a74; stroke-width: 2; stroke-linejoin: round; }
+    .forbidden-zone { fill: #ff3b30; fill-opacity: .45; stroke: #ff3b30; stroke-width: 3; stroke-dasharray: 10 6; stroke-linejoin: round; }
     .pathway { fill: none; stroke: #ffbd00; stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; }
     .pathway-center { fill: none; stroke: #fff7cf; stroke-width: 1.5; stroke-dasharray: 8 8; stroke-linecap: round; }
     .cleaned-area { opacity: .58; }
@@ -32,7 +33,8 @@
       <polyline class="cleaned-path" points="372.73,523.22 372.73,262.16" />
     </g>
     <polygon class="base-area" points="302.69,707.88 423.67,707.88 423.67,752.45 302.69,752.45" />
-    <polygon class="no-go-area" points="506.45,300.37 551.02,294.00 570.12,338.57 525.55,360.86 493.71,332.20" />
+    <polygon class="obstacle" points="506.45,300.37 551.02,294.00 570.12,338.57 525.55,360.86 493.71,332.20" />
+    <polygon class="forbidden-zone" points="575.00,440.00 632.00,455.00 618.00,508.00 561.00,493.00" />
     <polyline class="pathway" points="48.00,453.18 168.98,453.18" />
     <polyline class="pathway-center" points="48.00,453.18 168.98,453.18" />
     <g class="charging-station" transform="translate(68.00 521.18)">

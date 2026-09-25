@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import struct
+
 
 def varint(value: int) -> bytes:
     encoded = bytearray()
@@ -40,7 +42,47 @@ def point(
     return encoded
 
 
-def map_payload(*, include_embedded_position: bool = True) -> bytes:
+def polygon(points: tuple[tuple[int, int], ...]) -> bytes:
+    return b"".join(message(1, point(x, y)) for x, y in points)
+
+
+def ellipse(center: tuple[int, int], semi_major: int, semi_minor: int, rotation: float) -> bytes:
+    """An ellipse message whose rotation is a float, protobuf wire type 5."""
+    return b"".join(
+        (
+            message(1, point(*center)),
+            integer(2, semi_major),
+            integer(3, semi_minor),
+            varint((4 << 3) | 5) + struct.pack("<f", rotation),
+        )
+    )
+
+
+def forbidden_zone(
+    boundary: tuple[tuple[int, int], ...] = (),
+    *,
+    shape: int | None = None,
+    is_polygon: bool = False,
+    ellipse_message: bytes = b"",
+) -> bytes:
+    """One map-record field 12 zone: 1 id, 2 boundary, 3 isPolygon, 4 shape, 5 ellipse."""
+    encoded = integer(1, 1)
+    if boundary:
+        encoded += message(2, polygon(boundary))
+    if is_polygon:
+        encoded += integer(3, 1)
+    if shape is not None:
+        encoded += integer(4, shape)
+    if ellipse_message:
+        encoded += message(5, ellipse_message)
+    return encoded
+
+
+def map_payload(
+    *,
+    include_embedded_position: bool = True,
+    forbidden_zones: tuple[bytes, ...] = (),
+) -> bytes:
     boundary = b"".join(
         message(1, point(x, y)) for x, y in ((-20, 0), (100, 0), (100, 80), (0, 80))
     )
@@ -61,6 +103,7 @@ def map_payload(*, include_embedded_position: bool = True) -> bytes:
             embedded_position,
             message(10, message(3, boundary)),
             message(11, restriction),
+            *(message(12, zone) for zone in forbidden_zones),
             integer(16, 539),
             message(18, pathway),
             message(26, integer(1, 1) + message(2, base_area)),

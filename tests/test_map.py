@@ -14,6 +14,8 @@ from custom_components.eufy_robomow.map import (
 
 from .map_fixtures import (
     clean_path_payload,
+    ellipse,
+    forbidden_zone,
     integer,
     map_payload,
     message,
@@ -38,10 +40,70 @@ def test_parse_map_snapshot_builds_confirmed_geometry() -> None:
     )
     assert len(snapshot.base_areas) == 1
     assert len(snapshot.no_go_areas) == 1
+    assert snapshot.forbidden_zones == ()
     assert len(snapshot.pathways) == 1
     assert tuple(map(len, snapshot.cleaned_paths)) == (2,)
     assert snapshot.mower_position == Point(9, 10)
     assert snapshot.tracking_position == Point(200, 200)
+
+
+def test_parse_map_snapshot_decodes_forbidden_zones_apart_from_obstacles() -> None:
+    # A rotated rectangle with only an id and a boundary, so the shape is the
+    # default rectangle, and a polygon zone that states its shape.
+    rectangle = ((10, 10), (30, 20), (25, 30), (5, 20))
+    pentagon = ((60, 10), (80, 10), (85, 30), (70, 40), (55, 30))
+
+    snapshot = parse_map_snapshot(
+        map_payload(
+            forbidden_zones=(
+                forbidden_zone(rectangle),
+                forbidden_zone(pentagon, shape=1, is_polygon=True),
+            )
+        ),
+        clean_path_payload(),
+        point(11, 12, x_field=2, y_field=3),
+    )
+
+    assert snapshot.forbidden_zones == (
+        tuple(Point(x, y) for x, y in rectangle),
+        tuple(Point(x, y) for x, y in pentagon),
+    )
+    assert snapshot.no_go_areas == (
+        (Point(20, 20), Point(30, 20), Point(30, 30), Point(20, 30)),
+    )
+
+
+def test_parse_map_snapshot_skips_forbidden_zones_without_an_outline() -> None:
+    corners = ((10, 10), (30, 10), (30, 30), (10, 30))
+    skipped = (
+        # An ellipse is skipped even with a boundary, and its float rotation
+        # is never decoded.
+        forbidden_zone(corners, shape=2, ellipse_message=ellipse((20, 20), 10, 5, 0.5)),
+        forbidden_zone(corners, shape=3),
+        forbidden_zone(((10, 10), (30, 30))),
+        forbidden_zone(((10, 10), (30, 30), (10, 10))),
+        forbidden_zone(),
+    )
+
+    snapshot = parse_map_snapshot(
+        map_payload(forbidden_zones=(*skipped, forbidden_zone(corners))),
+        clean_path_payload(),
+        b"",
+    )
+
+    assert snapshot.forbidden_zones == (tuple(Point(x, y) for x, y in corners),)
+
+
+@pytest.mark.parametrize(
+    ("zone", "error"),
+    [
+        (b"\x08", "Truncated"),
+        (message(2, message(1, integer(1, 0x1_0000_0000))), "sint32"),
+    ],
+)
+def test_parse_map_snapshot_rejects_malformed_forbidden_zone(zone: bytes, error: str) -> None:
+    with pytest.raises(MapDecodeError, match=error):
+        parse_map_snapshot(map_payload(forbidden_zones=(zone,)), b"", b"")
 
 
 def test_parse_map_snapshot_falls_back_to_navigation_position() -> None:

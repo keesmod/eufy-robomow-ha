@@ -43,6 +43,14 @@ def _snapshot() -> MapSnapshot:
         cleaned_paths=((Point(10, 10), Point(20, 10)),),
         mower_position=Point(45, 50),
         tracking_position=Point(20, 10),
+        forbidden_zones=(
+            (
+                Point(60, 15),
+                Point(80, 20),
+                Point(75, 40),
+                Point(55, 35),
+            ),
+        ),
     )
 
 
@@ -56,9 +64,50 @@ def test_render_map_svg_is_deterministic_and_script_free() -> None:
     assert b"<script" not in rendered.lower()
     assert b'class="boundary"' in rendered
     assert b'class="base-area"' in rendered
-    assert b'class="no-go-area"' in rendered
+    assert rendered.count(b'class="obstacle"') == 1
+    assert rendered.count(b'class="forbidden-zone"') == 1
     assert rendered.count(b'class="pathway"') == 2
     assert b'class="mower-marker"' in rendered
+
+
+def test_render_map_svg_draws_forbidden_zones_as_red_dashed_zones() -> None:
+    rendered = render_map_svg(_snapshot()).decode()
+
+    style = re.search(r"\.forbidden-zone \{([^}]*)\}", rendered)
+    assert style is not None
+    assert "stroke: #ff3b30" in style.group(1)
+    assert "stroke-dasharray" in style.group(1)
+    obstacle_style = re.search(r"\.obstacle \{([^}]*)\}", rendered)
+    assert obstacle_style is not None
+    assert "#ff3b30" not in obstacle_style.group(1)
+    # Above the lawn, the areas and the obstacles, below the pathways and markers.
+    zone = rendered.index('<polygon class="forbidden-zone"')
+    assert rendered.index('<polygon class="obstacle"') < zone
+    assert zone < rendered.index('<polyline class="pathway"')
+    assert zone < rendered.index('class="mower-marker"')
+
+
+def test_render_map_svg_keeps_forbidden_zones_inside_canvas() -> None:
+    snapshot = MapSnapshot(
+        map_id=539,
+        boundary=(Point(0, 0), Point(100, 0), Point(100, 100), Point(0, 100)),
+        base_areas=(),
+        no_go_areas=(),
+        pathways=(),
+        cleaned_paths=(),
+        mower_position=None,
+        forbidden_zones=(
+            (Point(90, 90), Point(300, 90), Point(300, 300), Point(90, 300)),
+        ),
+    )
+
+    rendered = render_map_svg(snapshot).decode()
+    points = re.search(r'class="forbidden-zone" points="([^"]+)"', rendered)
+
+    assert points is not None
+    coordinates = [tuple(map(float, pair.split(","))) for pair in points.group(1).split()]
+    assert len(coordinates) == 4
+    assert all(48 <= x <= 672 and 48 <= y <= 852 for x, y in coordinates)
 
 
 def test_render_map_svg_hides_historical_cleaned_path_by_default() -> None:
