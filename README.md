@@ -26,7 +26,9 @@ Version 0.14.1 reads DP 107 with the official app's mission status schema. Versi
 with mower bridge 0.10.1 on library 0.22.0, which does the same in bridge mode.
 Version 0.15.0 reads the DP 155 work parameters through mower bridge 0.11.0,
 writes Travel Speed and Blade Speed through it and shows a confirmed setting at
-once. Version 0.15.1 draws the app's no-go zones on the map.
+once. Version 0.15.1 draws the app's no-go zones on the map. Version 0.15.2
+reads the map id from map-record field 1. Version 0.15.3 no longer draws a
+pathway that stays inside the lawn.
 
 ---
 
@@ -445,6 +447,14 @@ built and verified and what is confirmed on hardware.
 between the backends, rollback and the later retirement of the Android map
 helper.
 
+- **0.15.3, pathways inside the lawn.** The map no longer draws a pathway
+  that never leaves the lawn, which the eufy app does not show either. A
+  pathway that reaches outside the lawn is drawn in full as before. Replace
+  the integration folder. The bridge app is unchanged.
+- **0.15.2, map identity.** The map id comes from map-record field 1
+  instead of field 16, the total area. Live coverage no longer mixes maps
+  of equal area or resets when the area of the same map changes. Replace
+  the integration folder.
 - **0.15.1, no-go zones on the map.** The map draws the no-go zones that the
   eufy app shows in red, the forbidden zones of map-record field 12, as red
   dashed zones. Rectangles and polygons are drawn, ellipse zones not yet.
