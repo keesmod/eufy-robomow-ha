@@ -1,0 +1,166 @@
+# Migration and rollback
+
+How the mower moves between the integration's local backend and the mower
+bridge, how the integration and the bridge app are upgraded and rolled back,
+and how the Android map helper can be retired later. The procedures keep one
+control owner and one map owner at any time. They keep the config entry, the
+entity ids, the unique ids and the session history, and they never retry or
+replay a command.
+
+The rehearsal of these procedures on the owner's installation is item 3 of
+[issue #8](https://github.com/keesmod/eufy-robomow-ha/issues/8), and its
+receipt is recorded there.
+
+## One control owner, one map owner
+
+**Control.** Exactly one path writes to the mower from Home Assistant.
+
+- With the `local` backend the integration writes over its own LAN connection
+  in its `control` mode. Keep the bridge app in `observe_only` with
+  `settings_mode` unset or `read_only`. Nothing queries the bridge then, so it
+  opens no LAN session to the mower.
+- With the `bridge` backend the integration opens no LAN connection and no
+  cloud client of its own. The bridge writes, and only while both the
+  integration and the bridge run in `control`.
+- The eufy app stays an independent control path in both cases.
+
+**Map.** Exactly one source feeds the map entity.
+
+- `external` is the Android map helper or another compatible HTTPS source. It
+  is the default and the manual recovery path.
+- `bridge` is the bridge's read-only map route. It needs the `bridge` backend
+  and a bridge that reports `routes.maps`.
+- Each source keeps its own latest-good file, `latest.mapbundle` and
+  `bridge.mapbundle`. The external URL stays stored while `bridge` is
+  selected.
+
+The entities keep their unique ids on both backends. Bridge mode does not
+create the cloud settings: edge distance, pad direction, path distance, travel
+speed and blade speed. Those five show as unavailable while the bridge backend
+runs, keep their registry entries and return with the local backend.
+`tests/test_migration.py` pins this.
+
+## Switching the backend
+
+Before switching, check that the bridge's health check reports `running` and
+that no supervised window runs on the mower.
+
+1. Open **Settings → Devices & Services → Eufy Robomow → Configure**. Choose
+   the backend `bridge` with the bridge URL and token, and keep the map source
+   `external` unless the bridge serves maps.
+2. Saving asks the bridge's state route with the token and resolves the mower.
+   When the bridge cannot be reached, the token is wrong or the mower is
+   unknown, the form shows the error and nothing is saved. The local backend
+   keeps running. This is a failed cutover before the switch, and nothing
+   needs restoring.
+3. After saving, the entry reloads on the bridge backend. Within one or two
+   polls, about 10 to 20 seconds, the mower entity is available again, with
+   `backend: bridge` in its attributes.
+4. When the entities stay unavailable, for example because the bridge stopped
+   after the switch, open **Configure** again and choose `local`. The entry
+   reloads on the local backend and its first poll brings the entities back.
+   This is the whole recovery.
+
+A backend switch needs no Home Assistant restart. A reload starts a new
+coordinator without a pending command, so nothing is retried or replayed
+(`tests/test_bridge_backend.py`). The fallback to `local` is a deliberate
+step and not automatic, so that the mower never gets two LAN owners from Home
+Assistant.
+
+The app candidate starts with `boot: manual`, so it does not start by itself
+after a host restart. For lasting use of the bridge backend, enable
+**Start on boot** on the app's page. Without it, a restart of the host leaves
+the bridge backend unavailable until the app is started.
+
+## Switching the map source
+
+- From `external` to `bridge`: the options flow refuses `bridge` without the
+  bridge backend or without `routes.maps`, and nothing changes.
+- Back to `external`: one option change. The external URL and its latest-good
+  map are still there.
+- Before a rollback of the bridge to a version older than 0.7.0, switch the map
+  source to `external`.
+
+## Upgrade and rollback of the integration
+
+1. Back up the installed `custom_components/eufy_robomow` folder to a dated
+   archive outside `custom_components`. Also back up
+   `.storage/core.config_entries`, `core.entity_registry`,
+   `core.device_registry` and `eufy_robomow.sessions.<entry id>`. Keep the
+   backup private, because the config entry holds the account password and the
+   local key.
+2. Replace the folder with the version's `eufy_robomow` folder, run the
+   configuration check (`ha core check`) and restart Home Assistant
+   (`ha core restart`).
+3. Check that the entry loaded, that the entity registry is unchanged and that
+   the session history still lists its sessions.
+
+A rollback is the same with the previous folder.
+
+- The options have kept their keys since 0.11.0. The session store has used
+  storage version 1 since 0.7.0 and keeps session fields it does not know. Home
+  Assistant refuses a store with a newer major version, so a later release
+  that changes the session layout must use a minor version or a new key
+  (`tests/test_migration.py`).
+- An older version ignores an option it does not know, but saving the options
+  there drops it.
+- Entities that only a newer version creates become unavailable after a
+  rollback and keep their registry entries. The next upgrade brings them back
+  under the same entity ids.
+- A rollback across 0.8.1 changes the Signal Strength unit back to dBm and
+  raises the statistics repair again.
+
+## Upgrade and rollback of the bridge app
+
+- Upgrade: copy the version's app folder to `/addons/eufy_mower_bridge`, run
+  `ha store reload` and then `ha apps update local_eufy_mower_bridge --backup`.
+  The Supervisor builds the image on the host and backs up the previous
+  version first. Check that `GET /v1/state` reports the new version.
+- Rollback: copy the previous version's app folder to
+  `/addons/eufy_mower_bridge` and update the same way. The Supervisor installs
+  an older version through an update as well, and keeps the data directory and
+  the options. **Rebuild** is no rollback, because the Supervisor refuses it
+  once the folder carries another version. Restoring the app backup that the
+  upgrade made is the alternative. It brings back the previous version with its
+  options and the data of that moment.
+- Keep `mower-session.json` and `bridge-id` in the data directory. The mower id
+  the integration stores depends on them. The library's changelog records no
+  change of either from library 0.13.0 to 0.22.0.
+- Docker: start the previous image tag with the same volume, see the
+  [deployment guide](bridge-deployment.md#rollback).
+
+## Retiring the Android map helper later
+
+This is a plan, not a procedure to run now. Nothing in this repository stops,
+removes or changes the Android map helper, its caches or its backups. Every
+step needs the owner's explicit decision at that time.
+
+The plan starts only after these gates:
+
+1. Native map acceptance, item 2 of #8, has passed. That means live acquisition
+   through the bridge compared with the external source and the app in an
+   observed session, with a restart and an offline case, and with the real
+   observation interval and its gaps published.
+2. The map provisioning that the bridge needs is produced and renewed without
+   manual steps.
+3. The switch of the map source to `bridge` and back to `external` has been
+   rehearsed on the owner's installation.
+
+Then, in order:
+
+1. **Parallel run.** The map source is `bridge` for daily use while the helper
+   keeps running as the recovery source. The run lasts until the owner is
+   satisfied, at least two weeks with several mowing sessions and a Home
+   Assistant restart. Record every gap and every switch back.
+2. **Standby.** Stop the helper's acquisition service first and its emulator
+   after it, as the helper's own rollback notes require. Keep the external URL
+   in the integration's options and keep `latest.mapbundle`. Recovery is to
+   start both again and switch the map source to `external`.
+3. **Archive.** After a further period without recovery use, the owner decides
+   whether to archive the helper. Its configuration, certificates, vendor
+   libraries and caches then move to a private backup. They are never deleted
+   as part of this programme.
+
+What never happens: no deletion of the helper's runtime, caches, backups or
+`latest.mapbundle`, no change of the external map source's API, and no removal
+of the `external` option from the integration while any installation uses it.
