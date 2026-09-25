@@ -28,6 +28,33 @@ def test_command_evidence_is_precise(action, dps, evidence):
     assert command_evidence(action, dps) == evidence
 
 
+# DP 118 stays at 100 after a map save. On 2026-09-25 a start from the dock right
+# after an arrival reported DP 1 true with DP 118 still at 100.
+SAVED = {"1": False, "2": False, "118": 100}
+RESTING = {"1": True, "2": False, "118": 100}
+
+
+@pytest.mark.parametrize(
+    "action,before,dps,evidence",
+    [
+        ("start", SAVED, RESTING, "task_started"),
+        ("start", {"8": 90, "110": 40, "118": 0}, {"1": True, "2": False, "118": 0}, "mowing_reported"),
+        ("start", RESTING, RESTING, None),
+        ("start", SAVED, {"1": True, "2": True, "118": 100}, None),
+        ("start", {}, RESTING, None),
+        ("resume", {**RESTING, "2": True}, RESTING, "pause_cleared"),
+        ("resume", RESTING, RESTING, None),
+        ("resume", {**RESTING, "2": True}, {"1": False, "2": False}, None),
+    ],
+)
+def test_the_changed_flag_confirms_start_and_resume_after_a_map_save(action, before, dps, evidence):
+    assert command_evidence(action, dps, before) == evidence
+    op = MowerCommand(action, 4, before=before)
+    op.state = "pending"
+    op.observe(5, dps)
+    assert op.evidence == evidence
+
+
 def test_cached_and_prewrite_values_cannot_confirm():
     op = MowerCommand("pause", 4)
     op.observe(5, {"1": True, "2": True})
@@ -46,6 +73,7 @@ def coordinator():
     c.operating_mode = "control"
     c.local_generation = 1
     c.command = None
+    c.local_dps = {"1": True, "2": False, "118": 0}
     c.async_update_listeners = Mock()
     c.hass = SimpleNamespace(async_add_executor_job=AsyncMock(return_value={}))
     c.async_request_refresh = AsyncMock()
@@ -104,5 +132,38 @@ def test_pause_can_supersede_pending_start():
             await task
         assert old.state == "superseded"
         assert c.command.state == "confirmed"
+
+    asyncio.run(run())
+
+
+def test_pause_without_a_running_task_is_refused_before_any_write():
+    async def run():
+        c = coordinator()
+        c.local_dps = {"1": False, "2": False, "118": 0}
+        with pytest.raises(HomeAssistantError, match="runs no task"):
+            await c.async_send_mower_command("pause")
+        c.hass.async_add_executor_job.assert_not_awaited()
+        assert c.command is None
+        c.local_dps = {}
+        c.async_request_refresh = AsyncMock()
+        with pytest.raises(HomeAssistantError, match="did not confirm"):
+            await c.async_send_mower_command("pause", timeout=0.01)
+        c.hass.async_add_executor_job.assert_awaited_once()
+
+    asyncio.run(run())
+
+
+def test_a_start_from_the_dock_records_the_status_it_was_chosen_from():
+    async def run():
+        c = coordinator()
+        c.local_dps = SAVED
+
+        async def refresh():
+            c.command.observe(2, RESTING)
+
+        c.async_request_refresh = refresh
+        await c.async_send_mower_command("start", timeout=0.1)
+        assert c.command.state == "confirmed"
+        assert c.command.evidence == "task_started"
 
     asyncio.run(run())

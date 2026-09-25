@@ -1,5 +1,5 @@
 /* Eufy Mower Card — uses Home Assistant entities and authenticated image proxy. */
-export const CARD_VERSION = "0.7.1";
+export const CARD_VERSION = "0.7.2";
 const unavailable = new Set(["unknown", "unavailable", ""]);
 export const escapeHTML = (value) => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 export function ageSeconds(value, now = Date.now()) {
@@ -14,7 +14,8 @@ export function controls(state, now = Date.now()) {
   const features = a.supported_features ?? 0;
   return {
     start: Boolean(writable && !busy && (features & 1) && ["docked", "paused"].includes(state.state)),
-    pause: Boolean(writable && (features & 2) && ["mowing", "returning"].includes(state.state)),
+    // The E15 ignores a pause during the drive home, so pause is offered while mowing only.
+    pause: Boolean(writable && (features & 2) && state.state === "mowing"),
     dock: Boolean(writable && (features & 4) && ["mowing", "paused", "returning"].includes(state.state)),
     writable, fresh,
   };
@@ -28,7 +29,7 @@ export function mapHealth(image, active, now = Date.now()) {
 }
 const labels = {docked:"Inactief", mowing:"Aan het maaien", paused:"Gepauzeerd", returning:"Terug naar het laadstation", unavailable:"Geen verbinding", unknown:"Status onbekend", idle:"Geen actieve sessie", charging:"Laadfase tijdens sessie"};
 const commandLabels = {sending:"Opdracht wordt verzonden…", pending:"Verzonden · wachten op de maaier…", timeout:"Geen bevestiging ontvangen. Controleer de maaier voordat je opnieuw probeert.", rejected:"De maaier heeft de opdracht geweigerd.", failed:"Verzenden mislukt. Controleer de verbinding.", interrupted:"Bevestiging onderbroken; controleer de maaier.", superseded:"Vervangen door een volgende opdracht."};
-const evidenceLabels = {mowing_reported:"Maaier meldt maaien", pause_reported:"Pauze bevestigd door de maaier", returning_reported:"Maaier meldt terugkeer", task_inactive:"Maaier meldt een inactieve taak; aankomst bij het laadstation is niet bevestigd."};
+const evidenceLabels = {mowing_reported:"Maaier meldt maaien", task_started:"Maaier meldt een gestarte taak", pause_cleared:"Maaier meldt dat de pauze is opgeheven", pause_reported:"Pauze bevestigd door de maaier", returning_reported:"Maaier meldt terugkeer", task_inactive:"Maaier meldt een inactieve taak; aankomst bij het laadstation is niet bevestigd."};
 const icon = (name) => `<ha-icon icon="mdi:${name}"></ha-icon>`;
 const stamp = (value) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString("nl-NL", {day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"}) : "—";
 const minutes = value => (Number(value) || 0) < 60 ? `${Math.round(Number(value) || 0)} sec` : `${Math.round(Number(value) / 60)} min`;

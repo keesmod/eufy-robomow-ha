@@ -9,14 +9,30 @@ from typing import Any
 from homeassistant.util import dt as dt_util
 
 from .const import DP_PAUSED, DP_PROGRESS, DP_TASK_ACTIVE, RETURNING_THRESHOLD
+from .telemetry import task_active
 
 
-def command_evidence(action: str, dps: dict[str, Any]) -> str | None:
-    """Describe exactly what a new device status proves."""
+def command_evidence(
+    action: str, dps: dict[str, Any], before: dict[str, Any] | None = None
+) -> str | None:
+    """Describe exactly what a new device status proves.
+
+    ``before`` is the local status the command was chosen from. DP 118 stays at
+    100 after a map save, so a task started or resumed then never reports 0, as
+    a start from the dock showed on 2026-09-25. There the flag the command
+    changed is the evidence: DP 1 turning true for start and DP 2 turning false
+    for resume. Without that change, for example a start while the mower rests
+    in the dock with DP 1 already true, nothing is confirmed.
+    """
     active, paused, progress = dps.get(DP_TASK_ACTIVE), dps.get(DP_PAUSED), dps.get(DP_PROGRESS)
     if action in ("start", "resume"):
         if active is True and paused is False and progress == 0:
             return "mowing_reported"
+        if before is not None and active is True and paused is False:
+            if action == "start" and task_active(before) is False:
+                return "task_started"
+            if action == "resume" and before.get(DP_PAUSED) is True:
+                return "pause_cleared"
     elif action == "pause" and active is True and paused is True:
         return "pause_reported"
     elif action == "dock":
@@ -40,6 +56,8 @@ class MowerCommand:
     requested_at: str = field(default_factory=lambda: dt_util.utcnow().isoformat())
     finished_at: str | None = None
     event: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+    # The local status the command was chosen from, see command_evidence.
+    before: dict[str, Any] | None = field(default=None, repr=False)
 
     def finish(self, state: str, evidence: str | None = None) -> None:
         self.state, self.evidence = state, evidence
@@ -49,7 +67,7 @@ class MowerCommand:
     def observe(self, generation: int, dps: dict[str, Any]) -> None:
         if self.state != "pending" or generation <= self.after_generation:
             return
-        if evidence := command_evidence(self.action, dps):
+        if evidence := command_evidence(self.action, dps, self.before):
             self.finish("confirmed", evidence)
 
     def as_dict(self) -> dict[str, Any]:
