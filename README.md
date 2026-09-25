@@ -601,7 +601,7 @@ helper.
 ## Known limitations
 
 - **Zone mowing** — the owned E15 app shows Entire, Zone, Box and Spot, but area identifiers and command transport have not been validated. No zone action is exposed; see [zone research](docs/zone-control-research.md).
-- **Map acquisition** — experimental. The external source needs a separate compatible source, because Tuya publishes the required P2P transport only through its Android media stack. The bridge source uses the library's portable acquisition, which needs private provisioning that the operator supplies and keeps fresh. Neither has passed native map acceptance yet, see issue #8.
+- **Map acquisition** — experimental. The external source needs a separate compatible source. Bridge 0.12.1 with library 0.24.0 obtains fresh provisioning for each native acquisition in explicit `cloud` mode. The operator-supplied provisioning file remains supported. Fresh docked downloads and matching static geometry are confirmed on the owned E15. Updates during mowing and longer observation remain open in issue #8.
 - **Live marker semantics** — the live mower/station interpretation matches repeated E15 observations but is not a vendor-documented protocol contract. It is display-only and never drives mower control.
 
 ---

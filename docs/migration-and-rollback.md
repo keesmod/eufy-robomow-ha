@@ -66,8 +66,10 @@ that no supervised window runs on the mower.
    polls, about 10 to 20 seconds, the mower entity is available again, with
    `backend: bridge` in its attributes.
 4. When the entities stay unavailable, for example because the bridge stopped
-   after the switch, open **Configure** again and choose `local`. The entry
-   reloads on the local backend and its first poll brings the entities back.
+   after the switch, open **Configure** again and choose backend `local` and
+   map source `external` together. The native source cannot stay selected with
+   the local backend. The entry reloads locally and its first poll brings the
+   entities back.
    This is the whole recovery.
 
 A backend switch needs no Home Assistant restart. A reload starts a new
@@ -143,38 +145,40 @@ A rollback is the same with the previous folder.
 - Docker: start the previous image tag with the same volume, see the
   [deployment guide](bridge-deployment.md#rollback).
 
-## Retiring the Android map helper later
+## Retiring an Android map source
 
-This is a plan, not a procedure to run now. Nothing in this repository stops,
-removes or changes the Android map helper, its caches or its backups. Every
-step needs the owner's explicit decision at that time.
+Nothing in this repository automatically stops or removes an external map
+source. Retiring a particular installation requires its owner's explicit
+decision, a working replacement and verified recovery material.
 
-The plan starts only after these gates:
+Before a normal retirement, confirm fresh provisioning and acquisition without
+Android, the source switch and rollback, restart and outage recovery, and
+observed updates during mowing. Record the actual observation period and gaps.
+An owner can choose earlier retirement with a private recovery archive. That
+decision does not satisfy the remaining hardware acceptance criteria.
 
-1. Native map acceptance, item 2 of #8, has passed. That means live acquisition
-   through the bridge compared with the external source and the app in an
-   observed session, with a restart and an offline case, and with the real
-   observation interval and its gaps published.
-2. The map provisioning that the bridge needs is produced and renewed without
-   manual steps.
-3. The switch of the map source to `bridge` and back to `external` has been
-   rehearsed on the owner's installation.
+1. **One active map owner.** Stop the helper's acquisition service before its
+   emulator when selecting native maps. Keeping the helper running alongside
+   the bridge is not passive standby: it starts acquisitions on its own idle
+   schedule. Keep the external URL, certificate pin and `latest.mapbundle` for
+   recovery. In lasting bridge use, enable the bridge app's **Start on boot**.
+2. **Recovery.** Disable native acquisition before starting Android. If the
+   runtime was removed, restore the verified private archive with container,
+   emulator and helper autostart disabled, then start the restored container.
+   Start the emulator, wait until it is ready, then start the acquisition
+   service and select `external`. In the owned installation, allowing 60
+   seconds before starting the helper restored fresh acquisition after a cold
+   emulator start.
+   Confirm a fresh source timestamp and a healthy HA map, not just running
+   services. Restore the recorded backend and operating mode deliberately.
+3. **Archive.** Before removing the active runtime, preserve its configuration,
+   certificates, vendor libraries, emulator data, map caches and research
+   backups privately. Verify the archive, keep an independent copy and test a
+   cold restore without starting another map owner. A cold restore proves file
+   recovery, not fresh acquisition from the restored emulator.
+4. **Remove the dedicated runtime only with the owner's approval.** Verify the
+   exact target and its dependencies, then check the native source again and
+   confirm that unrelated workloads remain unchanged. Keep the recovery
+   archive and the HA caches.
 
-Then, in order:
-
-1. **Parallel run.** The map source is `bridge` for daily use while the helper
-   keeps running as the recovery source. The run lasts until the owner is
-   satisfied, at least two weeks with several mowing sessions and a Home
-   Assistant restart. Record every gap and every switch back.
-2. **Standby.** Stop the helper's acquisition service first and its emulator
-   after it, as the helper's own rollback notes require. Keep the external URL
-   in the integration's options and keep `latest.mapbundle`. Recovery is to
-   start both again and switch the map source to `external`.
-3. **Archive.** After a further period without recovery use, the owner decides
-   whether to archive the helper. Its configuration, certificates, vendor
-   libraries and caches then move to a private backup. They are never deleted
-   as part of this programme.
-
-What never happens: no deletion of the helper's runtime, caches, backups or
-`latest.mapbundle`, no change of the external map source's API, and no removal
-of the `external` option from the integration while any installation uses it.
+The public external-source API and the `external` option remain supported.
