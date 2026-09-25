@@ -95,6 +95,8 @@ jobs:
         run: docker build -t eufy-mower-bridge-app:test ./ha_app
       - name: App candidate refuses without options, runs healthy without network and stops cleanly
         run: bridge/scripts/container-smoke.sh --app eufy-mower-bridge-app:test
+      - name: App cloud-map option reaches the running bridge without enabling writes
+        run: bridge/scripts/container-smoke.sh --app --cloud-maps eufy-mower-bridge-app:test
 
   hassfest:
     runs-on: ubuntu-latest

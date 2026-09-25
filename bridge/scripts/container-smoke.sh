@@ -5,11 +5,16 @@
 set -euo pipefail
 
 mode=standalone
-if [ "${1:-}" = "--app" ]; then
-  mode=app
+map_mode=file
+while [[ "${1:-}" = --* ]]; do
+  case "$1" in
+    --app) mode=app ;;
+    --cloud-maps) map_mode=cloud ;;
+    *) echo "smoke: unknown argument $1" >&2; exit 1 ;;
+  esac
   shift
-fi
-image=${1:?usage: container-smoke.sh [--app] <image>}
+done
+image=${1:?usage: container-smoke.sh [--app] [--cloud-maps] <image>}
 name="eufy-mower-smoke-$$"
 token="synthetic-bridge-token-0123456789abcdef"
 password="synthetic-password-not-real"
@@ -44,7 +49,7 @@ set -e
 # 2. Synthetic configuration, no network at all.
 if [ "$mode" = app ]; then
   mkdir -p "$workdir/data"
-  printf '{"token":"%s","email":"synthetic@example.invalid","password":"%s","country":"NL"}\n' "$token" "$password" >"$workdir/data/options.json"
+  printf '{"token":"%s","email":"synthetic@example.invalid","password":"%s","country":"NL","map_provisioning_mode":"%s"}\n' "$token" "$password" "$map_mode" >"$workdir/data/options.json"
   docker run -d --name "$name" --network none -v "$workdir/data:/data" "$image" >/dev/null
 else
   docker run -d --name "$name" --network none \
@@ -52,6 +57,7 @@ else
     -e EUFY_MOWER_EMAIL=synthetic@example.invalid \
     -e "EUFY_MOWER_PASSWORD=$password" \
     -e EUFY_MOWER_COUNTRY=NL \
+    -e "EUFY_MOWER_MAP_PROVISIONING_MODE=$map_mode" \
     "$image" >/dev/null
 fi
 
@@ -79,6 +85,19 @@ case "$summary" in
 esac
 unauthorized=$(docker exec "$name" node -e 'fetch("http://127.0.0.1:8090/v1/state").then(r => console.log(r.status))') || fail "unauthenticated request failed"
 [ "$unauthorized" = 401 ] || fail "expected 401 without token, got $unauthorized"
+
+# Exercise options.json through the real root-dropping app bootstrap, not only config parsing.
+docker exec -e "SMOKE_TOKEN=$token" -e "SMOKE_MAP_MODE=$map_mode" "$name" node --input-type=module -e '
+  import assert from "node:assert/strict";
+  const response = await fetch("http://127.0.0.1:8090/v1/state", {
+    headers: {Authorization: `Bearer ${process.env.SMOKE_TOKEN}`},
+  });
+  assert.equal(response.status, 200);
+  const state = await response.json();
+  assert.equal(state.routes.maps, process.env.SMOKE_MAP_MODE === "cloud");
+  assert.equal(state.routes.control, false);
+  assert.equal(state.routes.settings, false);
+' || fail "configured map mode did not reach the running bridge"
 
 # 5. Stop within the shutdown deadline and exit 0.
 docker stop -t 25 "$name" >/dev/null
