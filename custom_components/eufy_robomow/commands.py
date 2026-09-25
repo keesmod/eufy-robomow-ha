@@ -1,4 +1,8 @@
-"""Confirm commands using fresh local telemetry, never cloud or cached values."""
+"""Confirm commands using fresh local telemetry, never cached values.
+
+The cloud's DP 107 confirms only a start or resume whose effect the local status
+cannot show, see :meth:`MowerCommand.observe_cloud`.
+"""
 
 from __future__ import annotations
 
@@ -69,6 +73,18 @@ class MowerCommand:
             return
         if evidence := command_evidence(self.action, dps, self.before):
             self.finish("confirmed", evidence)
+
+    def observe_cloud(self, status: str | None) -> None:
+        """Confirm a start or resume from DP 107 read after the write.
+
+        The caller passes DP 107 from a cloud poll that began after the write, and
+        only while the mower rests in the dock with its task flag set. Then DP 1
+        is already true and DP 118 at 100, so the local status cannot show a
+        start. On 2026-09-25 the cloud showed the default payload turn into the
+        confirmed mowing payload within 4 seconds of such a start.
+        """
+        if self.state == "pending" and self.action in ("start", "resume") and status == "mowing":
+            self.finish("confirmed", "cloud_mowing_reported")
 
     def as_dict(self) -> dict[str, Any]:
         return {

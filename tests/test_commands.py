@@ -167,3 +167,37 @@ def test_a_start_from_the_dock_records_the_status_it_was_chosen_from():
         assert c.command.evidence == "task_started"
 
     asyncio.run(run())
+
+
+def test_the_cloud_confirms_only_a_pending_start_or_resume_with_the_mowing_payload():
+    for action, status, state in [
+        ("start", "mowing", "confirmed"),
+        ("resume", "mowing", "confirmed"),
+        ("start", None, "pending"),
+        ("start", "idle", "pending"),
+        ("pause", "paused", "pending"),
+        ("dock", "returning", "pending"),
+    ]:
+        op = MowerCommand(action, 4)
+        op.state = "pending"
+        op.observe_cloud(status)
+        assert op.state == state, (action, status)
+    op = MowerCommand("start", 4)
+    op.observe_cloud("mowing")
+    assert op.state == "sending", "never before the write"
+
+
+def test_a_confirmation_stands_when_the_refresh_outlasts_the_bound():
+    async def run():
+        c = coordinator()
+
+        async def refresh():
+            c.command.observe(2, {"1": True, "2": False, "118": 0})
+            await asyncio.sleep(1)
+
+        c.async_request_refresh = refresh
+        await c.async_send_mower_command("start", timeout=0.05)
+        assert c.command.state == "confirmed"
+        assert c.command.evidence == "mowing_reported"
+
+    asyncio.run(run())
