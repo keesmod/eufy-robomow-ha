@@ -17,13 +17,14 @@ backends and rollback are described in
 
 | Component | Version | Pinned inputs |
 | --- | --- | --- |
-| Integration `eufy_robomow` | 0.15.0 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
+| Integration `eufy_robomow` | 0.15.1 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
 | Mower bridge, container image | 0.11.0 | `@keesmod/eufy-mega-client` 0.23.0 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
 | Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.11.0 | the same inputs, built by the Supervisor on the host |
 
 The checksums of every candidate that was built are recorded in #8. The
-candidate of 0.15.0 and 0.11.0, built from `64ce862`, matched the folders
-deployed on the owner's installation file for file. CI runs the
+candidates of 0.15.0 and 0.15.1 with bridge 0.11.0, built from `64ce862` and
+`0ed3691`, matched the folders deployed on the owner's installation file for
+file. CI runs the
 tests on Home Assistant 2026.7.2, and the rehearsal ran on Home Assistant
 2026.9.3 with Supervisor 2026.09.2. The hardware evidence below comes from the
 owner's Home Assistant OS installation with the owned E15 (T2880) on firmware
@@ -139,6 +140,9 @@ on hardware in this programme.
   the operator supplies.
 - The `external` map source. It has been in daily use on the owner's
   installation since 0.5.0, but native map acceptance has not passed.
+- The no-go zones on the map since 0.15.1, from map-record field 12. The
+  owner's one zone was compared with the app before the change, and the
+  drawing is software-verified with synthetic geometry.
 - The cloud settings of the local backend: edge distance, pad direction, path
   distance, travel speed and blade speed, inherited from upstream.
 - Edge distance, pad direction and path distance in bridge mode, read only
@@ -182,7 +186,8 @@ Combinations run on the owner's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
-| 0.15.0 | 0.11.0 (0.23.0) | the current candidate, matched file for file after its deployment, speed window of 2026-09-25 |
+| 0.15.1 | 0.11.0 (0.23.0) | the current candidate, matched file for file after its deployment on 2026-09-25 |
+| 0.15.0 | 0.11.0 (0.23.0) | matched file for file after its deployment, speed window of 2026-09-25 |
 | 0.14.2 | 0.10.1 (0.22.0) | bridge-mode check, settings windows and migration rehearsal of 2026-09-25 |
 | 0.14.0 | 0.10.0 (0.20.0) | deployed with settings read only, 2026-09-25 |
 | 0.13.0 | 0.9.0 (0.19.0) | third control window, 2026-09-24 |
