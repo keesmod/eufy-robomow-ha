@@ -6,6 +6,11 @@ Writable boolean DPS:
   • Smart Suggestions      — DP132 (AI suggestions for no-go zones)
   • Mow Yellow Grass       — DP141 (allow mowing dry/yellow grass)
   • Real Lawn Map          — DP133 (use actual lawn map vs simplified map)
+
+With the mower bridge backend all five read the bridge's state document. Smart
+No-Go Suggestions and Mow Yellow Grass write through its opt-in settings route.
+Stop on Rain Detection, Child Protection and Real Lawn Map stay read only there,
+so turning them on or off is refused before any request.
 """
 
 from __future__ import annotations
@@ -44,7 +49,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: EufyMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
-    if not coordinator.writes_available:
+    if not coordinator.setting_entities_available:
         return
     async_add_entities(
         [

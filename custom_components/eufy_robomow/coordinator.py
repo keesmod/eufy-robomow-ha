@@ -13,6 +13,7 @@ from .bridge_client import (
     BridgeClient,
     BridgeClientError,
     BridgeCommandOutcome,
+    BridgeSettingOutcome,
     parse_state_document,
     refused_before_write,
 )
@@ -42,6 +43,8 @@ from .const import (
     OPERATING_MODE_CONTROL,
     BACKEND_BRIDGE,
     BACKEND_LOCAL,
+    BRIDGE_SETTING_KEYS,
+    BRIDGE_WRITABLE_SETTING_DPS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -99,7 +102,10 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
     With ``backend=BACKEND_BRIDGE`` the coordinator instead reads one typed state
     document per poll from the dedicated mower bridge and owns no local socket.
     Start, pause, resume and dock then go through the bridge's opt-in command
-    routes, each sent exactly once, while settings writes have no bridge route.
+    routes, each sent exactly once. The local setting data points come from the
+    bridge's state document, and cut height, volume, smart no-go suggestions and
+    mow yellow grass are written through its opt-in settings route, each once.
+    Rain stop, child protection and the real lawn map stay read only there.
     """
 
     # Defaults so a coordinator created without __init__ (as in unit tests) is local.
@@ -137,6 +143,11 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
     # control opt-in it carried (classes, max_state_age_ms, read_back_ms).
     bridge_routes_control: bool = False
     bridge_control: dict[str, Any] | None = None
+    # Whether the bridge's last state answer reported ``routes.settings``, its own
+    # settings opt-in, and per reported setting data point whether the library
+    # writes it and the mower declares it writable.
+    bridge_routes_settings: bool = False
+    bridge_settings_writable: dict[str, bool] = {}
 
     def __init__(
         self,
@@ -173,6 +184,8 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self.bridge_command_activity_at = None
         self.bridge_routes_control = False
         self.bridge_control = None
+        self.bridge_routes_settings = False
+        self.bridge_settings_writable = {}
         if backend == BACKEND_BRIDGE and (bridge is None or not bridge_mower_id):
             raise ValueError("The bridge backend needs a bridge client and a mower id")
 
@@ -216,13 +229,24 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
 
     @property
     def writes_available(self) -> bool:
-        """Settings writes need explicit control and a backend that routes them.
+        """Cloud settings writes need explicit control and the local backend.
 
-        Only the local backend writes settings. The bridge has no setting route,
-        so no number, select or switch entity is created in bridge mode and every
-        settings write is refused there before touching any transport.
+        The bridge has no route for the cloud settings (DP 155), so their number
+        and select entities are created only with the local backend. The local
+        setting data points follow :attr:`setting_entities_available`.
         """
         return self.control_enabled and self.backend != BACKEND_BRIDGE
+
+    @property
+    def setting_entities_available(self) -> bool:
+        """The local setting entities exist in control mode on either backend.
+
+        The local backend writes them itself. The bridge backend reads them from
+        the bridge's state document and writes the four writable ones through its
+        settings route while the bridge reports ``routes.settings``. The entities
+        keep their unique ids on both backends.
+        """
+        return self.control_enabled
 
     @property
     def commands_available(self) -> bool:
@@ -391,11 +415,11 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             )
 
     def _require_writes_available(self) -> None:
-        """Reject settings writes that no backend can route, before any transport."""
+        """Reject writes that no backend can route, before any transport."""
         if self.backend == BACKEND_BRIDGE:
             raise HomeAssistantError(
-                "Eufy Robomow uses the mower bridge backend, which has no settings "
-                "routes. Select the local backend for settings writes."
+                "Eufy Robomow uses the mower bridge backend, which has no route for "
+                "this setting. Select the local backend to change it."
             )
         self._require_control_enabled()
 
@@ -639,6 +663,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             self._record_activity(*telemetry.command_activity)
         self.local_generation += 1
         self.last_local_update = telemetry.observed_at
+        self.bridge_settings_writable = dict(telemetry.settings_writable)
         if self.session_store and telemetry.status == "reported" and telemetry.activity:
             # Only a reported activity is an observation. Missing, invalid and
             # unconfirmed say nothing, and nothing is derived from age or absence.
@@ -650,7 +675,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         return dps
 
     async def _async_read_bridge_control(self) -> None:
-        """Read whether the bridge routes commands from its own state document."""
+        """Read whether the bridge routes commands and settings from its own state document."""
         assert self.bridge is not None
         try:
             state = await self.bridge.async_state()
@@ -658,6 +683,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             _LOGGER.debug("Bridge state query failed: %s", exc.code)
             self.bridge_routes_control = False
             self.bridge_control = None
+            self.bridge_routes_settings = False
             return
         routes = state.get("routes")
         control = state.get("control")
@@ -665,6 +691,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self.bridge_control = (
             control if self.bridge_routes_control and isinstance(control, dict) else None
         )
+        self.bridge_routes_settings = isinstance(routes, dict) and routes.get("settings") is True
 
     def _carry_forward_cloud_data(self, dps: dict, local_dp_keys: set[str]) -> None:
         """Copy all non-local keys from the previous coordinator.data into dps.
@@ -890,7 +917,14 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self.bridge_command_activity_at = None
 
     async def async_send_command(self, dp: str, value) -> None:
-        """Write a single DPS value or raise a visible Home Assistant error."""
+        """Write a single DPS value or raise a visible Home Assistant error.
+
+        In bridge mode the value goes through the bridge's settings route once, see
+        :meth:`_async_set_bridge_setting`.
+        """
+        if self.backend == BACKEND_BRIDGE:
+            await self._async_set_bridge_setting(dp, value)
+            return
         self._require_writes_available()
         _LOGGER.debug("Sending command DP %s = %s", dp, value)
         try:
@@ -906,6 +940,68 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             raise
         except Exception as exc:  # noqa: BLE001
             raise HomeAssistantError(f"Mower command DP {dp} failed: {exc}") from exc
+
+    async def _async_set_bridge_setting(self, dp: str, value: bool | int) -> None:
+        """Write one local setting through the bridge exactly once.
+
+        Every check that needs no transport runs first: the integration's control
+        mode, a setting the bridge reads, rain stop, child protection and the real
+        lawn map as read only, the bridge's own ``routes.settings`` opt-in and the
+        setting's writable flag from the last poll. The library then runs its fresh
+        query, refusals, single write and read-back behind the bridge. A refusal
+        known to precede the write says so, every other failure may have written
+        the value. Nothing is retried and a restore is a separate deliberate write.
+        """
+        self._require_control_enabled()
+        key = BRIDGE_SETTING_KEYS.get(dp)
+        if key is None:
+            raise HomeAssistantError("The mower bridge has no route for this setting.")
+        if dp not in BRIDGE_WRITABLE_SETTING_DPS:
+            raise HomeAssistantError(
+                "Rain stop, child protection and the real lawn map are read only "
+                "through the mower bridge. Change them in the Eufy app."
+            )
+        if not self.bridge_routes_settings:
+            raise HomeAssistantError(
+                "The mower bridge does not accept setting writes. Set its settings "
+                "mode to write before changing settings through it."
+            )
+        if not self.bridge_settings_writable.get(dp):
+            raise HomeAssistantError(
+                "The mower bridge does not report this setting as writable right now."
+            )
+        assert self.bridge is not None and self.bridge_mower_id is not None
+        interrupted = False
+        try:
+            async with self._bridge_command_lock:
+                outcome = await self.bridge.async_set_setting(self.bridge_mower_id, key, value)
+            self._finish_bridge_setting(outcome)
+        except BridgeClientError as exc:
+            if refused_before_write(exc.code):
+                raise HomeAssistantError(
+                    f"The mower bridge refused the setting before writing it: {exc.code}"
+                ) from exc
+            raise HomeAssistantError(
+                f"The mower bridge did not answer the setting ({exc.code}). The value may "
+                "have been written. Check the setting before repeating it."
+            ) from exc
+        except asyncio.CancelledError:
+            interrupted = True
+            raise
+        finally:
+            if not interrupted:
+                await self.async_request_refresh()
+
+    @staticmethod
+    def _finish_bridge_setting(outcome: BridgeSettingOutcome) -> None:
+        """Only a confirmed write, a fresh report of the written value, succeeds."""
+        if outcome.result == "failed":
+            raise HomeAssistantError("The mower rejected the setting")
+        if outcome.result != "confirmed":
+            raise HomeAssistantError(
+                "The setting was written, but the mower did not report it within the "
+                "bridge's read-back window. Check the setting before repeating it."
+            )
 
     async def async_set_cloud_setting(self, **kwargs) -> None:
         """Write one or more cloud settings via the Tuya mobile API.

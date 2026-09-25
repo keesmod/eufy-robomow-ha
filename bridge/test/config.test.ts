@@ -30,6 +30,7 @@ test('minimal values resolve to observe-only defaults with a separate mower data
     bindAddress: DEFAULT_BIND_ADDRESS,
     dataDir: DEFAULT_DATA_DIR,
     operatingMode: 'observe_only',
+    settingsMode: 'read_only',
     cloudTimeoutMs: DEFAULT_CLOUD_TIMEOUT_MS,
     localTimeoutMs: DEFAULT_LOCAL_TIMEOUT_MS,
     hosts: {},
@@ -89,6 +90,26 @@ test('observe_only is the default and control needs the explicit stop route opt-
   assert.ok(!JSON.stringify(description).includes('pause then the app'), 'the stop route is not logged');
 });
 
+test('settings stay read only by default and writes need the separate settings_mode opt-in', async () => {
+  assert.equal(resolveConfig(syntheticValues({ settings_mode: '' })).settingsMode, 'read_only');
+  assert.equal(resolveConfig(syntheticValues({ settings_mode: 'read_only' })).settingsMode, 'read_only');
+  const write = resolveConfig(syntheticValues({ settings_mode: 'write' }));
+  assert.equal(write.settingsMode, 'write');
+  assert.equal(write.operatingMode, 'observe_only', 'settings writes are independent of the control mode');
+  assert.equal(write.control, null);
+  assert.equal(describeConfig(write).settings_mode, 'write');
+  rejects(syntheticValues({ settings_mode: 'Write' }), 'settings_mode');
+  rejects(syntheticValues({ settings_mode: 'true' }), 'settings_mode');
+  rejects(syntheticValues({ settings_mode: 'control' }), 'settings_mode');
+  assert.deepEqual(parseOptions('{"settings_mode":"write"}'), { settings_mode: 'write' });
+  assert.equal(ENV.settings_mode, 'EUFY_MOWER_SETTINGS_MODE');
+  const fromEnvironment = await loadConfig(
+    { [ENV.token]: TOKEN, [ENV.email]: EMAIL, [ENV.password]: PASSWORD, [ENV.country]: 'nl', [ENV.settings_mode]: 'write' },
+    { readFile: async () => '{}' },
+  );
+  assert.equal(fromEnvironment.settingsMode, 'write');
+});
+
 test('options file values are merged and overridden by the environment', async () => {
   const files: Record<string, string> = {
     '/options.json': JSON.stringify({ token: TOKEN, email: EMAIL, password: PASSWORD, country: 'de', port: 9000, data_dir: null }),
@@ -133,7 +154,8 @@ test('options file rejects unknown keys, nested values, non-objects and oversize
 test('the startup description never contains the token or credentials', () => {
   const description = describeConfig(resolveConfig(syntheticValues()));
   assertNoSecrets(JSON.stringify(description));
-  assert.deepEqual(Object.keys(description).sort(), ['bind_address', 'cloud_timeout_ms', 'configured_hosts', 'country', 'data_dir', 'local_timeout_ms', 'maps', 'operating_mode', 'port']);
+  assert.deepEqual(Object.keys(description).sort(), ['bind_address', 'cloud_timeout_ms', 'configured_hosts', 'country', 'data_dir', 'local_timeout_ms', 'maps', 'operating_mode', 'port', 'settings_mode']);
+  assert.equal(description.settings_mode, 'read_only');
   assert.equal(description.maps, 'disabled');
   const withHosts = describeConfig(resolveConfig(syntheticValues({ host: '192.0.2.10', hosts: `${'a'.repeat(64)}=192.0.2.11` })));
   assert.equal(withHosts.configured_hosts, 2);
