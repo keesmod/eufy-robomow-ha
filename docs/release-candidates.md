@@ -17,7 +17,7 @@ backends and rollback are described in
 
 | Component | Version | Pinned inputs |
 | --- | --- | --- |
-| Integration `eufy_robomow` | 0.15.3 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
+| Integration `eufy_robomow` | 0.15.4 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
 | Mower bridge, container image | 0.12.1 | `@keesmod/eufy-mega-client` 0.24.0 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
 | Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.12.1 | the same inputs, built by the Supervisor on the host |
 
@@ -56,6 +56,16 @@ reported 0.12.1 on library 0.24.0. The app archive SHA-256 is
 Integration 0.15.3 is unchanged. The
 [native trial receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5835828129)
 records the two successful docked downloads, restart and restored configuration.
+
+Integration 0.15.4 from `4754732` (#63) fixes a partial HTTP read found in the
+native-source outage rehearsal. The integration now reads through EOF before
+validating a bundle, retaining the 16 MiB limit. All 338 Python tests, Ruff,
+types, frontend tests and eight CI jobs passed. The installed 25 files matched
+the candidate after a private backup, passing configuration checks and a Core
+restart. Its archive SHA-256 is
+`58f6aea8389f102f7455e8789baeee9b01e3854733abfee538195edb393489dd`.
+The repeated native-source switch, outage recovery and rollback passed on
+2026-09-25. The owner then selected lasting native maps in `observe_only`.
 
 CI runs the
 tests on Home Assistant 2026.7.2, and the rehearsal ran on Home Assistant
@@ -166,17 +176,20 @@ Deployment:
 
 ## Experimental
 
-These parts are software-verified or inherited. They have not been confirmed
-on hardware in this programme.
+These capabilities still lack full hardware acceptance. Partial observations
+below retain their stated scope.
 
 - The broader native map acceptance and the `bridge` map source. Bridge 0.12.1
   obtains fresh provisioning from library 0.24.0 in explicit cloud mode, or
   reads an operator-supplied file in file mode. Two fresh docked acquisitions
   passed on 2026-09-25 with Android stopped and a bridge restart between them.
   Both matched the external source's static geometry and confirmed cancellation
-  and cleanup. The timestamps were 7.639 seconds apart. Continuous updates while
-  mowing, native-source outage/recovery and the actual HA map-source switch
-  remain unverified. Android and the original options were restored.
+  and cleanup. The timestamps were 7.639 seconds apart. The later rehearsal on
+  integration 0.15.4 confirmed the HA source switch, a visible cached map during
+  a bridge outage, automatic fresh acquisition after restart and rollback to a
+  healthy external source. Existing identities, session objects, dashboard
+  references and both map caches were preserved. Continuous updates while
+  mowing and longer observation remain open.
 - The `external` map source. It has been in daily use on the owner's
   installation since 0.5.0, but native map acceptance has not passed.
 - The no-go zones on the map since 0.15.1, from map-record field 12. The
@@ -193,10 +206,7 @@ on hardware in this programme.
 ## Outstanding obligations
 
 - Native map acceptance, item 2 of #8.
-- The switch of the map source to `bridge` and back on the owner's
-  installation, which needs map provisioning. The backend and version
-  migration passed its rehearsal on 2026-09-25.
-- The retirement plan of the Android map helper, which starts only after both.
+- Observed native updates during mowing and longer daily-use observation.
 - The licensing boundary and an explicit authorisation before any publication.
 
 ## Compatibility
