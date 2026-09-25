@@ -129,9 +129,11 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
             "command": self.coordinator.command.as_dict() if self.coordinator.command else None,
         }
         if self.coordinator.backend != BACKEND_BRIDGE:
-            # DP 107 as the last cloud poll reported it, read with the confirmed
-            # definitions: mowing, paused, returning, map_saving, idle or None.
+            # DP 107 as the last cloud poll reported it, read with the app's mission
+            # status schema: mowing, paused, returning, map_saving, idle or None,
+            # and its power mode: running, standby, hibernate or None.
             attributes["robot_status"] = self.coordinator.cloud_robot_status
+            attributes["robot_power_mode"] = self.coordinator.cloud_power_mode
         if self.coordinator.backend == BACKEND_BRIDGE:
             attributes["bridge_status"] = self.coordinator.bridge_status
             attributes["bridge_activity"] = self.coordinator.bridge_activity
