@@ -22,7 +22,8 @@ backends and rollback are described in
 | Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.10.1 | the same inputs, built by the Supervisor on the host |
 
 The checksums of every candidate that was built are recorded in #8. CI runs the
-tests on Home Assistant 2026.7.2. The hardware evidence below comes from the
+tests on Home Assistant 2026.7.2, and the rehearsal ran on Home Assistant
+2026.9.3 with Supervisor 2026.09.2. The hardware evidence below comes from the
 owner's Home Assistant OS installation with the owned E15 (T2880) on firmware
 6.9.28, as read on 2026-09-20. The later windows did not read the firmware
 again.
@@ -113,6 +114,12 @@ Deployment:
   backup from 0.7.1 to 0.10.1 (2026-09-24 and 2026-09-25).
 - The integration was upgraded from 0.7.0 to 0.14.2 by replacing its folder.
   The config entry and its entities were kept (2026-09-24 and 2026-09-25).
+- The migration and rollback rehearsal, see the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5832886365). It
+  covered a switch refused while the bridge was unreachable, a bridge lost
+  after the switch, and a restart in bridge mode without a running bridge. It
+  also covered the integration from 0.14.2 to 0.14.1 and back, and the app from
+  0.10.1 to 0.10.0 and back. Every entity id, unique id, session and dashboard
+  reference was kept, and no command was sent (2026-09-25).
 
 ## Experimental
 
@@ -135,13 +142,13 @@ on hardware in this programme.
 ## Outstanding obligations
 
 - Native map acceptance, item 2 of #8.
-- The migration and rollback rehearsal on the owner's installation, item 3 of
-  #8.
+- The switch of the map source to `bridge` and back on the owner's
+  installation, which needs map provisioning. The backend and version
+  migration passed its rehearsal on 2026-09-25.
 - The retirement plan of the Android map helper, which starts only after both.
 - The work parameters of DP 155 in bridge mode, which the settings workstream
   of #8 is adding.
-- A fresh read of the firmware and the Home Assistant version for the
-  candidate's record.
+- A fresh read of the firmware for the candidate's record.
 - The licensing boundary and an explicit authorisation before any publication.
 
 ## Compatibility
@@ -214,4 +221,5 @@ Update the bridge app first, then the integration.
 - Before a bridge older than 0.7.0, switch the integration's map source to
   `external`.
 
-The rehearsal of these steps on the owner's installation is item 3 of #8.
+These steps were rehearsed on the owner's installation on 2026-09-25, see
+the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5832886365).
