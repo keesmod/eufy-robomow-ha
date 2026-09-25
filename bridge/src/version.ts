@@ -1,12 +1,12 @@
 /** Identity of this bridge and its pinned library release. Tests keep these in step with package metadata. */
 export const BRIDGE_NAME = 'eufy-robomow-bridge';
-export const BRIDGE_VERSION = '0.10.0';
+export const BRIDGE_VERSION = '0.10.1';
 export const PROTOCOL_VERSION = 1;
 
 export const CLIENT_PACKAGE = '@keesmod/eufy-mega-client';
-export const CLIENT_VERSION = '0.20.0';
+export const CLIENT_VERSION = '0.22.0';
 /** Exact release tarball. Never a branch, tag or commit reference. */
 export const CLIENT_TARBALL = `https://github.com/keesmod/eufy-mega-client/releases/download/v${CLIENT_VERSION}/keesmod-eufy-mega-client-${CLIENT_VERSION}.tgz`;
 /** Subresource integrity of that tarball, as recorded in package-lock.json. */
 export const CLIENT_INTEGRITY =
-  'sha512-jhuzLNUtnmoJ3UbraLt94oa6adE9jjtO+a4yWy82XvqcYyDO3bxJ4kWaNp94v3Ei+dPR2WOhbDPmKsuDzewLLA==';
+  'sha512-kuCKZVmURD4GDvy1LNXylUNr9nbuQN3vSW69vD8V1lm8lPZ4ReN5RZRXy83Y8RpWTRYmw9p8MuU5MK56bgC/kg==';

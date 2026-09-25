@@ -39,7 +39,10 @@ shows the drive home after a dock instead of the earlier activity. Version
 state route serves the library's typed settings, and the opt-in
 `settings_mode: write` enables `POST /v1/mowers/{id}/settings/{key}` for mow
 height, volume, smart no-go zones and sparse lawn optimization. Rain and child
-protection and the bird-view capture stay read only in either mode.
+protection and the bird-view capture stay read only in either mode. Version
+0.10.1 pins library 0.22.0, which reads DP 107 as the mower's mission status:
+every mowing mission, the Box, zone and scheduled tasks included, reports
+`mowing` or `paused`, and a message without a mission reports `idle`.
 
 ## What it does
 
@@ -231,12 +234,12 @@ Bridge state, for example:
 {
   "protocol": 1,
   "bridge": "eufy-robomow-bridge",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "bridge_id": "00000000-0000-4000-8000-000000000000",
   "lifecycle": "running",
   "operating_mode": "observe_only",
   "auth": { "state": "disconnected", "last_error": "authentication_failed", "attempted_at": "2026-09-19T10:00:00.000Z" },
-  "client": { "package": "@keesmod/eufy-mega-client", "version": "0.20.0", "module": "mowers", "lifecycle": "open", "connected": false },
+  "client": { "package": "@keesmod/eufy-mega-client", "version": "0.22.0", "module": "mowers", "lifecycle": "open", "connected": false },
   "mowers": { "count": null, "discovered_at": null, "error": "authentication_required" },
   "routes": { "discovery": true, "state": true, "control": false, "maps": false, "settings": false },
   "control": null,
@@ -360,7 +363,7 @@ reported.
 
 #### E15 activity
 
-`status` is whatever library 0.20.0 reports, unchanged. The library is pinned
+`status` is whatever library 0.22.0 reports, unchanged. Since 0.22.0 the library reads DP 107 as the mower's mission status, so every mowing mission, the Box, zone and scheduled tasks included, reports `mowing` or `paused`, and a message without a mission reports `idle`. The library is pinned
 to the release tarball with SHA-256 `a47771ef8cbde4f169b1e281cf0fa8d4b10b90284bd85cfed5c0b9a0bf531c93`
 (source commit `ac93dc8`). Its E15 registry confirms three DP 107
 `robot_status` payloads on the owned E15 (T2880, firmware 6.9.28, Anker eufy

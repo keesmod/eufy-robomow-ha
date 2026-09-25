@@ -3,13 +3,13 @@
 How to run the dedicated mower bridge from `bridge/` as a container or as a
 local Home Assistant app, and how to upgrade, restart, back up and roll it
 back. Everything here is local: no image is published and no app repository is
-listed. Version 0.10.0 serves state routes with the typed settings and, only
+listed. Version 0.10.1 serves state routes with the typed settings and, only
 behind the explicit `operating_mode: control` opt-in with a stop route, the
 start, pause, resume and stop routes. The separate `settings_mode: write`
 opt-in enables the settings route for mow height, volume, smart no-go zones
-and sparse lawn optimization. It pins library 0.20.0, which confirms the E15
-activities mowing, paused and returning and the start, pause, resume and stop
-commands, and reads and writes the settings behind its own opt-in.
+and sparse lawn optimization. It pins library 0.22.0, which reads DP 107 as
+the mower's mission status, confirms the start, pause, resume and stop commands,
+and reads and writes the settings behind its own opt-in.
 On the owned E15 a stop ends the task and returns the mower to the dock. With
 an operator-supplied map provisioning file it also serves the read-only map
 route, see [Map provisioning](#map-provisioning-optional).
@@ -52,7 +52,7 @@ in `ha_app/` (run `python3 scripts/prepare_ha_app.py`).
 ## Install with Docker
 
 ```bash
-docker build -t eufy-mower-bridge:0.10.0 ./bridge
+docker build -t eufy-mower-bridge:0.10.1 ./bridge
 ```
 
 ```bash
@@ -64,7 +64,7 @@ docker run -d --name eufy-mower-bridge --restart unless-stopped \
   -e EUFY_MOWER_PASSWORD=<eufy account password> \
   -e EUFY_MOWER_COUNTRY=NL \
   -e EUFY_MOWER_HOST=<mower LAN address> \
-  eufy-mower-bridge:0.10.0
+  eufy-mower-bridge:0.10.1
 ```
 
 Bind the published port to an address that only Home Assistant can reach, or
@@ -138,7 +138,7 @@ docker run -d --name eufy-mower-bridge --restart unless-stopped \
   -e EUFY_MOWER_PASSWORD=<eufy account password> \
   -e EUFY_MOWER_COUNTRY=NL \
   -e EUFY_MOWER_HOST=<mower LAN address> \
-  eufy-mower-bridge:0.10.0
+  eufy-mower-bridge:0.10.1
 ```
 
 Mount the directory rather than the file, so a file replaced by renaming
@@ -226,11 +226,12 @@ Bridge mode in the integration reads state and, since integration 0.9.0,
 routes start, pause and resume through the bridge's opt-in command routes.
 Since integration 0.10.0 dock goes through the bridge's stop route as well,
 and since integration 0.11.0 the map entity can read the bridge's map route.
-Activity reports mowing, paused and returning from the E15 payloads confirmed
-in library 0.20.0, see [DP 107 activity](protocol-provenance.md#dp-107-activity).
-Docked, charging, idle and error have no confirmed payload and are never
-inferred, mowing progress stays unconfirmed and a bridge-mode session cannot
-observe its end. Commands need two opt-ins: the integration's operating mode
+Activity reports mowing, paused, returning and idle from the E15 mission
+status read by library 0.22.0, see [DP 107 activity](protocol-provenance.md#dp-107-activity).
+Every mowing mission counts, the Box, zone and scheduled tasks included. Idle
+reads as docked and ends a bridge-mode session. Docked, charging and error have
+no confirmed payload and are never inferred, and mowing progress stays
+unconfirmed. Commands need two opt-ins: the integration's operating mode
 `control` and the bridge's `operating_mode: control` with its required
 `control_stop_route`. The integration reads `routes.control` from the bridge
 state on every poll and exposes start, pause and dock only while it is true.
