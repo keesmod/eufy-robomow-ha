@@ -21,6 +21,24 @@ files, because the mower id the integration stores depends on them. A rollback
 of the app restores the app backup that the update created, which brings back
 the previous version with its options and data.
 
+## 0.12.1 - 2026-09-25
+
+### Home Assistant cloud-map option
+
+- The app bootstrap now passes `map_provisioning_mode` to the bridge. In 0.12.0
+  the Supervisor accepted `cloud`, but the bootstrap omitted that option and
+  the running bridge kept its map route disabled.
+- Evidence: the first owned-E15 trial stopped before acquisition because the
+  route stayed disabled. Original options and the Android source were restored.
+  Container CI now starts the real app with synthetic cloud-map options and no
+  network, checks that the map route is enabled and that command and settings
+  writes remain disabled. The default file-mode smoke test remains.
+
+Upgrade: install the matching app with a backup and retain the existing options.
+Rollback: restore the 0.12.0 app backup. Cloud maps then remain unavailable in
+the app. Library 0.24.0 and the integration are unchanged. Fresh native hardware
+acceptance remains open in #8.
+
 ## 0.12.0 - 2026-09-25
 
 ### Fresh map provisioning
