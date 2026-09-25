@@ -209,6 +209,8 @@ the previous version with its options and data.
   `network` with their states, plus `observed_at`, `age_ms`, `stale` and
   `error`. Raw data points, keys and hosts are never served.
 - Hosts come from `EUFY_MOWER_HOST` or `EUFY_MOWER_HOSTS`.
+- Upgrade: set `EUFY_MOWER_HOST`, or `EUFY_MOWER_HOSTS` for more than one
+  mower, before the state route can reach a mower. Rollback: return to 0.1.0.
 - Evidence: software-verified.
 
 ## 0.1.0 - 2026-09-19
@@ -222,4 +224,5 @@ the previous version with its options and data.
   `GET /v1/state`. It makes one explicit authentication attempt without retry
   and shuts down within a bound on `SIGTERM`.
 - `operating_mode` accepts only `observe_only`.
+- Upgrade: none, this is the first version. Rollback: none.
 - Evidence: software-verified.
