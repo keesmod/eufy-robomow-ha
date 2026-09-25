@@ -34,7 +34,12 @@ the library reuses a session for at most one hour after its sign-in, and
 an hour later until a restart. The state document's `auth.state` now follows
 the library. Version 0.9.0 pins library 0.19.0 and serves the running
 command's progress in the state route's `command` field, so the integration
-shows the drive home after a dock instead of the earlier activity.
+shows the drive home after a dock instead of the earlier activity. Version
+0.10.0 pins library 0.20.0 and adds the settings workstream of issue #8: the
+state route serves the library's typed settings, and the opt-in
+`settings_mode: write` enables `POST /v1/mowers/{id}/settings/{key}` for mow
+height, volume, smart no-go zones and sparse lawn optimization. Rain and child
+protection and the bird-view capture stay read only in either mode.
 
 ## What it does
 
@@ -44,8 +49,9 @@ shows the drive home after a dock instead of the earlier activity.
 - Constructs one library client with only the mower module. Construction makes
   no network request.
 - Listens on a private HTTP port. Every request needs the bearer token, checked
-  in constant time. The read routes are `GET`. The single write route is
-  `POST` and works only in `control` mode.
+  in constant time. The read routes are `GET`. The two write routes are
+  `POST`: commands work only in `control` mode, settings only with
+  `settings_mode: write`.
 - Performs one explicit authentication attempt after listening, then one
   discovery when that succeeded. Results are recorded in the state document.
 - Renews the cloud session when a route needs it and the library reports it
@@ -71,6 +77,15 @@ shows the drive home after a dock instead of the earlier activity.
   The library runs one fresh status query, writes one declared boolean point
   and reads the lifecycle back from fresh reports. The outcome is served as
   `confirmed`, `failed` or `uncertain` and is never retried or replayed.
+- Serves the library's typed settings with every state query, decoded from the
+  same snapshot with the mower's own declaration. With `settings_mode: write`,
+  answers a setting request with one bounded LAN session after checking on the
+  bridge that the setting is one of the four writable ones, the value is a
+  boolean or an integer, the mower is discovered with a configured host and no
+  other write owns it. The library runs one fresh status query, its typed
+  refusals, one write and a bounded read-back of the written value. The
+  outcome is served as `confirmed`, `failed` or `uncertain` with the previous
+  value, and is never retried, replayed or restored.
 - With map provisioning, answers a map request at once from memory with the
   last good bundle, its entity tag and its age. The request may start one
   acquisition demand of the library's `PortableMapAcquisition` in the
@@ -82,7 +97,11 @@ shows the drive home after a dock instead of the earlier activity.
 
 ## What it does not do yet
 
-- No settings route. The map route exists only with map provisioning, which
+- No setting beyond the library's four writable ones: no DP 155 work
+  parameters, no edge distance and no other declared point. Rain and child
+  protection and the bird-view capture are read only, in either settings mode.
+  Settings writes need no `control` mode and `control` mode opens no settings
+  write. The map route exists only with map provisioning, which
   the bridge cannot obtain itself: the library's acquisition needs private,
   expiring `MapSessionProvisioning` from the current relay route, and the
   operator supplies it as a file. Without it the state document reports
@@ -109,8 +128,8 @@ shows the drive home after a dock instead of the earlier activity.
   has no DP 3 return route on this firmware. `stop` brings the mower home and
   the official app remains the only way back from a task stopped in place.
 - No stop in place. The library's `stop` ends the task and the mower returns
-  to the dock by itself, it never keeps the mower where it stands. No
-  settings, zone or scheduling command.
+  to the dock by itself, it never keeps the mower where it stands. No zone or
+  scheduling command.
 - No polling, reconnect or spontaneous report stream. Every LAN session is
   opened by a request and closed after its query. A map demand starts only
   when a map request finds one due, never on a timer of its own.
@@ -144,6 +163,7 @@ may contain only the keys below, as strings or integers, and must stay under
 | `EUFY_MOWER_BIND_ADDRESS`     | `bind_address`    | no       | `127.0.0.1`        | IP address or `localhost`                             |
 | `EUFY_MOWER_DATA_DIR`         | `data_dir`        | no       | `/data/eufy-mower` | Absolute path, private to this bridge                 |
 | `EUFY_MOWER_OPERATING_MODE`   | `operating_mode`  | no       | `observe_only`     | `observe_only` or `control`                            |
+| `EUFY_MOWER_SETTINGS_MODE`    | `settings_mode`   | no       | `read_only`        | `read_only` or `write`. `write` enables the settings route and the library's separate settings opt-in. Independent of `operating_mode` |
 | `EUFY_MOWER_CLOUD_TIMEOUT_MS` | `cloud_timeout_ms`| no       | `15000`            | 1000 to 60000, deadline per Eufy Home or Tuya request |
 | `EUFY_MOWER_LOCAL_TIMEOUT_MS` | `local_timeout_ms`| no       | `5000`             | 1000 to 60000, deadline for connecting and for each LAN query |
 | `EUFY_MOWER_HOST`             | `host`            | no       |                    | LAN address of the mower, used only when exactly one mower is discovered |
@@ -197,8 +217,9 @@ mower. With several, set `map_mower_id`, otherwise the map route answers
 
 Every request carries `Authorization: Bearer <token>`. A missing or wrong token
 gets `401`, an unknown path `404`, another method `405`, a command outside
-`control` mode `403`, a command the bridge refuses before any write `409` and a
-route failure `503`, each with only a stable code in `{ "error": "…" }`.
+`control` mode or a setting outside `settings_mode: write` `403`, a write the
+bridge or the library refuses before any frame `409` and a route failure
+`503`, each with only a stable code in `{ "error": "…" }`.
 Responses are never cached. The map bundle is the only answer that is not
 JSON.
 
@@ -210,14 +231,14 @@ Bridge state, for example:
 {
   "protocol": 1,
   "bridge": "eufy-robomow-bridge",
-  "version": "0.8.0",
+  "version": "0.10.0",
   "bridge_id": "00000000-0000-4000-8000-000000000000",
   "lifecycle": "running",
   "operating_mode": "observe_only",
   "auth": { "state": "disconnected", "last_error": "authentication_failed", "attempted_at": "2026-09-19T10:00:00.000Z" },
-  "client": { "package": "@keesmod/eufy-mega-client", "version": "0.19.0", "module": "mowers", "lifecycle": "open", "connected": false },
+  "client": { "package": "@keesmod/eufy-mega-client", "version": "0.20.0", "module": "mowers", "lifecycle": "open", "connected": false },
   "mowers": { "count": null, "discovered_at": null, "error": "authentication_required" },
-  "routes": { "discovery": true, "state": true, "control": false, "maps": false },
+  "routes": { "discovery": true, "state": true, "control": false, "maps": false, "settings": false },
   "control": null,
   "maps": null
 }
@@ -230,7 +251,8 @@ attempt, the startup attempt or a renewal, or `null` after success, and
 `auth.attempted_at` is the time of that attempt. `mowers` summarises the discovery cache. In `control` mode
 `routes.control` is `true` and `control` carries the opt-in in effect, for
 example `{ "classes": ["start", "pause", "resume", "stop"], "max_state_age_ms": 30000, "read_back_ms": 20000 }`.
-The stop route text is never served.
+The stop route text is never served. With `settings_mode: write`
+`routes.settings` is `true`.
 
 With map provisioning `routes.maps` is `true` and `maps` reports the
 acquisition without any geometry, for example:
@@ -296,6 +318,15 @@ Contract 1. One read-only local query, for example:
   "battery": { "state": "reported", "value": { "percent": 85 }, "dp": ["8"], "source": "local-tuya-3.5", "observedAt": "2026-09-19T10:00:01.250Z" },
   "progress": { "state": "unconfirmed" },
   "network": { "state": "reported", "value": { "kind": "wifi", "signalPercent": 70 }, "dp": ["134", "109"], "source": "local-tuya-3.5", "observedAt": "2026-09-19T10:00:01.250Z" },
+  "settings": {
+    "mow_height": { "state": "reported", "value": 40, "writable": true, "min": 25, "max": 75, "step": 1, "unit": "mm" },
+    "volume": { "state": "reported", "value": 20, "writable": true, "min": 0, "max": 100, "step": 1, "unit": "%" },
+    "smart_no_go_zones": { "state": "reported", "value": true, "writable": true },
+    "sparse_lawn_optimization": { "state": "reported", "value": false, "writable": true },
+    "rain_auto_return": { "state": "reported", "value": true, "writable": false },
+    "child_lock": { "state": "reported", "value": true, "writable": false },
+    "bird_view_capture": { "state": "missing" }
+  },
   "command": null
 }
 ```
@@ -305,6 +336,16 @@ state `reported`, `missing`, `invalid` or `unconfirmed`. `observed_at` is the
 local receipt time of the query reply and `age_ms` its age against the bridge
 clock when the response was built. Raw data points are never included, so the
 DP 107 payload itself is never served.
+
+`settings` holds the library's typed settings from the same query, since
+0.10.0. Each is `reported` with its `value`, `missing` when the reply did not
+carry the point, or `invalid` when the value had another type or lay outside
+its bound. `writable` is true when the library writes the setting and the
+mower declares the point writable with the expected code and type, the
+settings route itself also needs `routes.settings`. The value settings carry
+the app's input bound narrowed by the mower's declaration and its unit.
+`rain_auto_return` and `child_lock` are the rain and child protection, read
+only in either settings mode.
 
 `command` is the command that owns this mower right now, or `null`. While its
 read-back runs it carries the library's progress, for example
@@ -319,9 +360,9 @@ reported.
 
 #### E15 activity
 
-`status` is whatever library 0.19.0 reports, unchanged. The library is pinned
-to the release tarball with SHA-256 `982ef2e72167629333a86fab869a8f48439ae33909f30922b1ea8534308f2297`
-(source commit `80734eb`). Its E15 registry confirms three DP 107
+`status` is whatever library 0.20.0 reports, unchanged. The library is pinned
+to the release tarball with SHA-256 `a47771ef8cbde4f169b1e281cf0fa8d4b10b90284bd85cfed5c0b9a0bf531c93`
+(source commit `ac93dc8`). Its E15 registry confirms three DP 107
 `robot_status` payloads on the owned E15 (T2880, firmware 6.9.28, Anker eufy
 app 6.1.00): fields 1 = 2 and 3 = 1 `mowing`, fields 1 = 2 and 3 = 2 `paused`
 and fields 1 = 1 and 3 = 1 `returning`, each reproduced through owner-operated
@@ -428,6 +469,71 @@ recorded `stop` with `returning` 0.28 seconds after the write and the
 map-saving payload at dock arrival 29.8 seconds after it, and `return` ignored
 from the stopped task. The bridge itself has not been run against the mower
 in `control` mode, that is the hardware acceptance in
+keesmod/eufy-robomow-ha#8.
+
+### `POST /v1/mowers/{id}/settings/{key}`
+
+Contract 1. One opt-in setting write, `settings_mode: write` only, since
+0.10.0. The key is `mow_height`, `volume`, `smart_no_go_zones` or
+`sparse_lawn_optimization` in the path and the new value is the `value` query
+parameter, `true` or `false` for a switch and a plain integer for a number, for
+example `POST /v1/mowers/{id}/settings/mow_height?value=45`. Request bodies are
+ignored. Every check below runs on the bridge before the library is touched,
+in this order:
+
+| Status | Code                         | Reason                                                                                              |
+| ------ | ---------------------------- | --------------------------------------------------------------------------------------------------- |
+| `403`  | `settings_disabled`          | The bridge runs with `settings_mode: read_only`. Nothing else is checked                            |
+| `404`  | `not_found`                  | The key is not one of the seven settings the state route serves                                     |
+| `409`  | `mower_setting_read_only`    | `rain_auto_return`, `child_lock` or `bird_view_capture`, whatever the value                          |
+| `400`  | `invalid_setting_value`      | No `value`, or neither `true`, `false` nor an integer of at most six digits                          |
+| `400`  | `invalid_mower_id`           | Not a 64-character id                                                                               |
+| `409`  | `command_in_progress`        | Another write, a command or a setting, owns this mower. One write per mower at a time               |
+| `404`  | `unknown_mower`              | Discovery did not return the id                                                                     |
+| `503`  | `mower_host_unconfigured`    | No LAN host for the id                                                                              |
+| `409`  | library `mower_setting_*`    | The library refused before any frame was written: `mower_setting_invalid` for a wrong type or a value outside the app's bound, `mower_setting_undeclared`, `mower_setting_evidence_missing`, `mower_setting_map_saving` or `mower_setting_already_set` |
+| `503`  | library or bridge code       | The session could not be opened or was lost, for example `mower_local_unreachable`, `mower_local_disconnected` or `request_aborted` |
+
+There is no freshness check on the bridge: the library runs its own fresh
+status query on the setting session and decides its refusals on it. A `200`
+carries the library's outcome:
+
+```json
+{
+  "contract": 1,
+  "id": "<64 hex characters>",
+  "setting": "mow_height",
+  "result": "confirmed",
+  "write": { "dp": "110", "code": "mow_height", "value": 45 },
+  "previous": 40,
+  "sent_at": "2026-09-25T09:00:00.100Z",
+  "stage": "reflected",
+  "end": "reflected",
+  "before_observed_at": "2026-09-25T09:00:00.050Z",
+  "reply": { "observed_at": "2026-09-25T09:00:00.120Z", "return_code_zero": true, "rejected": false },
+  "reflection": { "observed_at": "2026-09-25T09:00:00.600Z", "sequence": 71, "value": 45 },
+  "other": null,
+  "reports": 1
+}
+```
+
+`result` is `confirmed` when a fresh report carried the written value within
+the library's read-back bound of 10 seconds, `failed` when the device rejected
+the control frame, and `uncertain` when the bound passed or the report limit
+was reached. An uncertain write happened and must never be repeated
+automatically. `previous` is the value on the library's fresh query before the
+write. A restore is a second deliberate request with that value, which runs
+its own fresh query and refusals. `other` is the latest fresh report of
+another value, served only as a boolean or a number. Raw data points and the
+reports themselves are never served, only their count.
+
+Evidence: the library's
+[settings contract](https://github.com/keesmod/eufy-mega-client/blob/main/docs/MOWER_SETTINGS.md)
+and its
+[settings schema receipt](https://github.com/keesmod/eufy-mega-client/blob/main/docs/research/E15_SETTINGS_SCHEMA_2026-09-25.md)
+record the data points, the owned E15's declarations and the app's input
+checks. No setting has been written through the bridge on the owned E15 yet,
+that supervised change, read-back and restore is part of
 keesmod/eufy-robomow-ha#8.
 
 ### `GET /v1/mowers/{id}/map`

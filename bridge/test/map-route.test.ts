@@ -100,7 +100,7 @@ test('without map provisioning the route answers 404 and the state reports no ma
   assert.equal(reply.status, 404);
   assert.deepEqual(reply.json, { error: 'map_unconfigured' });
   const state = await f.state();
-  assert.deepEqual(state.routes, { discovery: true, state: true, control: false, maps: false });
+  assert.deepEqual(state.routes, { discovery: true, state: true, control: false, maps: false, settings: false });
   assert.equal(state.maps, null);
   assert.equal(f.maps.created.length, 0);
 });
@@ -141,7 +141,7 @@ test('an idle request starts one demand, is answered at once and the demand ends
   assert.deepEqual(acquisition.provisioning, SYNTHETIC_PROVISIONING, 'the library receives the operator file as written');
   assert.equal(acquisition.demands[0]?.demandMs, 30_000);
   let state = await f.state();
-  assert.deepEqual(state.routes, { discovery: true, state: true, control: false, maps: true });
+  assert.deepEqual(state.routes, { discovery: true, state: true, control: false, maps: true, settings: false });
   assert.deepEqual(state.maps, { captured_at: null, age_ms: null, stale: false, error: null, acquiring: true, streaming: false, last_demand: null });
 
   // A demand opens with the empty realtime placeholder path.

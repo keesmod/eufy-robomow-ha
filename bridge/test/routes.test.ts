@@ -12,12 +12,24 @@ import {
   type MowerCommandOutcome,
   type MowerCommandRequest,
   type MowerDevice,
+  type MowerDpSchemaEntry,
   type MowerLocalSession,
   type MowerLocalSessionEnd,
   type MowerLocalSessionOptions,
+  type MowerSettingOutcome,
+  type MowerSettingRequest,
   type MowerTelemetry,
 } from '@keesmod/eufy-mega-client';
-import { MowerBridge, type BridgeDependencies, type BridgeState, type DiscoveryDocument, type MowerCommandDocument, type MowerStateDocument, type OpenLocalSession } from '../src/bridge.ts';
+import {
+  MowerBridge,
+  type BridgeDependencies,
+  type BridgeState,
+  type DiscoveryDocument,
+  type MowerCommandDocument,
+  type MowerSettingDocument,
+  type MowerStateDocument,
+  type OpenLocalSession,
+} from '../src/bridge.ts';
 import type { BridgeConfig, ControlConfig } from '../src/config.ts';
 import { MOWERS_PATH, STATE_PATH } from '../src/server.ts';
 import { TOKEN, assertNoSecrets, baselineHandles, call, settledHandles, temporaryDirectory, testConfig, type Reply } from './helpers.ts';
@@ -86,8 +98,8 @@ function wirePayload(fields: Record<number, number>): string {
  * release reports. `robotStatus` is the DP 107 payload, absent by default. DP 155 stands in for
  * a private raw data point that must never reach a response.
  */
-function telemetry(observedAt: string, battery = 85, robotStatus?: string | number): MowerTelemetry {
-  const dps: Record<string, string | number> = { '8': battery, '134': 'Wifi', '109': 70, '155': 'PRIVATE-BLOB' };
+function telemetry(observedAt: string, battery = 85, robotStatus?: string | number, extra: Record<string, string | number | boolean> = {}): MowerTelemetry {
+  const dps: Record<string, string | number | boolean> = { '8': battery, '134': 'Wifi', '109': 70, '155': 'PRIVATE-BLOB', ...extra };
   if (robotStatus !== undefined) dps['107'] = robotStatus;
   return decodeMowerTelemetry({ source: 'local-tuya-3.5', observedAt, dps });
 }
@@ -96,11 +108,13 @@ interface SessionLog {
   opened: { id: string; options: MowerLocalSessionOptions }[];
   queries: number;
   commands: MowerCommandRequest[];
+  settings: MowerSettingRequest[];
   disconnects: number;
   lastConnected: () => boolean;
 }
 
 type CommandAnswer = (request: MowerCommandRequest, signal: AbortSignal) => Promise<MowerCommandOutcome>;
+type SettingAnswer = (request: MowerSettingRequest, signal: AbortSignal) => Promise<MowerSettingOutcome>;
 
 /**
  * Synthetic command outcome in the library's shape. The `before` snapshot and the reports carry a
@@ -145,8 +159,18 @@ function outcome(kind: MowerCommandKind, end: MowerCommandEnd, at: string): Mowe
   return { ...base, stage: 'sent', end, reports: [] };
 }
 
-/** Synthetic LAN session. `answer` decides what one query returns or throws, `command` what one command resolves. */
-function sessions(log: SessionLog, answer: (signal: AbortSignal) => Promise<MowerTelemetry>, openFailure?: () => string | null, command?: CommandAnswer): OpenLocalSession {
+/**
+ * Synthetic LAN session. `answer` decides what one query returns or throws, `command` what one
+ * command resolves, `extra.setting` what one setting write resolves and `extra.schema` the
+ * declarations the session exposes.
+ */
+function sessions(
+  log: SessionLog,
+  answer: (signal: AbortSignal) => Promise<MowerTelemetry>,
+  openFailure?: () => string | null,
+  command?: CommandAnswer,
+  extra: { setting?: SettingAnswer; schema?: MowerDpSchemaEntry[] } = {},
+): OpenLocalSession {
   return async (id, options, signal) => {
     const failure = openFailure?.();
     if (failure) throw new EufyError(failure);
@@ -163,9 +187,18 @@ function sessions(log: SessionLog, answer: (signal: AbortSignal) => Promise<Mowe
       },
       closed,
       commandsEnabled: command !== undefined,
-      schema: undefined,
+      settingsEnabled: extra.setting !== undefined,
+      schema: extra.schema,
       queryStatus: async () => {
         throw new Error('not used by the bridge');
+      },
+      querySettings: async () => {
+        throw new Error('not used by the bridge');
+      },
+      setSetting: async (request, settingSignal) => {
+        log.settings.push({ ...request });
+        if (!extra.setting) throw new EufyError('mower_settings_disabled');
+        return extra.setting(request, settingSignal ?? signal);
       },
       sendCommand: async (request, commandSignal) => {
         // Only the class: the progress callback is the bridge's own and checked where it matters.
@@ -192,7 +225,7 @@ function sessions(log: SessionLog, answer: (signal: AbortSignal) => Promise<Mowe
 }
 
 function sessionLog(): SessionLog {
-  return { opened: [], queries: 0, commands: [], disconnects: 0, lastConnected: () => false };
+  return { opened: [], queries: 0, commands: [], settings: [], disconnects: 0, lastConnected: () => false };
 }
 
 interface Fixture {
@@ -225,6 +258,61 @@ async function fixture(t: TestContext, config: Partial<BridgeConfig> = {}, depen
 }
 
 const commandPath = (id: string, kind: string) => `${MOWERS_PATH}/${id}/commands/${kind}`;
+const settingPath = (id: string, key: string, value?: string) =>
+  `${MOWERS_PATH}/${id}/settings/${key}${value === undefined ? '' : `?value=${encodeURIComponent(value)}`}`;
+const SETTINGS_WRITE: Partial<BridgeConfig> = { settingsMode: 'write' };
+
+/** Every setting as the library reports it for a snapshot without the setting points. */
+const MISSING_SETTINGS = {
+  mow_height: { state: 'missing' },
+  volume: { state: 'missing' },
+  smart_no_go_zones: { state: 'missing' },
+  sparse_lawn_optimization: { state: 'missing' },
+  rain_auto_return: { state: 'missing' },
+  child_lock: { state: 'missing' },
+  bird_view_capture: { state: 'missing' },
+};
+/** Synthetic setting values on the data points the library documents. */
+const SETTING_DPS = { '110': 40, '26': 20, '132': true, '141': false, '101': true, '47': true, '133': false };
+/** Synthetic declarations in the library's parsed shape, as documented in its settings contract. */
+const SETTING_SCHEMA: MowerDpSchemaEntry[] = [
+  { id: '110', code: 'mow_height', mode: 'rw', type: 'value', min: 25, max: 75, scale: 0, step: 1, unit: 'mm' },
+  { id: '26', code: 'volume_set', mode: 'rw', type: 'value', min: 0, max: 100, scale: 0, step: 1, unit: '%' },
+  { id: '132', code: 'enable_smart_forbid_zone', mode: 'rw', type: 'bool' },
+  { id: '141', code: 'sparse_lawn_optimization', mode: 'rw', type: 'bool' },
+  { id: '101', code: 'rain_auto_return', mode: 'rw', type: 'bool' },
+  { id: '47', code: 'child_lock', mode: 'rw', type: 'bool' },
+  { id: '133', code: 'enable_bird_view_capture', mode: 'rw', type: 'bool' },
+];
+const SETTING_WRITES: Record<string, { dp: string; code: string }> = {
+  mowHeight: { dp: '110', code: 'mow_height' },
+  volume: { dp: '26', code: 'volume_set' },
+  smartNoGoZones: { dp: '132', code: 'enable_smart_forbid_zone' },
+  sparseLawnOptimization: { dp: '141', code: 'sparse_lawn_optimization' },
+};
+
+/**
+ * Synthetic setting outcome in the library's shape. The `before` snapshot and the reports carry a
+ * private raw data point that must never reach a response.
+ */
+function settingOutcome(request: MowerSettingRequest, end: MowerSettingOutcome['end'], at: string, previous: boolean | number, other?: unknown): MowerSettingOutcome {
+  const write = { ...SETTING_WRITES[request.name]!, value: request.value };
+  const snapshot = { source: 'local-tuya-3.5' as const, observedAt: at, dps: { [write.dp]: previous, '118': 100, '155': 'PRIVATE-BLOB' } };
+  const base = { setting: request.name, write, before: snapshot, previous, sentAt: at, reply: { observedAt: at, returnCodeZero: true, rejected: false } };
+  const report = (sequence: number, value: unknown) => ({ ...snapshot, kind: 'device-report' as const, sequence, dps: { [write.dp]: value as boolean, '155': 'PRIVATE-BLOB' } });
+  const otherField = other === undefined ? {} : { other: { observedAt: at, sequence: 20, value: other as boolean } };
+  if (end === 'reflected')
+    return {
+      ...base,
+      ...otherField,
+      stage: 'reflected',
+      end,
+      reflection: { observedAt: at, sequence: 21, value: request.value },
+      reports: [...(other === undefined ? [] : [report(20, other)]), report(21, request.value)],
+    };
+  if (end === 'rejected') return { ...base, stage: 'sent', end, reply: { observedAt: at, returnCodeZero: false, rejected: true }, reports: [] };
+  return { ...base, ...otherField, stage: 'sent', end, reports: other === undefined ? [] : [report(20, other)] };
+}
 
 test('discovery needs a connected module, is cached, spaced and keeps an older list after a failed refresh', async (t) => {
   const f = await fixture(t);
@@ -269,7 +357,7 @@ test('discovery needs a connected module, is cached, spaced and keeps an older l
   assert.equal(f.adapter.discoveries, 4);
   const state = (await f.get(STATE_PATH)).json as { mowers: unknown; routes: unknown };
   assert.deepEqual(state.mowers, { count: 1, discovered_at: new Date(T0 + 5_100).toISOString(), error: 'mower_request_failed' });
-  assert.deepEqual(state.routes, { discovery: true, state: true, control: false, maps: false });
+  assert.deepEqual(state.routes, { discovery: true, state: true, control: false, maps: false, settings: false });
   f.adapter.failWith = null;
   f.clock.now += 1_000;
   assert.equal(((await f.get(MOWERS_PATH)).json as DiscoveryDocument).fresh, true);
@@ -361,6 +449,7 @@ test('the state route serves the four typed fields with freshness, closes the se
     battery: { state: 'reported', value: { percent: 85 }, dp: ['8'], source: 'local-tuya-3.5', observedAt },
     progress: { state: 'unconfirmed' },
     network: { state: 'reported', value: { kind: 'wifi', signalPercent: 70 }, dp: ['134', '109'], source: 'local-tuya-3.5', observedAt },
+    settings: MISSING_SETTINGS,
     command: null,
   });
   const list = (await f.get(MOWERS_PATH)).json as DiscoveryDocument;
@@ -677,7 +766,7 @@ test('observe_only answers every command route with 403 before discovery, the li
   await f.bridge.connect();
   const state = (await f.get(STATE_PATH)).json as BridgeState;
   assert.equal(state.operating_mode, 'observe_only');
-  assert.deepEqual(state.routes, { discovery: true, state: true, control: false, maps: false });
+  assert.deepEqual(state.routes, { discovery: true, state: true, control: false, maps: false, settings: false });
   assert.equal(state.control, null);
   for (const kind of ['start', 'pause', 'resume', 'stop', 'return', 'jump']) {
     const refused = await f.post(commandPath(ID_A, kind));
@@ -705,7 +794,7 @@ test('control mode routes start, pause and resume behind a fresh observation, se
   await f.bridge.connect();
   const state = (await f.get(STATE_PATH)).json as BridgeState;
   assert.equal(state.operating_mode, 'control');
-  assert.deepEqual(state.routes, { discovery: true, state: true, control: true, maps: false });
+  assert.deepEqual(state.routes, { discovery: true, state: true, control: true, maps: false, settings: false });
   assert.deepEqual(state.control, { classes: ['start', 'pause', 'resume', 'stop'], max_state_age_ms: 30_000, read_back_ms: 20_000 });
   assertNoSecrets(JSON.stringify(state));
   // Without a successful observation nothing is written.
@@ -913,5 +1002,252 @@ test('shutdown aborts an in-flight command, answers it and leaves no handles', a
   assert.deepEqual(aborted.json, { error: 'request_aborted' });
   assert.equal(log.disconnects, 2, 'the aborted command session is closed');
   await assert.rejects(f.bridge.command(ID_A, 'start'), { code: 'bridge_not_running' });
+  assert.deepEqual(await settledHandles(handles), handles);
+});
+
+test('the state route serves the typed settings of the same query with their bounds and nothing raw', async (t) => {
+  const log = sessionLog();
+  let values: Record<string, string | number | boolean> = SETTING_DPS;
+  let schema: MowerDpSchemaEntry[] | undefined = SETTING_SCHEMA;
+  let queryFailure: Error | null = null;
+  const observedAt = new Date(T0).toISOString();
+  const open = (current: MowerDpSchemaEntry[] | undefined) =>
+    sessions(
+      log,
+      async () => {
+        if (queryFailure) throw queryFailure;
+        return telemetry(observedAt, 85, undefined, values);
+      },
+      undefined,
+      undefined,
+      current ? { schema: current } : {},
+    );
+  let openSession = open(schema);
+  const f = await fixture(t, { host: HOST_A }, { openLocalSession: (id, options, signal) => openSession(id, options, signal) });
+  await f.bridge.connect();
+  const reply = await f.get(`${MOWERS_PATH}/${ID_A}/state`);
+  assert.equal(reply.status, 200);
+  assert.equal(log.queries, 1, 'the settings come from the one state query');
+  assert.ok(!reply.text.includes('"dps"') && !reply.text.includes('PRIVATE-BLOB') && !reply.text.includes('"110"'), 'raw data points are absent');
+  assert.deepEqual((reply.json as MowerStateDocument).settings, {
+    mow_height: { state: 'reported', value: 40, writable: true, min: 25, max: 75, step: 1, unit: 'mm' },
+    volume: { state: 'reported', value: 20, writable: true, min: 0, max: 100, step: 1, unit: '%' },
+    smart_no_go_zones: { state: 'reported', value: true, writable: true },
+    sparse_lawn_optimization: { state: 'reported', value: false, writable: true },
+    rain_auto_return: { state: 'reported', value: true, writable: false },
+    child_lock: { state: 'reported', value: true, writable: false },
+    bird_view_capture: { state: 'reported', value: false, writable: false },
+  });
+  // Without the device's declaration nothing reads as writable, and a bad value stays invalid.
+  schema = undefined;
+  openSession = open(schema);
+  values = { ...SETTING_DPS, '110': 80, '26': 'loud' };
+  const undeclared = (await f.get(`${MOWERS_PATH}/${ID_A}/state`)).json as MowerStateDocument;
+  assert.deepEqual(undeclared.settings.mow_height, { state: 'invalid' });
+  assert.deepEqual(undeclared.settings.volume, { state: 'invalid' });
+  assert.deepEqual(undeclared.settings.smart_no_go_zones, { state: 'reported', value: true, writable: false });
+  // A failed query serves the last good settings as stale, never a guess.
+  queryFailure = new EufyError('mower_local_protocol_error');
+  const stale = (await f.get(`${MOWERS_PATH}/${ID_A}/state`)).json as MowerStateDocument;
+  assert.equal(stale.stale, true);
+  assert.deepEqual(stale.settings, undeclared.settings);
+});
+
+test('read_only settings mode answers every settings route with 403 before discovery, the library or a session', async (t) => {
+  const log = sessionLog();
+  const f = await fixture(t, { host: HOST_A }, {
+    openLocalSession: sessions(log, async () => telemetry(new Date(T0).toISOString()), undefined, undefined, {
+      setting: async (request) => settingOutcome(request, 'reflected', new Date(T0).toISOString(), 40),
+    }),
+  });
+  await f.bridge.connect();
+  const state = (await f.get(STATE_PATH)).json as BridgeState;
+  assert.equal(state.routes.settings, false);
+  for (const [key, value] of [
+    ['mow_height', '45'],
+    ['volume', '30'],
+    ['rain_auto_return', 'false'],
+    ['child_lock', 'false'],
+    ['cut_height', '45'],
+  ] as const) {
+    const refused = await f.post(settingPath(ID_A, key, value));
+    assert.equal(refused.status, 403, key);
+    assert.deepEqual(refused.json, { error: 'settings_disabled' });
+  }
+  assert.equal(f.adapter.discoveries, 0, 'no discovery ran for a refused setting');
+  assert.equal(log.opened.length, 0, 'no LAN session was opened');
+  assert.equal(log.settings.length, 0);
+  await assert.rejects(f.bridge.setting(ID_A, 'mow_height', '45'), { code: 'settings_disabled', status: 403 });
+});
+
+test('write mode routes one setting, serves the outcome and closes the session', async (t) => {
+  const handles = await baselineHandles();
+  const log = sessionLog();
+  let end: MowerSettingOutcome['end'] = 'reflected';
+  let other: unknown;
+  let failure: Error | null = null;
+  const at = new Date(T0 + 2_000).toISOString();
+  const f = await fixture(t, { host: HOST_A, ...SETTINGS_WRITE }, {
+    openLocalSession: sessions(log, async () => telemetry(new Date(T0).toISOString()), undefined, undefined, {
+      setting: async (request) => {
+        if (failure) throw failure;
+        return settingOutcome(request, end, at, request.name === 'mowHeight' ? 40 : true, other);
+      },
+    }),
+  });
+  await f.bridge.connect();
+  const state = (await f.get(STATE_PATH)).json as BridgeState;
+  assert.deepEqual(state.routes, { discovery: true, state: true, control: false, maps: false, settings: true });
+  assert.equal(state.control, null, 'settings writes need no control mode');
+  // The library runs its own fresh query, so no earlier state observation is required.
+  const changed = await f.post(settingPath(ID_A, 'mow_height', '45'));
+  assert.equal(changed.status, 200, changed.text);
+  assertNoSecrets(changed.text);
+  assert.ok(!changed.text.includes(HOST_A) && !changed.text.includes('"dps"') && !changed.text.includes('PRIVATE-BLOB') && !changed.text.includes('155'), 'raw data points, reports and the host are absent');
+  assert.deepEqual(changed.json, {
+    contract: 1,
+    id: ID_A,
+    setting: 'mow_height',
+    result: 'confirmed',
+    write: { dp: '110', code: 'mow_height', value: 45 },
+    previous: 40,
+    sent_at: at,
+    stage: 'reflected',
+    end: 'reflected',
+    before_observed_at: at,
+    reply: { observed_at: at, return_code_zero: true, rejected: false },
+    reflection: { observed_at: at, sequence: 21, value: 45 },
+    other: null,
+    reports: 1,
+  });
+  assert.deepEqual(log.settings, [{ name: 'mowHeight', value: 45 }]);
+  assert.deepEqual(log.opened, [{ id: ID_A, options: { host: HOST_A, timeoutMs: 5_000 } }]);
+  assert.equal(log.disconnects, 1, 'the setting session is closed');
+  assert.equal(log.lastConnected(), false);
+  // A switch value is a boolean. A timed out write is uncertain and carries the other value it saw.
+  end = 'timed_out';
+  other = true;
+  const uncertain = (await f.post(settingPath(ID_A, 'smart_no_go_zones', 'false'))).json as MowerSettingDocument;
+  assert.equal(uncertain.result, 'uncertain', 'a timed out write is never confirmed and never repeated');
+  assert.equal(uncertain.stage, 'sent');
+  assert.deepEqual(uncertain.write, { dp: '132', code: 'enable_smart_forbid_zone', value: false });
+  assert.equal(uncertain.previous, true);
+  assert.deepEqual(uncertain.other, { observed_at: at, sequence: 20, value: true });
+  assert.equal(uncertain.reflection, null);
+  // Another value of an unexpected type is never served raw.
+  other = { raw: 'PRIVATE-BLOB' };
+  const hidden = await f.post(settingPath(ID_A, 'sparse_lawn_optimization', 'true'));
+  assert.equal((hidden.json as MowerSettingDocument).other?.value, null);
+  assert.ok(!hidden.text.includes('PRIVATE-BLOB'));
+  other = undefined;
+  end = 'rejected';
+  const rejected = (await f.post(settingPath(ID_A, 'volume', '30'))).json as MowerSettingDocument;
+  assert.equal(rejected.result, 'failed');
+  assert.deepEqual(rejected.reply, { observed_at: at, return_code_zero: false, rejected: true });
+  assert.deepEqual(log.settings.map((request) => [request.name, request.value]), [
+    ['mowHeight', 45],
+    ['smartNoGoZones', false],
+    ['sparseLawnOptimization', true],
+    ['volume', 30],
+  ]);
+  // The library's typed refusals map to 409 with the library code, other failures to 503.
+  failure = new EufyError('mower_setting_already_set');
+  const refused = await f.post(settingPath(ID_A, 'mow_height', '40'));
+  assert.equal(refused.status, 409);
+  assert.deepEqual(refused.json, { error: 'mower_setting_already_set' });
+  assert.equal(log.disconnects, log.opened.length, 'a refused setting still closes its session');
+  failure = new EufyError('mower_local_disconnected');
+  const lost = await f.post(settingPath(ID_A, 'mow_height', '45'));
+  assert.equal(lost.status, 503);
+  assert.deepEqual(lost.json, { error: 'mower_local_disconnected' });
+  failure = new TypeError('unexpected detail');
+  const unexpected = await f.post(settingPath(ID_A, 'mow_height', '45'));
+  assert.equal(unexpected.status, 503);
+  assert.deepEqual(unexpected.json, { error: 'internal_error' });
+  assert.ok(!unexpected.text.includes('unexpected detail'));
+  assert.equal(log.settings.length, 7, 'every request reached the library exactly once');
+  await f.bridge.stop();
+  assert.deepEqual(await settledHandles(handles), handles);
+});
+
+test('the settings route checks the key, the value, the mower and ownership on the bridge first', async (t) => {
+  const log = sessionLog();
+  let release: () => void = () => {};
+  const f = await fixture(t, { hosts: { [ID_A]: HOST_A }, ...SETTINGS_WRITE, ...CONTROL_MODE }, {
+    openLocalSession: sessions(
+      log,
+      async () => telemetry(new Date(T0).toISOString()),
+      undefined,
+      async (request) => outcome(request.kind, 'reflected', new Date(T0).toISOString()),
+      {
+        setting: async (request) => {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return settingOutcome(request, 'reflected', new Date(T0).toISOString(), 40);
+        },
+      },
+    ),
+  });
+  f.adapter.devices = [device(ID_A), device(ID_B)];
+  await f.bridge.connect();
+  // Rain and child protection and the bird-view capture are read only whatever the value.
+  for (const key of ['rain_auto_return', 'child_lock', 'bird_view_capture']) {
+    for (const value of ['true', 'false']) {
+      const refused = await f.post(settingPath(ID_A, key, value));
+      assert.equal(refused.status, 409, key);
+      assert.deepEqual(refused.json, { error: 'mower_setting_read_only' });
+    }
+  }
+  const unknown = await f.post(settingPath(ID_A, 'cut_height', '45'));
+  assert.equal(unknown.status, 404);
+  assert.deepEqual(unknown.json, { error: 'not_found' });
+  for (const value of [undefined, '', 'yes', 'True', '4.5', '1e3', '0x10', '1234567', ' 45', '45 ']) {
+    const refused = await f.post(settingPath(ID_A, 'mow_height', value));
+    assert.equal(refused.status, 400, String(value));
+    assert.deepEqual(refused.json, { error: 'invalid_setting_value' });
+  }
+  const invalid = await f.post(settingPath('not-a-mower-id', 'mow_height', '45'));
+  assert.equal(invalid.status, 400);
+  assert.deepEqual(invalid.json, { error: 'invalid_mower_id' });
+  assert.equal(f.adapter.discoveries, 0, 'every check above ran before discovery');
+  const noHost = await f.post(settingPath(ID_B, 'mow_height', '45'));
+  assert.equal(noHost.status, 503);
+  assert.deepEqual(noHost.json, { error: 'mower_host_unconfigured' });
+  assert.equal(log.settings.length, 0, 'no refused request reached a session');
+  // One write, a setting or a command, owns the mower at a time.
+  assert.equal((await f.get(`${MOWERS_PATH}/${ID_A}/state`)).status, 200);
+  const pending = f.post(settingPath(ID_A, 'mow_height', '45'));
+  for (let i = 0; i < 100 && log.settings.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  const second = await f.post(settingPath(ID_A, 'volume', '30'));
+  assert.equal(second.status, 409);
+  assert.deepEqual(second.json, { error: 'command_in_progress' });
+  const command = await f.post(commandPath(ID_A, 'start'));
+  assert.equal(command.status, 409);
+  assert.deepEqual(command.json, { error: 'command_in_progress' });
+  release();
+  assert.equal((await pending).status, 200);
+  assert.equal(log.settings.length, 1, 'the refused writes never reached a session');
+  assert.equal(log.commands.length, 0);
+});
+
+test('shutdown aborts an in-flight setting write, answers it and leaves no handles', async (t) => {
+  const handles = await baselineHandles();
+  const log = sessionLog();
+  const f = await fixture(t, { host: HOST_A, ...SETTINGS_WRITE }, {
+    openLocalSession: sessions(log, async () => telemetry(new Date(T0).toISOString()), undefined, undefined, {
+      setting: (_request, signal) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(new EufyError('request_aborted')), { once: true })),
+    }),
+  });
+  await f.bridge.connect();
+  const pending = f.post(settingPath(ID_A, 'mow_height', '45'));
+  for (let i = 0; i < 100 && log.settings.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(log.settings.length, 1);
+  await f.bridge.stop();
+  const aborted = await pending;
+  assert.equal(aborted.status, 503);
+  assert.deepEqual(aborted.json, { error: 'request_aborted' });
+  assert.equal(log.disconnects, 1, 'the aborted setting session is closed');
+  await assert.rejects(f.bridge.setting(ID_A, 'mow_height', '45'), { code: 'bridge_not_running' });
   assert.deepEqual(await settledHandles(handles), handles);
 });

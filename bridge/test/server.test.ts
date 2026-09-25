@@ -6,6 +6,7 @@ import { MOWERS_PATH, RawReply, STATE_PATH, createPrivateServer, type MapRequest
 import { TOKEN, baselineHandles, call, settledHandles } from './helpers.ts';
 
 const maps: { id: string; request: MapRequest }[] = [];
+const settings: { id: string; key: string; value: string | null }[] = [];
 const BUNDLE = Buffer.from('synthetic bundle bytes');
 
 async function withServer(run: (base: string, calls: () => number) => Promise<void>): Promise<void> {
@@ -24,6 +25,11 @@ async function withServer(run: (base: string, calls: () => number) => Promise<vo
     command: async (id: string, kind: string) => {
       if (id === 'observed') throw new ApiError(403, 'control_disabled');
       return { contract: 1, id, command: kind };
+    },
+    setting: async (id: string, key: string, value: string | null) => {
+      settings.push({ id, key, value });
+      if (id === 'observed') throw new ApiError(403, 'settings_disabled');
+      return { contract: 1, id, setting: key };
     },
     map: async (id: string, request: MapRequest) => {
       maps.push({ id, request });
@@ -155,5 +161,36 @@ test('the map route is GET only, passes its two headers and serves the bundle by
     }
     assert.equal((await call(base, `${MOWERS_PATH}/abc/map`)).status, 401, 'the bundle needs the token');
     assert.equal(maps.length, 3, 'refused requests never reach the map');
+  });
+});
+
+test('the settings route is POST only, reads the value from the query and ignores the body', async () => {
+  await withServer(async (base) => {
+    settings.length = 0;
+    const changed = await call(base, `${MOWERS_PATH}/abc/settings/mow_height?value=45`, { token: TOKEN, method: 'POST', body: '{"value":75}' });
+    assert.equal(changed.status, 200);
+    assert.deepEqual(changed.json, { contract: 1, id: 'abc', setting: 'mow_height' });
+    const missing = await call(base, `${MOWERS_PATH}/abc/settings/smart_no_go_zones`, { token: TOKEN, method: 'POST', body: 'value=true' });
+    assert.equal(missing.status, 200, 'the route decides about a missing value');
+    const forbidden = await call(base, `${MOWERS_PATH}/observed/settings/volume?value=30`, { token: TOKEN, method: 'POST' });
+    assert.equal(forbidden.status, 403);
+    assert.deepEqual(forbidden.json, { error: 'settings_disabled' });
+    assert.deepEqual(settings, [
+      { id: 'abc', key: 'mow_height', value: '45' },
+      { id: 'abc', key: 'smart_no_go_zones', value: null },
+      { id: 'observed', key: 'volume', value: '30' },
+    ]);
+    for (const method of ['GET', 'PUT', 'DELETE']) {
+      const refused = await call(base, `${MOWERS_PATH}/abc/settings/mow_height?value=45`, { token: TOKEN, method });
+      assert.equal(refused.status, 405, method);
+      assert.equal(refused.headers.allow, 'POST');
+    }
+    for (const path of ['/v1/mowers/abc/settings', '/v1/mowers/abc/settings/', '/v1/mowers/abc/settings/MOW_HEIGHT', '/v1/mowers/abc/settings/mow-height', '/v1/mowers/abc/settings/mow_height/45', '/v1/mowers/abc/setting/mow_height']) {
+      const missingRoute = await call(base, path, { token: TOKEN, method: 'POST' });
+      assert.equal(missingRoute.status, 404, path);
+      assert.deepEqual(missingRoute.json, { error: 'not_found' });
+    }
+    assert.equal((await call(base, `${MOWERS_PATH}/abc/settings/mow_height?value=45`, { method: 'POST' })).status, 401, 'the route needs the token');
+    assert.equal(settings.length, 3, 'refused requests never reach the route');
   });
 });

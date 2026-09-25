@@ -3,10 +3,13 @@
 How to run the dedicated mower bridge from `bridge/` as a container or as a
 local Home Assistant app, and how to upgrade, restart, back up and roll it
 back. Everything here is local: no image is published and no app repository is
-listed. Version 0.9.0 serves state routes and, only behind the explicit
-`operating_mode: control` opt-in with a stop route, the start, pause, resume
-and stop routes. It pins library 0.19.0, which confirms the E15 activities
-mowing, paused and returning and the start, pause, resume and stop commands.
+listed. Version 0.10.0 serves state routes with the typed settings and, only
+behind the explicit `operating_mode: control` opt-in with a stop route, the
+start, pause, resume and stop routes. The separate `settings_mode: write`
+opt-in enables the settings route for mow height, volume, smart no-go zones
+and sparse lawn optimization. It pins library 0.20.0, which confirms the E15
+activities mowing, paused and returning and the start, pause, resume and stop
+commands, and reads and writes the settings behind its own opt-in.
 On the owned E15 a stop ends the task and returns the mower to the dock. With
 an operator-supplied map provisioning file it also serves the read-only map
 route, see [Map provisioning](#map-provisioning-optional).
@@ -49,7 +52,7 @@ in `ha_app/` (run `python3 scripts/prepare_ha_app.py`).
 ## Install with Docker
 
 ```bash
-docker build -t eufy-mower-bridge:0.9.0 ./bridge
+docker build -t eufy-mower-bridge:0.10.0 ./bridge
 ```
 
 ```bash
@@ -61,7 +64,7 @@ docker run -d --name eufy-mower-bridge --restart unless-stopped \
   -e EUFY_MOWER_PASSWORD=<eufy account password> \
   -e EUFY_MOWER_COUNTRY=NL \
   -e EUFY_MOWER_HOST=<mower LAN address> \
-  eufy-mower-bridge:0.9.0
+  eufy-mower-bridge:0.10.0
 ```
 
 Bind the published port to an address that only Home Assistant can reach, or
@@ -135,7 +138,7 @@ docker run -d --name eufy-mower-bridge --restart unless-stopped \
   -e EUFY_MOWER_PASSWORD=<eufy account password> \
   -e EUFY_MOWER_COUNTRY=NL \
   -e EUFY_MOWER_HOST=<mower LAN address> \
-  eufy-mower-bridge:0.9.0
+  eufy-mower-bridge:0.10.0
 ```
 
 Mount the directory rather than the file, so a file replaced by renaming
@@ -224,7 +227,7 @@ routes start, pause and resume through the bridge's opt-in command routes.
 Since integration 0.10.0 dock goes through the bridge's stop route as well,
 and since integration 0.11.0 the map entity can read the bridge's map route.
 Activity reports mowing, paused and returning from the E15 payloads confirmed
-in library 0.19.0, see [DP 107 activity](protocol-provenance.md#dp-107-activity).
+in library 0.20.0, see [DP 107 activity](protocol-provenance.md#dp-107-activity).
 Docked, charging, idle and error have no confirmed payload and are never
 inferred, mowing progress stays unconfirmed and a bridge-mode session cannot
 observe its end. Commands need two opt-ins: the integration's operating mode
@@ -240,7 +243,15 @@ the map-saving payload the library received at dock arrival. The library's
 stopped task, so the bridge has no return route and cannot stop the mower in
 place. Leave the bridge at `observe_only` unless a supervised test with the
 app at hand is planned, the bridge has not yet run in control mode against
-the mower, see keesmod/eufy-robomow-ha#8. Settings have no route. The map
+the mower, see keesmod/eufy-robomow-ha#8. Since integration 0.14.0 the cut
+height, volume and the five local switches read the bridge's state document in
+bridge mode. Writes need the integration's `control` mode and the bridge's
+separate `settings_mode: write`, and only cut height, volume, smart no-go
+suggestions and mow yellow grass are written. Rain stop, child protection and
+the real lawn map stay read only there, see
+[Settings through the bridge](protocol-provenance.md#settings-through-the-bridge).
+The cloud settings (edge distance, pad direction, path distance, travel and
+blade speed) have no bridge route. The map
 route is read-only, needs the operator's provisioning and has not acquired a
 live map through the bridge yet, that map acceptance is part of
 keesmod/eufy-robomow-ha#8 as well. Physical control keeps its explicit opt-in

@@ -2,16 +2,18 @@
 
 The bridge serves contract 1 of ``GET /v1/state``, ``GET /v1/mowers``,
 ``GET /v1/mowers/{id}/state`` and, in its ``control`` mode, one opt-in
-``POST /v1/mowers/{id}/commands/{start|pause|resume|stop}``. This client validates the
+``POST /v1/mowers/{id}/commands/{start|pause|resume|stop}``. Bridge 0.10.0 adds the
+typed settings to the state document and, with its ``settings_mode: write``, one
+opt-in ``POST /v1/mowers/{id}/settings/{key}?value=...``. This client validates the
 connection settings, bounds every request and reduces failures to stable codes
 without upstream detail. It never logs the token or a document, and it never
-retries: a command request is sent exactly once.
+retries: a command or setting request is sent exactly once.
 """
 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import re
@@ -24,7 +26,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
-from .const import DP_BATTERY, DP_NETWORK, DP_SIGNAL
+from .const import (
+    BRIDGE_NUMBER_SETTING_DPS,
+    BRIDGE_SETTING_KEYS,
+    BRIDGE_WRITABLE_SETTING_DPS,
+    DP_BATTERY,
+    DP_NETWORK,
+    DP_SIGNAL,
+)
 
 BRIDGE_NAME = "eufy-robomow-bridge"
 BRIDGE_PROTOCOL = 1
@@ -68,6 +77,8 @@ _REFUSED_BEFORE_WRITE = frozenset(
         "cannot_connect",
         "certificate_mismatch",
         "certificate_invalid",
+        "settings_disabled",
+        "invalid_setting_value",
     }
 )
 _NETWORK_KINDS = {
@@ -94,14 +105,19 @@ class BridgeClientError(Exception):
 
 
 def refused_before_write(code: str) -> bool:
-    """Whether a failed command request is known to have written nothing.
+    """Whether a failed command or setting request is known to have written nothing.
 
-    The bridge checks mode, class, id, ownership, discovery, host and telemetry
-    age before it touches the library, and the library's ``mower_command_*``
-    refusals happen before any frame. A timeout, a lost transport or an invalid
-    answer says nothing about the write, so those are not listed here.
+    The bridge checks mode, class or key, value, id, ownership, discovery, host and,
+    for commands, telemetry age before it touches the library, and the library's
+    ``mower_command_*`` and ``mower_setting_*`` refusals happen before any frame. A
+    timeout, a lost transport or an invalid answer says nothing about the write, so
+    those are not listed here.
     """
-    return code in _REFUSED_BEFORE_WRITE or code.startswith("mower_command_")
+    return (
+        code in _REFUSED_BEFORE_WRITE
+        or code.startswith("mower_command_")
+        or code.startswith("mower_setting")
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +202,10 @@ class BridgeTelemetry:
     # the library received that report, for example ``returning`` shortly after a
     # dock. None without a running command or without progress yet.
     command_activity: tuple[str, datetime] | None = None
+    # Per reported setting data point, whether the library writes it and the mower
+    # declares it writable. The values themselves are in ``dps``. Empty for a
+    # bridge older than 0.10.0.
+    settings_writable: dict[str, bool] = field(default_factory=dict)
 
 
 def _field(document: dict[str, Any], name: str) -> dict[str, Any]:
@@ -255,6 +275,8 @@ def parse_state_document(document: Any, mower_id: str) -> BridgeTelemetry:
             raise BridgeClientError("invalid_document")
         activity = status["value"]
     _field(document, "progress")
+    settings, writable = _settings(document.get("settings"))
+    dps.update(settings)
     return BridgeTelemetry(
         observed_at=observed_at,
         age_ms=age_ms,
@@ -264,7 +286,35 @@ def parse_state_document(document: Any, mower_id: str) -> BridgeTelemetry:
         activity=activity,
         dps=dps,
         command_activity=_command_activity(document.get("command")),
+        settings_writable=writable,
     )
+
+
+def _settings(settings: Any) -> tuple[dict[str, Any], dict[str, bool]]:
+    """The reported settings of bridge 0.10.0 or later as DPS values and writable flags.
+
+    The field is optional. An older bridge omits it, and a setting this
+    integration cannot read is skipped instead of failing the poll, so the
+    mower's state keeps flowing. Missing and invalid settings map to nothing.
+    """
+    values: dict[str, Any] = {}
+    writable: dict[str, bool] = {}
+    if not isinstance(settings, dict):
+        return values, writable
+    for dp, key in BRIDGE_SETTING_KEYS.items():
+        setting = settings.get(key)
+        if not isinstance(setting, dict) or setting.get("state") != "reported":
+            continue
+        value = setting.get("value")
+        flag = setting.get("writable")
+        if dp in BRIDGE_NUMBER_SETTING_DPS:
+            if not isinstance(value, int) or isinstance(value, bool):
+                continue
+        elif not isinstance(value, bool):
+            continue
+        values[dp] = value
+        writable[dp] = flag is True
+    return values, writable
 
 
 def _command_activity(command: Any) -> tuple[str, datetime] | None:
@@ -354,6 +404,70 @@ def parse_command_outcome(document: Any, mower_id: str, kind: str) -> BridgeComm
     )
 
 
+_SETTING_RESULTS = _COMMAND_RESULTS
+
+
+@dataclass(frozen=True, slots=True)
+class BridgeSettingOutcome:
+    """The parts of one bridge setting answer that the integration consumes."""
+
+    # ``confirmed``, ``failed`` or ``uncertain``, the library's outcome unchanged.
+    result: str
+    # ``sent`` or ``reflected``.
+    stage: str
+    # Why the write ended, for example ``reflected``, ``rejected`` or ``timed_out``.
+    end: str
+    # The value the library read on its fresh query before the write, the value a
+    # deliberate restore writes back.
+    previous: bool | int
+    # When the library received the report that carried the written value.
+    observed_at: datetime | None = None
+
+
+def parse_setting_outcome(
+    document: Any, mower_id: str, key: str, value: bool | int
+) -> BridgeSettingOutcome:
+    """Validate a contract 1 setting answer for exactly the setting and value sent."""
+    if not isinstance(document, dict):
+        raise BridgeClientError("invalid_document")
+    if (
+        document.get("contract") != STATE_CONTRACT
+        or document.get("id") != mower_id
+        or document.get("setting") != key
+    ):
+        raise BridgeClientError("invalid_document")
+    result = document.get("result")
+    stage = document.get("stage")
+    end = document.get("end")
+    write = document.get("write")
+    previous = document.get("previous")
+    if result not in _SETTING_RESULTS:
+        raise BridgeClientError("invalid_document")
+    if not (isinstance(stage, str) and isinstance(end, str)):
+        raise BridgeClientError("invalid_document")
+    if not isinstance(write, dict) or not _same_value(write.get("value"), value):
+        raise BridgeClientError("invalid_document")
+    if not isinstance(previous, (bool, int)) or isinstance(previous, bool) != isinstance(value, bool):
+        raise BridgeClientError("invalid_document")
+    reflection = document.get("reflection")
+    reflected_at: datetime | None = None
+    if reflection is not None:
+        if not isinstance(reflection, dict) or not _same_value(reflection.get("value"), value):
+            raise BridgeClientError("invalid_document")
+        reflected_at = _report_time(reflection)
+    if result == "confirmed" and reflection is None:
+        # Confirmed means a fresh report carried the written value.
+        raise BridgeClientError("invalid_document")
+    return BridgeSettingOutcome(
+        result=result, stage=stage, end=end, previous=previous, observed_at=reflected_at
+    )
+
+
+def _same_value(candidate: Any, value: bool | int) -> bool:
+    """Equal and of the same kind, so True never stands in for 1."""
+    return isinstance(candidate, bool) == isinstance(value, bool) and candidate == value
+
+
 def _report_time(field: dict[str, Any]) -> datetime | None:
     """The library's receipt time of one reflecting report, or None when unreadable.
 
@@ -430,6 +544,37 @@ class BridgeClient:
             "POST", f"/v1/mowers/{mower_id}/commands/{kind}", _COMMAND_TIMEOUT
         )
         return parse_command_outcome(document, mower_id, kind)
+
+    async def async_set_setting(
+        self, mower_id: str, key: str, value: bool | int
+    ) -> BridgeSettingOutcome:
+        """Write one setting exactly once and return the library's outcome.
+
+        The value travels in the query and the request carries no body. A
+        ``BridgeClientError`` whose code passes :func:`refused_before_write` wrote
+        nothing, any other failure leaves the write uncertain and the caller must
+        never repeat it blindly. Rain stop, child protection and the real lawn map
+        are refused here before any request.
+        """
+        if not _MOWER_ID_PATTERN.fullmatch(mower_id):
+            raise BridgeClientError("invalid_mower_id")
+        dp = next((dp for dp, name in BRIDGE_SETTING_KEYS.items() if name == key), None)
+        if dp is None:
+            raise BridgeClientError("not_found")
+        if dp not in BRIDGE_WRITABLE_SETTING_DPS:
+            raise BridgeClientError("mower_setting_read_only")
+        if dp in BRIDGE_NUMBER_SETTING_DPS:
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise BridgeClientError("invalid_setting_value")
+            encoded = str(value)
+        elif isinstance(value, bool):
+            encoded = "true" if value else "false"
+        else:
+            raise BridgeClientError("invalid_setting_value")
+        document = await self._async_request(
+            "POST", f"/v1/mowers/{mower_id}/settings/{key}?value={encoded}", _COMMAND_TIMEOUT
+        )
+        return parse_setting_outcome(document, mower_id, key, value)
 
     async def _async_get(self, path: str) -> dict[str, Any]:
         return await self._async_request("GET", path, _REQUEST_TIMEOUT)

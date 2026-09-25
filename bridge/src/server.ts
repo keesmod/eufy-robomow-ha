@@ -7,6 +7,8 @@ export const MOWERS_PATH = '/v1/mowers';
 const MOWER_STATE_PATH = /^\/v1\/mowers\/([^/]{1,128})\/state$/;
 /** `POST /v1/mowers/{id}/commands/{class}`. The class is addressed by path, bodies are discarded. */
 const MOWER_COMMAND_PATH = /^\/v1\/mowers\/([^/]{1,128})\/commands\/([a-z]{1,16})$/;
+/** `POST /v1/mowers/{id}/settings/{key}?value=...`. The value is a query parameter, bodies are discarded. */
+const MOWER_SETTING_PATH = /^\/v1\/mowers\/([^/]{1,128})\/settings\/([a-z_]{1,32})$/;
 /** `GET /v1/mowers/{id}/map`, the read-only map bundle. */
 const MOWER_MAP_PATH = /^\/v1\/mowers\/([^/]{1,128})\/map$/;
 
@@ -34,8 +36,10 @@ export interface PrivateApi {
   state(): unknown;
   discover(): Promise<unknown>;
   mowerState(id: string): Promise<unknown>;
-  /** The only write route. Refused with 403 unless the bridge runs in `control` mode. */
+  /** A command write. Refused with 403 unless the bridge runs in `control` mode. */
   command(id: string, kind: string): Promise<unknown>;
+  /** A setting write. Refused with 403 unless the bridge runs with `settings_mode: write`. */
+  setting(id: string, key: string, value: string | null): Promise<unknown>;
   /** Read-only. Refused with 404 unless the bridge is configured for maps. */
   map(id: string, request: MapRequest): Promise<unknown>;
 }
@@ -76,13 +80,16 @@ interface Route {
   handler: () => unknown;
 }
 
-function route(api: PrivateApi, request: IncomingMessage, pathname: string): Route | undefined {
+function route(api: PrivateApi, request: IncomingMessage, url: URL): Route | undefined {
+  const { pathname } = url;
   if (pathname === STATE_PATH) return { method: 'GET', handler: () => api.state() };
   if (pathname === MOWERS_PATH) return { method: 'GET', handler: () => api.discover() };
   const mower = MOWER_STATE_PATH.exec(pathname);
   if (mower) return { method: 'GET', handler: () => api.mowerState(mower[1]!) };
   const command = MOWER_COMMAND_PATH.exec(pathname);
   if (command) return { method: 'POST', handler: () => api.command(command[1]!, command[2]!) };
+  const setting = MOWER_SETTING_PATH.exec(pathname);
+  if (setting) return { method: 'POST', handler: () => api.setting(setting[1]!, setting[2]!, url.searchParams.get('value')) };
   const map = MOWER_MAP_PATH.exec(pathname);
   if (map)
     return {
@@ -94,8 +101,9 @@ function route(api: PrivateApi, request: IncomingMessage, pathname: string): Rou
 
 /**
  * Private HTTP shell. Every request needs the bearer token before any route is visible. The
- * read routes are GET, the command route is POST. Request bodies are discarded and every
- * timeout is bounded. Answers are JSON except the map bundle.
+ * read routes are GET, the command and settings routes are POST. Request bodies are discarded, a
+ * setting's value travels in the query, and every timeout is bounded. Answers are JSON except the
+ * map bundle.
  */
 export function createPrivateServer(token: string, api: PrivateApi): Server {
   const server = createServer((request, response) => {
@@ -105,7 +113,7 @@ export function createPrivateServer(token: string, api: PrivateApi): Server {
       return;
     }
     const url = new URL(request.url ?? '/', 'http://bridge');
-    const matched = route(api, request, url.pathname);
+    const matched = route(api, request, url);
     if (!matched) {
       json(response, 404, { error: 'not_found' });
       return;

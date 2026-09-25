@@ -43,7 +43,8 @@ def test_commands_follow_the_mode_the_backend_and_the_bridge_opt_in() -> None:
 
     bridge = _coordinator_for_mode(OPERATING_MODE_CONTROL)
     bridge.backend = BACKEND_BRIDGE
-    assert bridge.writes_available is False, "settings have no bridge route"
+    assert bridge.writes_available is False, "cloud settings have no bridge route"
+    assert bridge.setting_entities_available is True, "the local settings go through the bridge"
     assert bridge.commands_available is False, "the bridge has not reported routes.control"
     with pytest.raises(HomeAssistantError, match="not in control mode"):
         bridge._require_commands_available()
@@ -51,7 +52,7 @@ def test_commands_follow_the_mode_the_backend_and_the_bridge_opt_in() -> None:
     assert bridge.commands_available is True
     assert bridge.writes_available is False
     bridge._require_commands_available()
-    with pytest.raises(HomeAssistantError, match="no settings routes"):
+    with pytest.raises(HomeAssistantError, match="no route for this setting"):
         bridge._require_writes_available()
 
     observe_only = _coordinator_for_mode(OPERATING_MODE_OBSERVE_ONLY)

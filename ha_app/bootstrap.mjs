@@ -12,6 +12,7 @@ const ENVIRONMENT = {
   password: 'EUFY_MOWER_PASSWORD',
   country: 'EUFY_MOWER_COUNTRY',
   operating_mode: 'EUFY_MOWER_OPERATING_MODE',
+  settings_mode: 'EUFY_MOWER_SETTINGS_MODE',
   cloud_timeout_ms: 'EUFY_MOWER_CLOUD_TIMEOUT_MS',
   local_timeout_ms: 'EUFY_MOWER_LOCAL_TIMEOUT_MS',
   host: 'EUFY_MOWER_HOST',

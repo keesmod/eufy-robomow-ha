@@ -20,6 +20,8 @@ dock in bridge mode. Version 0.13.2 shows the drive home in the local backend.
 Version 0.13.3 confirms a start right after a map save and refuses a pause
 without a running task. Version 0.13.4 confirms a start while the mower rests in
 the dock and shows the drive home right after a dock.
+Version 0.14.0 reads the local settings through the mower bridge and writes
+cut height, volume and two lawn options through its opt-in settings route.
 
 ---
 
@@ -172,8 +174,21 @@ A confirmed dock carries the evidence `bridge:map_saving`, the map-saving
 payload the library received at dock arrival about 30 seconds after the write,
 see the library's
 [stop and return receipt](https://github.com/keesmod/eufy-mega-client/blob/19d47a7144e505702e1ef98dfc7d84dfeb956cd6/docs/research/E15_STOP_RETURN_WINDOW_2026-09-20.md).
-No number, select or switch entity exists in bridge mode, the bridge has no
-settings route. The map entity has its own source choice, the bridge's map
+Since 0.14.0 the local settings exist in bridge mode too, with the same unique
+ids, in this integration's `control` mode: Cut Height and Volume as numbers and
+the five switches, read from the `settings` of the bridge's state document
+(bridge 0.10.0 or later). Cut Height, Volume, Smart No-Go Suggestions and Mow
+Yellow Grass are written through the bridge's settings route when two opt-ins
+meet: this integration's `control` mode and the bridge's own
+`settings_mode: write`, which it reports as `routes.settings`. Each change is
+one request, the library behind the bridge reads the setting fresh, refuses
+what it cannot prove, writes once and confirms only a fresh report of the new
+value. Nothing is retried, and a change back is a second deliberate write.
+Stop on Rain Detection, Child Protection and Real Lawn Map stay read only in
+bridge mode: turning them on or off raises an error before any request, change
+them in the Eufy app. The cloud settings (Edge Distance, Pad Direction, Path
+Distance, Travel Speed and Blade Speed) have no bridge route and do not exist
+in bridge mode. The map entity has its own source choice, the bridge's map
 route or the external map source, see [Optional read-only map](#optional-read-only-map).
 
 Each command is one `POST` to the bridge, sent exactly once, and the bridge's
@@ -348,7 +363,7 @@ issue or include them in diagnostics.
 [`bridge/`](bridge/README.md) contains the dedicated Node 24 mower bridge that
 later steps connect to this integration. It consumes
 [`@keesmod/eufy-mega-client`](https://github.com/keesmod/eufy-mega-client)
-0.18.0 as a library, pinned to the exact release tarball, and instantiates only
+0.20.0 as a library, pinned to the exact release tarball, and instantiates only
 the library's mower module. It has its own token, credentials, session file,
 data directory, port and lifecycle, and runs with no camera bridge present.
 
@@ -367,7 +382,10 @@ the bridge for mode, class, mower, host, exclusive ownership and the age of the
 last state observation, and served as the library's confirmed, failed or
 uncertain outcome without retry or replay. `return` stays unsupported, the
 owned firmware ignores its DP 3 write from paused and from the stopped task,
-and `stop` is the route that returns the mower to the dock. No settings route.
+and `stop` is the route that returns the mower to the dock. Its state route
+serves the typed settings, and with the separate `settings_mode: write` it adds
+`POST /v1/mowers/{id}/settings/{key}` for mow height, volume, smart no-go zones
+and sparse lawn optimization, with rain and child protection read only.
 With an operator-supplied map provisioning file it adds the read-only
 `GET /v1/mowers/{id}/map`, which serves the map bundle described above from
 the library's portable map acquisition after the library's decoder accepted
@@ -388,7 +406,7 @@ in [issue #12](https://github.com/keesmod/eufy-robomow-ha/issues/12). See
 
 - **Local polling** (every 10 s) via the [Tuya local protocol](https://github.com/jasonacox/tinytuya) for real-time status (battery, activity state, etc.). With the **bridge** backend the mower bridge polls the mower instead and Home Assistant reads its typed state every 10 s over an authenticated private HTTP connection.
 - **Cloud polling** (every 5 min) via the Tuya mobile API for settings stored as protobuf blobs in DP155.
-- **Writes**, when control is explicitly enabled, go to either the local mower or the cloud API depending on the setting. With the **bridge** backend start, pause, resume and dock go through the bridge's command routes instead, once each, dock through the bridge's stop route, and settings have no route.
+- **Writes**, when control is explicitly enabled, go to either the local mower or the cloud API depending on the setting. With the **bridge** backend start, pause, resume and dock go through the bridge's command routes instead, once each, dock through the bridge's stop route, and cut height, volume, smart no-go suggestions and mow yellow grass through its settings route, once each. Rain stop, child protection, the real lawn map and the cloud settings have no bridge write.
 - **Optional map acquisition** uses five-minute idle snapshots and two-second
   `ETag`-aware live pulls while mowing, then renders the validated geometry
   locally as a script-free SVG. With the **bridge** map source the bridge
@@ -404,6 +422,15 @@ protocol tests.
 
 ## Upgrade notes
 
+- **0.14.0, settings through the bridge, and bridge 0.10.0.** With mower
+  bridge 0.10.0 on library 0.20.0 the bridge backend reads Cut Height, Volume
+  and the five local switches from the bridge's state document, with the same
+  unique ids as the local backend, and writes Cut Height, Volume, Smart No-Go
+  Suggestions and Mow Yellow Grass through the bridge's settings route once
+  the bridge runs with `settings_mode: write`. Rain stop, child protection and
+  the real lawn map stay read only in bridge mode. With an older bridge the
+  setting entities in bridge mode have no value. The local backend is
+  unchanged, including its switches for rain stop and child protection.
 - **0.13.4, start while resting in the dock and the first poll of the drive
   home.** About five minutes after each arrival the mower rests in the dock
   with DP 1 true and DP 118 at 100. A start then works, but it leaves the

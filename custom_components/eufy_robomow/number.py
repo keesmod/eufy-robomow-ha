@@ -10,6 +10,10 @@ Cloud entities (backed by DP155 via Tuya mobile API):
   • Pad Direction   — DP155 field 4, 0–359°, step 1° (rotary; full rotation)
 
 Path distance is a fixed 3-option select; see select.py.
+
+With the mower bridge backend only Cut Height and Volume exist. They read the
+bridge's state document and write through its opt-in settings route. The cloud
+entities have no bridge route.
 """
 
 from __future__ import annotations
@@ -49,7 +53,7 @@ async def async_setup_entry(
 ) -> None:
     coordinator: EufyMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    if not coordinator.writes_available:
+    if not coordinator.setting_entities_available:
         return
 
     entities: list[NumberEntity] = [
@@ -57,7 +61,7 @@ async def async_setup_entry(
         EufyVolumeNumber(coordinator, entry),
     ]
 
-    if coordinator.cloud_client is not None:
+    if coordinator.writes_available and coordinator.cloud_client is not None:
         entities.append(EufyEdgeDistanceNumber(coordinator, entry))
         entities.append(EufyPadDirectionNumber(coordinator, entry))
 

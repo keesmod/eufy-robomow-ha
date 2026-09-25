@@ -41,6 +41,13 @@ stop routes, which the integration's bridge backend uses in its own `control`
 mode. Leave the default unless a supervised test with the eufy app at hand is
 planned.
 
+The state route also reads the mower's settings. `settings_mode` stays
+`read_only` by default, where the settings route answers `403`. Setting it to
+`write` enables the bridge's opt-in route for mow height, volume, smart no-go
+zones and sparse lawn optimization, which the integration's bridge backend
+uses in its own `control` mode. It is independent of `operating_mode`. Rain
+and child protection stay read only in either mode.
+
 ## Read-only map
 
 The map route needs a private provisioning file that you supply and keep
