@@ -615,8 +615,10 @@ refuses a missing, late or unusable cloud reading with
 [work parameter contract](https://github.com/keesmod/eufy-mega-client/blob/main/docs/MOWER_WORK_PARAMETERS.md).
 On 2026-09-25 the owned E15 merged a partial DP 155 message written over the
 LAN outside the library and reported the complete message within about 0.2
-seconds. No work parameter has been written through the bridge on hardware
-yet.
+seconds. On 2026-09-25 this route changed and restored `mow_speed` and
+`blade_speed` on the owned E15 through Home Assistant, every write
+`confirmed` within 332 to 449 ms with the other fields unchanged
+([receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5833748272)).
 
 ### `GET /v1/mowers/{id}/map`
 
