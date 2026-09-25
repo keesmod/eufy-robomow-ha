@@ -21,6 +21,29 @@ files, because the mower id the integration stores depends on them. A rollback
 of the app restores the app backup that the update created, which brings back
 the previous version with its options and data.
 
+## 0.12.0 - 2026-09-25
+
+### Fresh map provisioning
+
+- Pins library 0.24.0. `map_provisioning_mode: cloud` explicitly enables fresh
+  map provisioning from the mower account before every acquisition. The
+  existing session renewal handles expired authentication before that read.
+- The default file route retains its behavior. File and cloud configuration
+  cannot be combined. A provisioning failure retains the last good map and
+  marks it stale. Shutdown aborts a pending RTC request before any map
+  connection opens. Account credentials and private map inputs remain outside
+  public state, diagnostics and logs.
+- Evidence: software checks cover renewal, fresh inputs, concurrent requests, failure
+  retention, shutdown and file compatibility. Fresh E15 map transfer and the
+  source-switch rehearsal remain acceptance work in #8.
+
+Upgrade: back up options and the private data directory, install the matching
+app, then explicitly select cloud provisioning for the intended map owner.
+The session file gains private MQTT credentials without changing mower ids.
+Keep the external Android source recoverable. Rollback: restore the 0.11.0 app
+backup, including its options and data, and the previous map-source option.
+The integration's map-source contract is unchanged. No mower release is published.
+
 ## 0.11.0 - 2026-09-25
 
 ### Work parameters

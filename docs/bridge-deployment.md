@@ -117,11 +117,20 @@ The app data lives in the app's `/data`, which Home Assistant backups include.
 
 ## Map provisioning (optional)
 
-The read-only map route needs a private provisioning file that the operator
-supplies and keeps fresh, see
+For fresh account-based provisioning, set app option
+`map_provisioning_mode: cloud`, or environment variable
+`EUFY_MOWER_MAP_PROVISIONING_MODE=cloud`. Leave `map_provisioning_file` unset.
+Bridge 0.12.0 on library 0.24.0 then requests private provisioning for each
+acquisition and uses its existing session renewal when needed. No file needs
+manual renewal. Back up the private data directory and options before enabling
+this experimental route. Native map acceptance and controlled source migration
+remain required before retiring the existing external map source.
+
+The default file route remains available. The operator supplies a private file
+and keeps it fresh, see
 [Map provisioning](../bridge/README.md#map-provisioning) in the bridge README
 for its content, expiry and rules. The bridge reads it for every acquisition
-demand and never obtains, stores or logs it. Without the file the route
+demand and never stores or logs its contents. Without cloud mode or a file the route
 answers `404` and `routes.maps` stays `false`.
 
 Docker: keep the file in a private directory on the host, owned by uid 1000
@@ -153,7 +162,7 @@ Assistant OS machine, give it to uid 1000 with mode `0600` (for example
 follows the documented Supervisor syntax and has not been exercised on a
 Supervisor yet.
 
-Then choose the map source `bridge` in the integration's options. The
+After native acceptance, choose the map source `bridge` in the integration's options. The
 integration refuses it while the bridge does not report `routes.maps`. The
 map source URL stays stored, switching the map source back to `external` is
 the manual recovery path.
