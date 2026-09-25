@@ -116,6 +116,32 @@ def test_parse_map_snapshot_falls_back_to_navigation_position() -> None:
     assert snapshot.mower_position == Point(11, 12)
 
 
+def test_live_coverage_resets_for_a_different_map_with_the_same_area() -> None:
+    previous = parse_map_snapshot(map_payload(map_id=539), clean_path_payload(), b"")
+    current = parse_map_snapshot(map_payload(map_id=540), b"", b"")
+
+    assert previous.cleaned_paths
+    assert merge_live_snapshots(previous, current) is current
+    assert current.cleaned_paths == ()
+
+
+def test_live_coverage_survives_an_area_change_of_the_same_map() -> None:
+    previous = parse_map_snapshot(map_payload(total_area=1200), clean_path_payload(), b"")
+    current = parse_map_snapshot(map_payload(total_area=1250), b"", b"")
+
+    merged = merge_live_snapshots(previous, current)
+
+    assert merged.map_id == 539
+    assert merged.cleaned_paths == previous.cleaned_paths
+
+
+def test_total_area_cannot_stand_in_for_a_missing_map_id() -> None:
+    payload = message(2, message(1, integer(16, 539)))
+
+    with pytest.raises(MapDecodeError, match="map identifier"):
+        parse_map_snapshot(payload, b"", b"")
+
+
 def test_parse_map_snapshot_keeps_sparse_straight_mowing_pass_connected() -> None:
     clean_path = b"".join(
         message(7, message(1, point(x, y))) for x, y in ((100, -5000), (100, 1000))
@@ -198,7 +224,7 @@ def test_merge_live_snapshots_resets_when_map_changes() -> None:
 
 
 def test_parse_map_snapshot_rejects_missing_boundary() -> None:
-    payload = message(2, message(1, integer(16, 1)))
+    payload = message(2, message(1, integer(1, 1)))
 
     with pytest.raises(MapDecodeError, match="boundary"):
         parse_map_snapshot(payload, b"", b"")
@@ -225,7 +251,7 @@ def test_parse_map_snapshot_rejects_malformed_protobuf(
 def test_parse_map_snapshot_rejects_coordinate_outside_sint32() -> None:
     oversized_coordinate = integer(1, 0x1_0000_0000)
     boundary = b"".join(message(1, oversized_coordinate) for _ in range(3))
-    record = integer(16, 1) + message(10, message(3, boundary))
+    record = integer(1, 1) + message(10, message(3, boundary))
 
     with pytest.raises(MapDecodeError, match="sint32"):
         parse_map_snapshot(message(2, message(1, record)), b"", b"")
@@ -240,7 +266,7 @@ def test_parse_map_snapshot_skips_point_message_without_coordinates() -> None:
             message(1, point(0, 10)),
         )
     )
-    record = integer(16, 1) + message(10, message(3, boundary))
+    record = integer(1, 1) + message(10, message(3, boundary))
 
     snapshot = parse_map_snapshot(message(2, message(1, record)), b"", b"")
 

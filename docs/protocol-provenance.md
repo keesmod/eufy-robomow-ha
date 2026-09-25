@@ -190,6 +190,16 @@ alongside field 4 on 2026-09-06 and at 17:21 UTC on 2026-09-24, but not at
 cloud and DP 1 false, the app showed its idle controls in the dock, as with the
 default payload. The mission status schema names field 4 = 2 hibernate.
 
+## Map identity
+
+Map-record field 1 is the map id. Field 16 is the total area. The original
+app's parser establishes both fields, as recorded in the library's
+[map geometry](https://github.com/keesmod/eufy-mega-client/blob/ed6d3e2/docs/MAP_GEOMETRY.md).
+Before integration 0.15.2 the renderer and live-coverage merge used field 16
+as the id. Since 0.15.2 they use field 1. Equal areas must not make two maps
+share their coverage, and a changed area must not reset coverage of the same
+map. Tests use synthetic maps with deliberately different ids and areas.
+
 ## Current map-position interpretation
 
 The E15 map record's field 8 and the latest clean-path position have been

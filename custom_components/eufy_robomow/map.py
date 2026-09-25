@@ -84,7 +84,7 @@ def parse_map_snapshot(
         clean_path = _decode_message(clean_path_payload)
         navigation_path = _decode_message(navigation_path_payload)
 
-        map_id = _required_integer(map_record, 16, "map identifier")
+        map_id = _required_integer(map_record, 1, "map identifier")
         boundary = _decode_boundary(map_record)
         cleaned_paths, tracking_position = _decode_cleaned_paths(clean_path)
 

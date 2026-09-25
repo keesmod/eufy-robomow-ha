@@ -80,6 +80,8 @@ def forbidden_zone(
 
 def map_payload(
     *,
+    map_id: int = 539,
+    total_area: int = 1200,
     include_embedded_position: bool = True,
     forbidden_zones: tuple[bytes, ...] = (),
 ) -> bytes:
@@ -100,11 +102,12 @@ def map_payload(
     )
     record = b"".join(
         (
+            integer(1, map_id),
             embedded_position,
             message(10, message(3, boundary)),
             message(11, restriction),
             *(message(12, zone) for zone in forbidden_zones),
-            integer(16, 539),
+            integer(16, total_area),
             message(18, pathway),
             message(26, integer(1, 1) + message(2, base_area)),
         )
