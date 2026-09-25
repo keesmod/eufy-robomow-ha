@@ -535,9 +535,12 @@ Evidence: the library's
 and its
 [settings schema receipt](https://github.com/keesmod/eufy-mega-client/blob/main/docs/research/E15_SETTINGS_SCHEMA_2026-09-25.md)
 record the data points, the owned E15's declarations and the app's input
-checks. No setting has been written through the bridge on the owned E15 yet,
-that supervised change, read-back and restore is part of
-keesmod/eufy-robomow-ha#8.
+checks. On 2026-09-25 the route changed the owned E15's mow height from 40 to
+45 mm and back to 40 through Home Assistant, with the mower in the dock and
+the owner at the mower. Both writes were `confirmed`, a later fresh query
+reported each value and the official app showed each one, see the library's
+[settings window receipt](https://github.com/keesmod/eufy-mega-client/blob/main/docs/research/E15_SETTINGS_WINDOW_2026-09-25.md).
+Volume and the two switches have not been written on the mower yet.
 
 ### `GET /v1/mowers/{id}/map`
 
