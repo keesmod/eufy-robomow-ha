@@ -296,5 +296,9 @@ those three stay read only in bridge mode. The local backend still writes all
 five through its cloud client, as before. On 2026-09-25 the owned E15 merged
 a partial DP 155 message with only the blade speed, written over the LAN
 outside the library, and reported the complete message within about 0.2
-seconds ([receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5832883255)). No work parameter has
-been written through the bridge on hardware yet.
+seconds ([receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5832883255)). In a third window
+the same day, integration 0.15.0 and bridge 0.11.0 on library 0.23.0 changed
+Travel Speed from normal to fast and back and Blade Speed from normal to fast
+and back through Home Assistant in bridge mode. Every write was confirmed from
+a fresh report that kept the other fields, and later cloud readings matched
+([receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5833748272)).
