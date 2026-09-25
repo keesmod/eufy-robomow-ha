@@ -19,14 +19,19 @@ from .const import (
     DOMAIN,
     BACKEND_BRIDGE,
     CONF_DEVICE_ID,
-    DP_PAUSED,
-    DP_PROGRESS,
-    RETURNING_THRESHOLD,
 )
 from .coordinator import EufyMowerCoordinator
-from .telemetry import task_active
 
 _LOGGER = logging.getLogger(__name__)
+
+# The local backend's readings, see telemetry.read_local_activity: the local
+# status reply with DP 107 from a cloud poll taken since it took its shape.
+LOCAL_ACTIVITIES: dict[str, LawnMowerActivity] = {
+    "mowing": LawnMowerActivity.MOWING,
+    "paused": LawnMowerActivity.PAUSED,
+    "returning": LawnMowerActivity.RETURNING,
+    "docked": LawnMowerActivity.DOCKED,
+}
 
 # The library's typed activity, only when it is reported from a confirmed
 # definition. Nothing here is inferred from age, absence or inactivity. With
@@ -109,42 +114,11 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
             # command the activity would stay unknown and resume unreachable.
             evidence = self.coordinator.bridge_activity_evidence
             return BRIDGE_ACTIVITIES.get(evidence[0]) if evidence else None
-        dps = self.coordinator.local_dps
-        dp1 = task_active(dps)
-        if type(dp1) is not bool:
-            return None
-        dp2 = dps.get(DP_PAUSED, False)
-        dp118 = dps.get(DP_PROGRESS, 0)
-
-        # Paused: task active but movement stopped
-        if dp1 and dp2:
-            return LawnMowerActivity.PAUSED
-
-        if dp1 and not dp2:
-            # DP118 5–99 → mower returning to base
-            if RETURNING_THRESHOLD <= dp118 < 100:
-                try:
-                    return LawnMowerActivity.RETURNING
-                except AttributeError:
-                    return LawnMowerActivity.MOWING
-            if dp118 == 100:
-                # DP118 stays at 100 after a map save, so this shape is a later
-                # task that mows or the mower resting in the dock with its task
-                # flag set, charging or after a session, or saving the map at the
-                # arrival before DP 1 turns false. DP 107 from a cloud poll taken
-                # since the shape appeared tells them apart. Without it the
-                # reading stays MOWING, as before.
-                status = self.coordinator.ambiguous_task_status
-                if status in ("idle", "map_saving"):
-                    return LawnMowerActivity.DOCKED
-                if status == "paused":
-                    return LawnMowerActivity.PAUSED
-                if status == "returning":
-                    return LawnMowerActivity.RETURNING
-            return LawnMowerActivity.MOWING
-
-        # DP1 absent or False → no active session → docked / idle
-        return LawnMowerActivity.DOCKED
+        # DP 1, DP 2 and DP 118 from the local status reply, and DP 107 from a
+        # cloud poll taken since that reply took its shape. DP 107 shows the drive
+        # home, which runs with DP 1 false, and the map save at the arrival.
+        reading = self.coordinator.local_activity
+        return LOCAL_ACTIVITIES.get(reading) if reading else None
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -156,7 +130,7 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
         }
         if self.coordinator.backend != BACKEND_BRIDGE:
             # DP 107 as the last cloud poll reported it, read with the confirmed
-            # definitions: mowing, paused, returning, idle or None.
+            # definitions: mowing, paused, returning, map_saving, idle or None.
             attributes["robot_status"] = self.coordinator.cloud_robot_status
         if self.coordinator.backend == BACKEND_BRIDGE:
             attributes["bridge_status"] = self.coordinator.bridge_status

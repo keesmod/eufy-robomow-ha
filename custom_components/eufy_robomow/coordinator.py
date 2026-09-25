@@ -18,7 +18,7 @@ from .bridge_client import (
 )
 from .commands import MowerCommand
 from .sessions import SessionStore
-from .telemetry import robot_status, task_ambiguous
+from .telemetry import read_local_activity, robot_status, status_shape
 from .const import CMD_START, CMD_RESUME, CMD_PAUSE, CMD_DOCK
 from datetime import datetime, timedelta
 
@@ -66,6 +66,19 @@ BRIDGE_TASK_ACTIVITIES = frozenset({"mowing", "paused", "returning"})
 # cloud DPS carry DP 107, which the local status reply never does.
 AMBIGUOUS_CLOUD_INTERVAL = 60
 
+# The local readings of a running task. When DP 1 turns false after one of them,
+# the task has ended or a stop was sent and the mower drives home with DP 1
+# false, 25 to 60 seconds on the owned E15 in September 2026. Only DP 107 shows
+# that drive, so the cloud is asked at every local poll for RETURN_WATCH_FAST
+# seconds, then every AMBIGUOUS_CLOUD_INTERVAL while DP 107 still reads
+# returning. The map-saving or default payload ends the drive.
+RUNNING_READINGS = frozenset({"mowing", "paused", "returning"})
+RETURN_WATCH_FAST = 120
+AT_REST_STATUSES = frozenset({"map_saving", "idle"})
+# Spacing of those requests, just under the local poll interval, so every poll
+# asks at most once and a refresh requested in between does not ask again.
+RETURN_CLOUD_INTERVAL = POLL_INTERVAL - 1
+
 # How long the activity a confirmed bridge command reflected stands in for the
 # polled one. The E15 answers state queries without DP 107, so after this bound
 # the mower may have changed by itself (its app schedule, the app, a low battery)
@@ -107,11 +120,19 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
     # ``observed_at`` in bridge mode.
     last_local_update: datetime | None = None
     # The local backend's DP 107 from the last successful cloud poll, read with
-    # the confirmed definitions, when that poll ran, and since when the local
-    # status has been ambiguous.
+    # the confirmed definitions, and when that poll ran. The shape of the last
+    # local status reply (see telemetry.status_shape) and since when it holds:
+    # only a cloud poll taken since then decides the reading.
     cloud_robot_status: str | None = None
     cloud_polled_at: datetime | None = None
-    ambiguous_since: datetime | None = None
+    local_shape: str | None = None
+    shape_since: datetime | None = None
+    # The reading after the previous local poll, the monotonic time DP 1 turned
+    # false after a running task, and whether the current task shape began while
+    # the drive home was watched, which is the dock arrival.
+    _previous_reading: str | None = None
+    _return_watch_started: float | None = None
+    _arrival: bool = False
     # Whether the bridge's last state answer reported ``routes.control`` and the
     # control opt-in it carried (classes, max_state_age_ms, read_back_ms).
     bridge_routes_control: bool = False
@@ -172,7 +193,11 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self._cloud_last_fetch: float = float("-inf")
         self.cloud_robot_status = None
         self.cloud_polled_at = None
-        self.ambiguous_since = None
+        self.local_shape = None
+        self.shape_since = None
+        self._previous_reading = None
+        self._return_watch_started = None
+        self._arrival = False
         # Consecutive cloud failures — used for exponential backoff
         self._cloud_consecutive_failures: int = 0
         # Track consecutive local-poll failures to know when to recreate the device
@@ -214,19 +239,80 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         return True
 
     @property
-    def ambiguous_task_status(self) -> str | None:
-        """DP 107 from a cloud poll that ran after the local status became ambiguous.
+    def fresh_cloud_status(self) -> str | None:
+        """DP 107 from a cloud poll that ran since the local status took its shape.
 
-        None while the local status is not ambiguous or no such poll succeeded
-        yet, so an older cloud value never decides the current shape.
+        None while no such poll succeeded, so an older cloud value never decides
+        the current shape.
         """
         if (
-            self.ambiguous_since is None
+            self.shape_since is None
             or self.cloud_polled_at is None
-            or self.cloud_polled_at < self.ambiguous_since
+            or self.cloud_polled_at < self.shape_since
         ):
             return None
         return self.cloud_robot_status
+
+    @property
+    def local_activity(self) -> str | None:
+        """The local backend's activity: the last status reply with fresh DP 107."""
+        return read_local_activity(self.local_dps, self.fresh_cloud_status)
+
+    def _return_watch_open(self, now: float) -> bool:
+        """DP 1 turned false after a running task and the drive home may still run.
+
+        The watch ends with the map-saving or default payload, a new local shape,
+        or after RETURN_WATCH_FAST seconds unless DP 107 still reads returning.
+        """
+        started = self._return_watch_started
+        if started is None or self.local_shape != "no_task":
+            return False
+        status = self.fresh_cloud_status
+        if status in AT_REST_STATUSES:
+            return False
+        return now - started <= RETURN_WATCH_FAST or status == "returning"
+
+    def _activity_refresh_due(self, now: float) -> bool:
+        """Whether the local status needs DP 107 from the cloud now, also at night.
+
+        The ambiguous shape asks at once and then every AMBIGUOUS_CLOUD_INTERVAL.
+        A map save, and the dock arrival after a watched drive home, ask once.
+        The drive home asks at once and at every local poll while it is watched.
+        A failed cloud poll keeps its backoff, so none of these repeats it.
+        """
+        if self._cloud_consecutive_failures or self.shape_since is None:
+            return False
+        fresh = self.cloud_polled_at is not None and self.cloud_polled_at >= self.shape_since
+        since_fetch = now - self._cloud_last_fetch
+        if self.local_shape == "ambiguous":
+            return not fresh or since_fetch >= AMBIGUOUS_CLOUD_INTERVAL
+        if self.local_shape == "map_save" or (self.local_shape == "task" and self._arrival):
+            return not fresh
+        if self._return_watch_open(now):
+            if not fresh:
+                return True
+            assert self._return_watch_started is not None
+            if now - self._return_watch_started <= RETURN_WATCH_FAST:
+                return since_fetch >= RETURN_CLOUD_INTERVAL
+            return since_fetch >= AMBIGUOUS_CLOUD_INTERVAL
+        return False
+
+    def _track_local_shape(self, now: float) -> None:
+        """Follow the local status shape after a successful poll.
+
+        A new shape needs a new cloud answer. DP 1 turning false after a running
+        task opens the drive-home watch, and a task shape that follows an open
+        watch is the dock arrival, whose map save the cloud confirms.
+        """
+        shape = status_shape(self.local_dps)
+        if shape == self.local_shape:
+            return
+        self._arrival = shape == "task" and self._return_watch_open(now)
+        self._return_watch_started = (
+            now if shape == "no_task" and self._previous_reading in RUNNING_READINGS else None
+        )
+        self.local_shape = shape
+        self.shape_since = self.last_local_update
 
     @property
     def bridge_activity_evidence(self) -> tuple[str, str, datetime | None] | None:
@@ -390,11 +476,8 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             self.command.observe(self.local_generation, self.local_dps)
         if self.session_store:
             self.session_store.observe(self.local_dps, self.last_local_update)
-        if task_ambiguous(self.local_dps):
-            if self.ambiguous_since is None:
-                self.ambiguous_since = self.last_local_update
-        else:
-            self.ambiguous_since = None
+        now = time.monotonic()
+        self._track_local_shape(now)
 
         _LOGGER.debug("Local DPS update received (%d keys)", len(dps))
 
@@ -406,26 +489,17 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         #      _cloud_last_fetch is updated on BOTH success AND failure so a failed
         #      login is not retried every 10 s (which would hammer the Eufy API and
         #      interfere with other integrations sharing the same account).
-        now = time.monotonic()
         if command_pending:
             self._carry_forward_cloud_data(dps, local_dp_keys)
         elif self.cloud_client is not None:
             _sun = self.hass.states.get("sun.sun")
             _sun_below_horizon = _sun is not None and _sun.state == "below_horizon"
-            # An ambiguous local status needs DP 107 from the cloud at once and then
-            # every AMBIGUOUS_CLOUD_INTERVAL, also at night, because the mower may
-            # rest in the dock or mow. Failures keep their backoff.
-            ambiguous_refresh = (
-                self.ambiguous_since is not None
-                and self._cloud_consecutive_failures == 0
-                and (
-                    self.cloud_polled_at is None
-                    or self.cloud_polled_at < self.ambiguous_since
-                    or now - self._cloud_last_fetch >= AMBIGUOUS_CLOUD_INTERVAL
-                )
-            )
+            # Where the local status alone cannot show the activity, DP 107 is
+            # needed from the cloud now, also at night: the ambiguous shape, a map
+            # save and the drive home after a task. Failures keep their backoff.
+            activity_refresh = self._activity_refresh_due(now)
 
-            if _sun_below_horizon and not ambiguous_refresh:
+            if _sun_below_horizon and not activity_refresh:
                 _LOGGER.debug("Sun below horizon — skipping cloud poll")
                 self._carry_forward_cloud_data(dps, local_dp_keys)
             else:
@@ -433,7 +507,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
                     CLOUD_POLL_INTERVAL * (2**self._cloud_consecutive_failures),
                     _CLOUD_MAX_BACKOFF,
                 )
-                if ambiguous_refresh or now - self._cloud_last_fetch >= backoff:
+                if activity_refresh or now - self._cloud_last_fetch >= backoff:
                     try:
                         raw_cloud_dps, cloud_settings = await self.hass.async_add_executor_job(
                             self.cloud_client.get_all_dps
@@ -498,6 +572,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             for cb in list(self._new_dp_callbacks):
                 cb(dps)
         self._known_dps = current_all_keys
+        self._previous_reading = self.local_activity
 
         return dps
 

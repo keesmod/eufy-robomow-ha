@@ -70,8 +70,39 @@ Defogging phase shares the `mowing` payload. The transitional first frame, the
 map-saving payload, field 6 = 1 and the default payload are withheld, so a
 query that carries one of them reports `status` as `invalid`, and a query
 without DP 107 reports `missing`. Nothing is derived from the age of a report
-or the absence of a data point. The local backend's reading of DP 1, DP 2 and
-DP 118 is unchanged by this evidence.
+or the absence of a data point.
+
+The local backend's status reply never carries DP 107, but the cloud DPS do.
+Since integration 0.12.1 the local backend reads DP 107 from them with the
+same three definitions, the exact map-saving payload and the default payload,
+and only a cloud poll taken since the local status took its current shape
+decides. It asks where DP 1, DP 2 and DP 118 cannot show the activity. The
+first case is the shape DP 1 true, DP 2 false and DP 118 at 100, where a task
+that mows looks like the mower resting in the dock. Since 0.13.2 it also asks
+during the drive home after a task, which runs with DP 1 false, and during the
+map save, in which DP 118 rises from 1 to 100 with DP 1 true at each dock
+arrival and after the app's Stop. The recorder showed that sequence at every
+natural end of a task from 2026-09-14 to 2026-09-24: DP 1 false for 50 to 60
+seconds, then the map save. The library's stop window of 2026-09-20 recorded
+the matching LAN reports. The default payload means `docked` only in the
+first shape, where the app showed the mower idle or charging in the dock.
+
+Field 4 = 2 as the only record of DP 107 is observed and not read. The cloud
+reported it while the mower stood docked with DP 1 false:
+
+- on 2026-09-06 after an app selection in the Zone mode, see
+  [zone-control-research.md](zone-control-research.md);
+- on 2026-09-24 at 10:15 and 17:21 UTC. The integration's polls first read an
+  unread payload between 10:02 and 10:07 UTC and between 13:51 and 13:56 UTC,
+  five to fifteen minutes after a rest in the dock ended;
+- on 2026-09-25 at 06:47 UTC, with an unread payload since the first daytime
+  poll at 05:30 UTC.
+
+When the rest in the dock began at 20:30 UTC on 2026-09-24 with DP 1 true, DP
+107 was the default payload again. DP 152 carried a top-level field 5 = 1
+alongside field 4 on 2026-09-06 and at 17:21 UTC on 2026-09-24, but not at
+06:47 UTC on 2026-09-25. What field 4 means and what the app shows at the same
+time are not established.
 
 ## Current map-position interpretation
 
