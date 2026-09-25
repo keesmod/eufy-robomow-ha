@@ -21,6 +21,27 @@ The session store has kept storage version 1 since 0.7.0 and the options have
 kept their keys since 0.11.0. An older version ignores an option it does not
 know, but saving the options there drops it.
 
+## 0.15.3 - 2026-09-25
+
+### Pathways inside the lawn
+
+- The map no longer draws a pathway of map-record field 18 that never leaves
+  the lawn. A pathway is the route between separate lawns, and the eufy app
+  did not show such a pathway on the owner's map. A pathway with at least one
+  point outside the lawn is drawn in full, as before. The map snapshot keeps
+  every pathway.
+- The first renderer had the same rule until 0.5.1 removed it.
+- Upgrade: replace the integration folder, run the configuration check and
+  restart Home Assistant. The bridge app needs no update. Rollback: install
+  0.15.2, and the map draws the pathway inside the lawn again.
+- Evidence: the owner's map has one lawn and two pathways. The one across the
+  lawn edge matches the app. The app did not show the other in two read-only
+  comparisons on 2026-09-25
+  ([first](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5834020227),
+  [second](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5834315930)),
+  and the owner asked Home Assistant to match. Software-verified with synthetic
+  geometry.
+
 ## 0.15.2 - 2026-09-25
 
 ### Map identity
