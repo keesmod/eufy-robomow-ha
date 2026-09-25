@@ -42,7 +42,7 @@ app, then explicitly select cloud provisioning for the intended map owner.
 The session file gains private MQTT credentials without changing mower ids.
 Keep the external Android source recoverable. Rollback: restore the 0.11.0 app
 backup, including its options and data, and the previous map-source option.
-The integration remains 0.15.2. No mower release is published.
+The integration's map-source contract is unchanged. No mower release is published.
 
 ## 0.11.0 - 2026-09-25
 

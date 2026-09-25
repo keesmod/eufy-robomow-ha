@@ -387,7 +387,7 @@ export interface BridgeState {
   };
   mowers: { count: number | null; discovered_at: string | null; error: string | null };
   /**
-   * `control` is true only in `control` mode, `maps` only with a map provisioning file and
+   * `control` is true only in `control` mode, `maps` only with cloud or file provisioning and
    * `settings` only with `settings_mode: write`.
    */
   routes: { discovery: true; state: true; control: boolean; maps: boolean; settings: boolean };
