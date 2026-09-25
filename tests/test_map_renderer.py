@@ -66,8 +66,50 @@ def test_render_map_svg_is_deterministic_and_script_free() -> None:
     assert b'class="base-area"' in rendered
     assert rendered.count(b'class="obstacle"') == 1
     assert rendered.count(b'class="forbidden-zone"') == 1
-    assert rendered.count(b'class="pathway"') == 2
+    assert rendered.count(b'class="pathway"') == 1
     assert b'class="mower-marker"' in rendered
+
+
+def test_render_map_svg_draws_only_pathways_that_leave_the_lawn() -> None:
+    snapshot = _snapshot()
+    rendered = render_map_svg(snapshot).decode()
+
+    # The snapshot keeps both pathways. The renderer draws the one that leaves
+    # the lawn in full, including its end inside the lawn, and never the one
+    # that stays inside.
+    assert len(snapshot.pathways) == 2
+    drawn = re.findall(r'<polyline class="pathway" points="([^"]+)"', rendered)
+    assert len(drawn) == 1
+    assert rendered.count('class="pathway-center"') == 1
+    boundary = re.search(r'<polygon class="boundary" points="([^"]+)"', rendered)
+    assert boundary is not None
+    lawn_left = min(float(pair.split(",")[0]) for pair in boundary.group(1).split())
+    drawn_x = [float(pair.split(",")[0]) for pair in drawn[0].split()]
+    assert len(drawn_x) == len(snapshot.pathways[0])
+    assert drawn_x[0] < lawn_left < drawn_x[-1]
+
+
+def test_render_map_svg_draws_pathways_outside_the_lawn() -> None:
+    snapshot = MapSnapshot(
+        map_id=539,
+        boundary=(Point(0, 0), Point(100, 0), Point(100, 100), Point(0, 100)),
+        base_areas=(),
+        no_go_areas=(),
+        pathways=(
+            (Point(120, 10), Point(150, 10), Point(150, 40)),
+            (Point(10, 10), Point(20, 20), Point(30, 10)),
+            (Point(50, 50), Point(150, 50)),
+        ),
+        cleaned_paths=(),
+        mower_position=None,
+    )
+
+    rendered = render_map_svg(snapshot).decode()
+    drawn = re.findall(r'<polyline class="pathway" points="([^"]+)"', rendered)
+
+    # Outside the lawn and across its edge are drawn, inside it is not.
+    assert [len(points.split()) for points in drawn] == [3, 2]
+    assert re.findall(r'<polyline class="pathway-center" points="([^"]+)"', rendered) == drawn
 
 
 def test_render_map_svg_draws_forbidden_zones_as_red_dashed_zones() -> None:

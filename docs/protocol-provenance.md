@@ -246,6 +246,28 @@ forbidden zone with only an id and a boundary of four distinct corners, so its
 shape is the default rectangle, and four obstacles of four points each. No
 coordinate was recorded.
 
+The app's product script can only delete physical forbidden zones (field 14)
+and has no edit operation for obstacles, so the mower creates both. The
+owner's map carries no physical forbidden zone. Its obstacles are drawn as the
+dark polygons.
+
+## Map pathways
+
+Map-record field 18 holds the pathways, with 1 points and 2 id. A pathway is
+the route the mower drives between separate lawns, as Eufy's
+[multi-lawn article](https://service.eufy.com/article-description/How-many-maps-can-the-E15-and-E18-Robot-Lawn-Mowers-support-Are-they-capable-of-working-on-multiple-lawns)
+describes. The app's product script can only delete them, so the mower records
+them when a pathway is set up.
+
+The owner's map of 2026-09-25 has one lawn region and two pathways. One runs
+from the dock across the lawn edge, and the app draws it. The other never
+leaves the lawn, and the app did not show it in two read-only comparisons that
+day (#8). The app's Live button covers part of its map in those comparisons.
+At the owner's request integration 0.15.3 draws a pathway only when at least
+one of its points lies outside the lawn boundary, and then draws all of it. The snapshot keeps every pathway. The first renderer had the same rule
+until #3 removed it without an app comparison. This is an `observed`
+presentation rule, not a protocol contract.
+
 ## Map bundle through the bridge
 
 Mower bridge 0.7.0 serves the map bundle this integration already validates
