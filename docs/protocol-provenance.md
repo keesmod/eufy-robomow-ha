@@ -255,6 +255,11 @@ bridge mode in either direction, as the owner decided on 2026-09-25 in issue
 The local backend's switches are unchanged. Every bridge write is one request
 that the library turns into one fresh query, one write and a read-back of the
 written value, and it is never retried. The mapping of the app's labels to DP
-141 and DP 133 is not established from the app's strings alone. The writes are
-software-verified. The supervised change, read-back and restore on the owned
-E15 is part of issue #8.
+141 and DP 133 is not established from the app's strings alone. On 2026-09-25
+a supervised window in issue #8 changed the mow height from 40 to 45 mm and
+back to 40 through integration 0.14.2 and bridge 0.10.1 on library 0.22.0,
+with the mower in the dock. Both writes were confirmed, a later fresh query
+reported each value and the app's Grass Height followed them, recorded in the
+library's
+[settings window receipt](https://github.com/keesmod/eufy-mega-client/blob/main/docs/research/E15_SETTINGS_WINDOW_2026-09-25.md).
+The other three writable settings are software-verified only.
