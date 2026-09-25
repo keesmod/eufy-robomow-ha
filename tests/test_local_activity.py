@@ -416,23 +416,65 @@ def test_the_watch_ends_after_two_minutes_unless_the_mower_still_drives_home(tmp
     _run(tmp_path, [RETURNING_PAYLOAD, RETURNING_PAYLOAD, DEFAULT_PAYLOAD], returning)
 
 
-def test_a_dock_command_is_confirmed_locally_before_the_drive_home_is_asked_for(tmp_path: Path) -> None:
+def test_the_poll_that_confirms_a_dock_asks_for_the_drive_home(tmp_path: Path) -> None:
     async def scenario(coordinator: EufyMowerCoordinator, entity: EufyRobomowEntity, cloud: _FakeCloud, poll: Poll) -> None:
         await poll(MOWING, 1000)
         command = MowerCommand("dock", coordinator.local_generation)
         command.state, command.sent_monotonic = "pending", 1005.0
         coordinator.command = command
 
-        await poll(DRIVING_HOME, 1006)
-        assert command.state == "confirmed" and command.evidence == "task_inactive"
-        assert cloud.calls == 0, "the confirming poll never waits for the cloud"
-        assert entity.activity == LawnMowerActivity.DOCKED
+        await poll(MOWING, 1005.5)
+        assert command.state == "pending"
+        assert cloud.calls == 0, "a pending command keeps the cloud out"
 
-        await poll(DRIVING_HOME, 1016)
-        assert cloud.calls == 1
+        await poll(DRIVING_HOME, 1015)
+        assert command.state == "confirmed" and command.evidence == "task_inactive"
+        assert cloud.calls == 1, "the confirmation came first, then the cloud was asked"
         assert entity.activity == LawnMowerActivity.RETURNING
 
     _run(tmp_path, [RETURNING_PAYLOAD], scenario)
+
+
+def test_a_start_while_resting_in_the_dock_is_confirmed_by_the_cloud(tmp_path: Path) -> None:
+    async def scenario(coordinator: EufyMowerCoordinator, entity: EufyRobomowEntity, cloud: _FakeCloud, poll: Poll) -> None:
+        await poll(RESTING_IN_DOCK, 1000)
+        assert cloud.calls == 1
+        assert entity.activity == LawnMowerActivity.DOCKED
+        command = MowerCommand("start", coordinator.local_generation, before=dict(coordinator.local_dps))
+        command.state, command.sent_monotonic = "pending", 1005.0
+        coordinator.command = command
+
+        await poll(RESTING_IN_DOCK, 1006)
+        assert cloud.calls == 2, "the local status cannot show the start, DP 107 can"
+        assert command.state == "pending", "the transitional first frame is not read"
+
+        await poll(RESTING_IN_DOCK, 1010)
+        assert cloud.calls == 2, "at most once per local poll"
+
+        await poll(RESTING_IN_DOCK, 1016)
+        assert cloud.calls == 3
+        assert command.state == "confirmed" and command.evidence == "cloud_mowing_reported"
+        assert entity.activity == LawnMowerActivity.MOWING
+
+    _run(tmp_path, [DEFAULT_PAYLOAD, _b64(0x08, 0x02), MOWING_PAYLOAD], scenario)
+
+
+def test_a_pending_start_the_local_status_can_show_never_asks_the_cloud(tmp_path: Path) -> None:
+    async def scenario(coordinator: EufyMowerCoordinator, entity: EufyRobomowEntity, cloud: _FakeCloud, poll: Poll) -> None:
+        await poll(DOCKED, 1000)
+        command = MowerCommand("start", coordinator.local_generation, before=dict(coordinator.local_dps))
+        command.state, command.sent_monotonic = "pending", 1005.0
+        coordinator.command = command
+
+        await poll(DOCKED, 1006)
+        assert cloud.calls == 0
+        assert command.state == "pending"
+
+        await poll(RESTING_IN_DOCK, 1016)
+        assert command.state == "confirmed" and command.evidence == "task_started"
+        assert cloud.calls == 1, "confirmed locally, then the ambiguous shape asks as before"
+
+    _run(tmp_path, [MOWING_PAYLOAD], scenario)
 
 
 def test_the_drive_home_is_asked_for_in_daylight_beside_the_regular_poll(tmp_path: Path) -> None:

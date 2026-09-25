@@ -297,6 +297,31 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             return since_fetch >= AMBIGUOUS_CLOUD_INTERVAL
         return False
 
+    def _command_cloud_due(self, now: float) -> bool:
+        """A pending start or resume that only DP 107 from the cloud can confirm.
+
+        While the mower rests in the dock DP 1 is already true and DP 118 at 100,
+        so a start leaves the local status unchanged, although on 2026-09-25 the
+        mower started and the cloud showed it within 4 seconds. Then the cloud is
+        asked at every local poll that began after the write while the command
+        is pending, and a failed cloud poll keeps its backoff.
+        """
+        command = self.command
+        if (
+            command is None
+            or command.state != "pending"
+            or command.action not in ("start", "resume")
+            or now <= command.sent_monotonic
+            or self._cloud_consecutive_failures
+            or self.local_shape != "ambiguous"
+            or status_shape(command.before or {}) != "ambiguous"
+        ):
+            return False
+        return (
+            self._cloud_last_fetch < command.sent_monotonic
+            or now - self._cloud_last_fetch >= RETURN_CLOUD_INTERVAL
+        )
+
     def _track_local_shape(self, now: float) -> None:
         """Follow the local status shape after a successful poll.
 
@@ -468,7 +493,6 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self._consecutive_errors = 0
         dps: dict = result.get("dps", {})
         local_dp_keys: set[str] = set(dps.keys())
-        command_pending = self.command and self.command.state in ("sending", "pending")
         self.local_dps = dict(dps)
         self.local_generation += 1
         self.last_local_update = dt_util.utcnow()
@@ -478,6 +502,12 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             self.session_store.observe(self.local_dps, self.last_local_update)
         now = time.monotonic()
         self._track_local_shape(now)
+        # A command still pending after this poll keeps the cloud out, so its
+        # confirmation never waits for a cloud request. The poll that confirmed a
+        # command may ask, which shows the drive home right after a dock, and a
+        # start whose effect only DP 107 can show asks while it is pending.
+        command_pending = self.command is not None and self.command.state in ("sending", "pending")
+        command_cloud = self._command_cloud_due(now)
 
         _LOGGER.debug("Local DPS update received (%d keys)", len(dps))
 
@@ -489,7 +519,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         #      _cloud_last_fetch is updated on BOTH success AND failure so a failed
         #      login is not retried every 10 s (which would hammer the Eufy API and
         #      interfere with other integrations sharing the same account).
-        if command_pending:
+        if command_pending and not command_cloud:
             self._carry_forward_cloud_data(dps, local_dp_keys)
         elif self.cloud_client is not None:
             _sun = self.hass.states.get("sun.sun")
@@ -497,7 +527,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             # Where the local status alone cannot show the activity, DP 107 is
             # needed from the cloud now, also at night: the ambiguous shape, a map
             # save and the drive home after a task. Failures keep their backoff.
-            activity_refresh = self._activity_refresh_due(now)
+            activity_refresh = command_cloud or self._activity_refresh_due(now)
 
             if _sun_below_horizon and not activity_refresh:
                 _LOGGER.debug("Sun below horizon — skipping cloud poll")
@@ -529,6 +559,8 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
                         self._cloud_consecutive_failures = 0
                         self.cloud_robot_status = robot_status(raw_cloud_dps.get("107"))
                         self.cloud_polled_at = dt_util.utcnow()
+                        if command_cloud and self.command is not None:
+                            self.command.observe_cloud(self.cloud_robot_status)
                         _LOGGER.debug(
                             "Cloud poll: %d raw DPS merged, settings=%s",
                             len(raw_cloud_dps),
@@ -699,6 +731,10 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             if operation.state == "superseded":
                 raise HomeAssistantError("Command superseded by a later safety command")
         except TimeoutError as exc:
+            if operation.state == "confirmed":
+                # Confirmed during the refresh, whose cloud request then outlasted
+                # the bound. The confirmation stands.
+                return
             operation.finish("timeout")
             raise HomeAssistantError(
                 "Command sent, but the mower did not confirm its state within 35 seconds. "
