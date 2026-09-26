@@ -31,6 +31,7 @@ import {
   type MowerWorkParameterName,
   type MowerWorkParameterOutcome,
   type MowerWorkParameters,
+  type MowerCloudStatus,
 } from '@keesmod/eufy-mega-client';
 import { MOWER_ID, SETTINGS_MODE_WRITE, type BridgeConfig, type ControlConfig } from './config.ts';
 import { ApiError, BridgeError } from './errors.ts';
@@ -127,6 +128,25 @@ export const READ_ONLY_WORK_PARAMETER_KEYS: readonly string[] = ['edge_distance'
 export const DEFAULT_WORK_PARAMETERS_REFRESH_MS = 5 * 60_000;
 /** Longest a state answer waits for a running work parameter reading before it serves the last one. */
 export const DEFAULT_WORK_PARAMETERS_WAIT_MS = 3_000;
+/** Activity is read more often than settings, through the same authenticated cloud request. */
+export const DEFAULT_CLOUD_STATE_REFRESH_MS = 30_000;
+/** Receipt age limit, not a claim about the age of the device's cloud cache. */
+export const CLOUD_STATUS_MAX_AGE_MS = 90_000;
+
+export interface CloudStatusDocument {
+  source: 'cloud';
+  observed_at: string | null;
+  age_ms: number | null;
+  stale: boolean;
+  error: string | null;
+  status: MowerCloudStatus | { state: 'unavailable' };
+}
+
+interface CloudStatusEntry {
+  stored: { observedAt: string; status: MowerCloudStatus } | null;
+  error: string | null;
+  askedAt: number;
+}
 
 /** One writable work parameter as the state route serves it. */
 export interface WorkParameterDocument {
@@ -206,6 +226,7 @@ export interface BridgeDependencies {
   mapWatchIntervalMs?: number;
   workParametersRefreshMs?: number;
   workParametersWaitMs?: number;
+  cloudStateRefreshMs?: number;
   now?: () => number;
 }
 
@@ -266,6 +287,8 @@ export interface MowerStateDocument extends TelemetryFields {
   command: InFlightCommandDocument | null;
   /** The DP 155 work parameters, since bridge 0.11.0. Their own source and time, never merged into the query. */
   work_parameters: WorkParametersDocument;
+  /** Separately sourced cloud DP 107. Never a local report or command confirmation. */
+  cloud_status: CloudStatusDocument;
 }
 
 /** Contract 1 of `POST /v1/mowers/{id}/commands/{class}`. Raw reports and data points are never served. */
@@ -654,7 +677,8 @@ export class MowerBridge {
   /** The DP 155 work parameters per mower id, from the cloud or from a confirmed write. */
   #workParameters = new Map<string, WorkParametersEntry>();
   /** The cloud reading running per mower id. Concurrent state queries join it. */
-  #workParameterReads = new Map<string, Promise<void>>();
+  #cloudStateReads = new Map<string, Promise<void>>();
+  #cloudStatus = new Map<string, CloudStatusEntry>();
   /** Progress of the running command per mower id, served by the state route until it ends. */
   #inFlight = new Map<string, InFlightCommandDocument>();
   /** Present only with map provisioning. Construction does no I/O. */
@@ -909,8 +933,8 @@ export class MowerBridge {
     const open: OpenLocalSession =
       this.#dependencies.openLocalSession ?? ((target, options, signal) => mowers.openLocalSession(target, options, signal));
     const signal = this.#lifetime.signal;
-    // The cloud reading of the work parameters runs next to the LAN query, never inside it.
-    const parameters = this.#refreshWorkParameters(mowers, id);
+    // One cloud read supplies activity and work parameters alongside the independent LAN query.
+    const parameters = this.#refreshCloudState(mowers, id);
     try {
       const session = await open(id, { host, timeoutMs: this.#config.localTimeoutMs }, signal);
       let telemetry: MowerTelemetry;
@@ -946,39 +970,46 @@ export class MowerBridge {
   }
 
   /**
-   * Asks the cloud for one mower's work parameters once the last reading, the last failed attempt
-   * or the last confirmed write is older than the refresh age. Concurrent state queries join the
-   * running reading. Never rejects: a failure keeps the last values and records its code.
+   * One bounded cloud read supplies activity and work parameters. Concurrent state queries join
+   * it. A failure preserves the last values with an explicit error. Confirmed parameter writes
+   * retain their existing refresh window and generation guard.
    */
-  #refreshWorkParameters(mowers: MowerModule, id: string): Promise<void> {
+  #refreshCloudState(mowers: MowerModule, id: string): Promise<void> {
+    const cloud = this.#cloudStatus.get(id);
+    const refresh = this.#dependencies.cloudStateRefreshMs ?? DEFAULT_CLOUD_STATE_REFRESH_MS;
+    if (cloud && this.#now() - cloud.askedAt < refresh) return Promise.resolve();
+    const running = this.#cloudStateReads.get(id);
+    if (running) return running;
     const entry = this.#workParameters.get(id);
     const age = this.#dependencies.workParametersRefreshMs ?? DEFAULT_WORK_PARAMETERS_REFRESH_MS;
-    if (entry && this.#now() - entry.askedAt < age) return Promise.resolve();
-    const running = this.#workParameterReads.get(id);
-    if (running) return running;
     const askedAt = this.#now();
+    const updateParameters = !entry || askedAt - entry.askedAt >= age;
     const generation = entry?.generation ?? 0;
     const read = (async () => {
       let stored: StoredWorkParameters | null = null;
+      let status: CloudStatusEntry['stored'] = null;
       let error: string | null = null;
       try {
-        const reading = await mowers.queryWorkParameters(id, this.#lifetime.signal);
+        const reading = await mowers.queryCloudState(id, this.#lifetime.signal);
+        status = { observedAt: reading.observedAt, status: structuredClone(reading.status) };
+        const parameters = reading.workParameters;
         stored = {
-          state: reading.state,
+          state: parameters.state,
           source: 'cloud',
-          observedAt: reading.observedAt,
-          parameters: reading.state === 'reported' ? structuredClone(reading.parameters) : {},
+          observedAt: parameters.observedAt,
+          parameters: parameters.state === 'reported' ? structuredClone(parameters.parameters) : {},
         };
       } catch (failure) {
         error = errorCode(failure);
       }
+      this.#cloudStatus.set(id, { stored: status ?? this.#cloudStatus.get(id)?.stored ?? null, error, askedAt });
       const current = this.#workParameters.get(id);
       // A write confirmed while this reading ran is newer evidence than the cloud's cache.
-      if (current && current.generation !== generation) return;
+      if (!updateParameters || (current && current.generation !== generation)) return;
       this.#workParameters.set(id, { stored: stored ?? current?.stored ?? null, error, askedAt, generation });
     })();
-    this.#workParameterReads.set(id, read);
-    void read.finally(() => this.#workParameterReads.delete(id));
+    this.#cloudStateReads.set(id, read);
+    void read.finally(() => this.#cloudStateReads.delete(id));
     return read;
   }
 
@@ -1007,6 +1038,22 @@ export class MowerBridge {
       ...structuredClone(fields),
       command: this.#inFlightDocument(id),
       work_parameters: workParametersDocument(this.#workParameters.get(id)),
+      cloud_status: this.#cloudStatusDocument(id),
+    };
+  }
+
+  #cloudStatusDocument(id: string): CloudStatusDocument {
+    const entry = this.#cloudStatus.get(id);
+    const stored = entry?.stored;
+    const observed = stored ? Date.parse(stored.observedAt) : NaN;
+    const age = Number.isFinite(observed) ? this.#now() - observed : null;
+    return {
+      source: 'cloud',
+      observed_at: stored?.observedAt ?? null,
+      age_ms: age === null ? null : Math.max(0, age),
+      stale: !stored || entry?.error != null || age === null || age < 0 || age > CLOUD_STATUS_MAX_AGE_MS,
+      error: entry?.error ?? null,
+      status: stored ? structuredClone(stored.status) : { state: 'unavailable' },
     };
   }
 

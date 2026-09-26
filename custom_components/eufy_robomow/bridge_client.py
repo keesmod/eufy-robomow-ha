@@ -94,6 +94,10 @@ _NETWORK_KINDS = {
 }
 # The library's four states of one typed telemetry field. Only ``reported`` carries a value.
 _FIELD_STATES = frozenset({"reported", "missing", "invalid", "unconfirmed"})
+_CLOUD_STATUS_STATES = frozenset({"reported", "missing", "invalid", "unavailable"})
+_MOWER_ACTIVITIES = frozenset(
+    {"mowing", "paused", "returning", "charging", "docked", "idle", "error", "unknown"}
+)
 
 
 class BridgeSettingsError(ValueError):
@@ -189,6 +193,23 @@ class BridgeSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class BridgeCloudStatus:
+    """An optional cloud status, separate from local telemetry and command evidence.
+
+    ``observed_at`` is when the bridge received the cloud response. It does not
+    establish when the device last updated the cloud record.
+    """
+
+    source: str | None
+    observed_at: datetime | None
+    age_ms: int | None
+    stale: bool
+    error: str | None
+    status: str
+    activity: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class BridgeTelemetry:
     """The parts of one bridge state document that the integration consumes."""
 
@@ -212,6 +233,8 @@ class BridgeTelemetry:
     # bridge older than 0.10.0. Since bridge 0.11.0 the two work parameter speeds
     # appear here under their ``cloud_*`` keys too.
     settings_writable: dict[str, bool] = field(default_factory=dict)
+    # None for an older bridge. Never copied into local DPS or command evidence.
+    cloud_status: BridgeCloudStatus | None = None
 
 
 def _field(document: dict[str, Any], name: str) -> dict[str, Any]:
@@ -296,6 +319,65 @@ def parse_state_document(document: Any, mower_id: str) -> BridgeTelemetry:
         dps=dps,
         command_activity=_command_activity(document.get("command")),
         settings_writable=writable,
+        cloud_status=_cloud_status(document["cloud_status"]) if "cloud_status" in document else None,
+    )
+
+
+def _cloud_status(document: Any) -> BridgeCloudStatus:
+    """Validate cloud metadata without allowing a bad optional field to lose LAN data."""
+    invalid = BridgeCloudStatus(
+        source=None,
+        observed_at=None,
+        age_ms=None,
+        stale=True,
+        error="invalid_cloud_status",
+        status="invalid",
+        activity=None,
+    )
+    if not isinstance(document, dict) or document.get("source") != "cloud":
+        return invalid
+    observed_raw = document.get("observed_at")
+    observed_at = dt_util.parse_datetime(observed_raw) if isinstance(observed_raw, str) else None
+    if observed_raw is not None and (observed_at is None or observed_at.tzinfo is None):
+        return invalid
+    age_ms = document.get("age_ms")
+    if age_ms is not None and (
+        not isinstance(age_ms, int) or isinstance(age_ms, bool) or age_ms < 0
+    ):
+        return invalid
+    stale = document.get("stale")
+    error = document.get("error")
+    if not isinstance(stale, bool) or (
+        error is not None
+        and (not isinstance(error, str) or not _ERROR_CODE_PATTERN.fullmatch(error))
+    ):
+        return invalid
+    status = document.get("status")
+    if (
+        not isinstance(status, dict)
+        or not isinstance(status.get("state"), str)
+        or status["state"] not in _CLOUD_STATUS_STATES
+    ):
+        return invalid
+    activity: str | None = None
+    if status["state"] == "reported":
+        value = status.get("value")
+        if (
+            not isinstance(value, str)
+            or value not in _MOWER_ACTIVITIES
+            or observed_at is None
+            or age_ms is None
+        ):
+            return invalid
+        activity = value
+    return BridgeCloudStatus(
+        source="cloud",
+        observed_at=observed_at,
+        age_ms=age_ms,
+        stale=stale,
+        error=error,
+        status=status["state"],
+        activity=activity,
     )
 
 

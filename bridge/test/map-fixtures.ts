@@ -198,7 +198,7 @@ export class FakeMapAcquisition implements MapAcquisitionPort {
     this.#snapshot = { revision: this.#revision, receivedAt, files: copyFiles(files) };
   }
 
-  end(reason: MapAcquisitionEnd, confirmations = { cancellationConfirmed: true, cleanupConfirmed: true }): void {
+  end(reason: MapAcquisitionEnd, confirmations: Pick<MapAcquisitionResult, 'cancellationConfirmed' | 'cancellationFailure' | 'cleanupConfirmed'> = { cancellationConfirmed: true, cleanupConfirmed: true }): void {
     const finish = this.#finish;
     if (!finish) return;
     this.#finish = undefined;

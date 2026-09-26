@@ -13,7 +13,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import EntityPlatform
 
-from custom_components.eufy_robomow.const import DP_TASK_ACTIVE
+from custom_components.eufy_robomow.bridge_client import BridgeCloudStatus
+from custom_components.eufy_robomow.const import BACKEND_BRIDGE, DP_TASK_ACTIVE
 from custom_components.eufy_robomow.coordinator import EufyMowerCoordinator
 from custom_components.eufy_robomow.image import EufyRobomowMapImage
 from custom_components.eufy_robomow.map import MapSnapshot, Point
@@ -132,6 +133,43 @@ def test_home_assistant_poll_updates_map_and_streaming_mode(tmp_path, monkeypatc
         await platform._async_update_entity_states()
         assert source.streaming_requests == [True, False]
         assert entity.image() is not None
+        await hass.async_stop()
+
+    asyncio.run(run_test())
+
+
+def test_cloud_activity_starts_map_stream_and_receipt_expiry_ends_it(tmp_path, monkeypatch):
+    async def run_test():
+        snapshot = _snapshot(
+            cleaned_paths=((Point(10, 10), Point(10, 80)),),
+            tracking_position=Point(10, 80),
+        )
+        source = _SequenceMapSource([snapshot, snapshot])
+        now = datetime(2026, 9, 26, 10, tzinfo=UTC)
+        coordinator = object.__new__(EufyMowerCoordinator)
+        coordinator.backend = BACKEND_BRIDGE
+        coordinator.last_update_success = True
+        coordinator.bridge_cloud_status = BridgeCloudStatus(
+            source="cloud",
+            observed_at=now,
+            age_ms=0,
+            stale=False,
+            error=None,
+            status="reported",
+            activity="mowing",
+        )
+        monkeypatch.setattr("custom_components.eufy_robomow.coordinator.dt_util.utcnow", lambda: now)
+        hass = HomeAssistant(str(tmp_path))
+        entity = EufyRobomowMapImage(
+            hass, coordinator, source, SimpleNamespace(data={"device_id": "synthetic-device"})
+        )
+
+        await entity.async_update()
+        assert b'class="cleaned-path"' in (entity.image() or b"")
+        now += timedelta(seconds=91)
+        await entity.async_update()
+        assert b'class="cleaned-path"' not in (entity.image() or b"")
+        assert source.streaming_requests == [True, False]
         await hass.async_stop()
 
     asyncio.run(run_test())

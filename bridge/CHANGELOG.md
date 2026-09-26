@@ -21,6 +21,30 @@ files, because the mower id the integration stores depends on them. A rollback
 of the app restores the app backup that the update created, which brings back
 the previous version with its options and data.
 
+## 0.13.0 - 2026-09-26
+
+### Cloud activity and confirmed map cancellation
+
+- Pins library 0.25.1. State requests obtain typed cloud mission activity and
+  work parameters in one library request, alongside independent LAN telemetry.
+  Activity refreshes at most once per 30 seconds and expires after 90 seconds
+  without a new receipt. `cloud_status` exposes source, receipt time, age and
+  errors. Cloud failures preserve LAN telemetry. Work parameter caching and
+  confirmed-write precedence remain intact.
+- A completed map is retained after an acquisition fails, but no longer hides
+  an unconfirmed cancellation or other acquisition failure. Unconfirmed
+  cancellation or cleanup blocks further demands until the bridge restarts.
+  A bounded cancellation failure category is available for diagnostics.
+- Evidence: synthetic cloud, cache, write-boundary and map-route regressions.
+  The library's cancellation change drains late file traffic while waiting for
+  its correlated reply. Its carrier heartbeat keeps longer demands connected
+  through cancellation. Real moving-map acceptance remains open in #8.
+
+Upgrade: install the matching app with a backup of its options and private
+state. No new option or identity migration. Integration 0.16.0 consumes the
+new status. Rollback: restore the 0.12.1 app backup and integration 0.15.4.
+No mower release, tag or container image is published.
+
 ## 0.12.1 - 2026-09-25
 
 ### Home Assistant cloud-map option

@@ -300,6 +300,11 @@ served but the last demand failed, with that demand's code in `error`.
 `last_demand` is the last demand that reached the library: its end reason as
 the library reports it, whether the peer confirmed the cancellation and the
 local cleanup, and how many snapshots it published and rejected.
+Since 0.13.0 a failed demand remains an error even when it produced a valid
+map. Unconfirmed cancellation or cleanup prevents further acquisition until
+the bridge restarts. The latest good bundle stays available. When supplied by
+the library, `cancellation_failure` is a fixed diagnostic category, never raw
+protocol content or exception text.
 
 ### `GET /v1/mowers`
 
@@ -384,9 +389,10 @@ only in either settings mode.
 
 `work_parameters` holds the DP 155 work parameters, since 0.11.0. The mower's
 LAN replies do not carry DP 155, so they never come from the state query. The
-bridge takes one library cloud reading next to a state query when the last
-reading, failed attempt or confirmed write is older than five minutes, and a
-state answer waits at most three seconds for it. After a write confirmed
+bridge shares a library cloud reading with mission activity, at most once per
+30 seconds, next to a state query. The work parameter cache refreshes once its
+last reading, failed attempt or confirmed write is older than five minutes.
+A state answer waits at most three seconds for the shared reading. After a write confirmed
 through the settings route, the values come from the LAN report that
 reflected it, with `source: "local-tuya-3.5"`, until the next reading.
 `state` is the reading's `reported`, `missing` or `invalid`, or `unavailable`
@@ -396,6 +402,15 @@ name for the value, or `null`, the values the library writes as `options`,
 and `writable`, which is true when the served value is one of them. The
 integers are the device's own and no unit is confirmed by a source. The raw
 message is never served.
+
+`cloud_status`, since 0.13.0, is separate from the LAN `status` and has
+`source: "cloud"`, `observed_at`, `age_ms`, `stale`, `error` and `status`.
+Its status is `{ "state": "reported", "value": "mowing" }`, or a state of
+`missing`, `invalid` or `unavailable`. `observed_at` dates receipt of the cloud
+response, not the underlying device report. A failed read retains the previous
+value as stale with an error. Receipts older than 90 seconds are stale too.
+This field cannot confirm a command or establish physical dock arrival from
+`idle`. LAN status, command evidence and their safety gates remain independent.
 
 `command` is the command that owns this mower right now, or `null`. While its
 read-back runs it carries the library's progress, for example
@@ -707,7 +722,7 @@ document's `maps.error`:
 | `map_provisioning_insecure`                                                                                                   | Group or others may write the file, or others may read it                  |
 | `mower_map_invalid_provisioning`                                                                                              | The library refused the provisioning, for example because it expired, before any network I/O |
 | `mower_map_incomplete`                                                                                                        | The demand ended without a complete snapshot                               |
-| `mower_map_negotiation_timeout`, `mower_map_connection_failed`, `mower_map_protocol_error`, `mower_map_stream_ended`, `mower_map_cancel_unconfirmed` | The library's end reason of a demand that published nothing |
+| `mower_map_negotiation_timeout`, `mower_map_connection_failed`, `mower_map_protocol_error`, `mower_map_stream_ended`, `mower_map_cancel_unconfirmed` | The library's failed demand reason, also after a valid map. Unconfirmed cancellation blocks further acquisition |
 | `mower_map_cleanup_unconfirmed`                                                                                               | Local cleanup was not confirmed, no further demand until a restart         |
 | `map_undecodable`, `map_boundary_missing`, `map_file_size`                                                                    | The demand's snapshots failed the gate                                     |
 | `request_aborted`                                                                                                             | The bridge stopped during the demand                                       |

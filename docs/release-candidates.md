@@ -17,9 +17,18 @@ backends and rollback are described in
 
 | Component | Version | Pinned inputs |
 | --- | --- | --- |
-| Integration `eufy_robomow` | 0.15.4 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
-| Mower bridge, container image | 0.12.1 | `@keesmod/eufy-mega-client` 0.24.0 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
-| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.12.1 | the same inputs, built by the Supervisor on the host |
+| Integration `eufy_robomow` | 0.16.0 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
+| Mower bridge, container image | 0.13.0 | `@keesmod/eufy-mega-client` 0.25.1 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
+| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.13.0 | the same inputs, built by the Supervisor on the host |
+
+Library [0.25.1](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.25.1)
+was published separately with the owner's approval from `de5b45b`. Its downloaded
+archive matched the release manifest and checksums, with SHA-256
+`99e00c72c41d56723a39bd3c8ab212c7c8f71532a554f49329dab90875aa5dcc`.
+The decompressed archive is byte-identical to the candidate that passed a
+30-second docked demand and a ten-second explicit abort, both with confirmed
+cancellation and cleanup. [Library PR #203](https://github.com/keesmod/eufy-mega-client/pull/203)
+records the observation. This does not complete moving-map acceptance.
 
 The checksums of every candidate that was built are recorded in #8. The
 candidates of 0.15.0 and 0.15.1 with bridge 0.11.0, built from `64ce862` and
