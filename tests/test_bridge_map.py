@@ -427,7 +427,7 @@ class _SequenceSource:
         self.streaming_requests.append(streaming)
         return LoadedMap(
             snapshot_id=f"snapshot-{len(self.streaming_requests)}",
-            captured_at=datetime(2026, 9, 23, 10, len(self.streaming_requests), tzinfo=UTC),
+            captured_at=datetime.now(tz=UTC),
             snapshot=MapSnapshot(
                 map_id=539,
                 boundary=(Point(0, 0), Point(100, 0), Point(100, 100), Point(0, 100)),

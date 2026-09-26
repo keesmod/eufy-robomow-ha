@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import datetime
 from functools import partial
 import logging
 from pathlib import Path
@@ -11,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .const import (
     BACKEND_BRIDGE,
@@ -26,13 +29,14 @@ from .const import (
     MAP_SOURCE_BRIDGE,
 )
 from .coordinator import EufyMowerCoordinator
-from .map import MapSnapshot, merge_live_snapshots
+from .map import merge_live_snapshots
 from .map_renderer import MAP_CONTENT_TYPE, render_map_svg
 from .map_source import (
     BRIDGE_CACHE_FILENAME,
     EXTERNAL_CACHE_FILENAME,
     MAP_CACHE_DIRECTORY,
     MAP_STREAM_REFRESH_INTERVAL,
+    LoadedMap,
     MapSource,
     MapSourceError,
     MapSourceSettings,
@@ -130,7 +134,8 @@ class EufyRobomowMapImage(ImageEntity):
         self._source = source
         self._content: bytes | None = None
         self._render_key: tuple[str, bool] | None = None
-        self._live_snapshot: MapSnapshot | None = None
+        self._live_started_at: datetime | None = None
+        self._live_map: LoadedMap | None = None
         self._attr_unique_id = f"{entry.data[CONF_DEVICE_ID]}_map"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.data[CONF_DEVICE_ID])},
@@ -171,6 +176,16 @@ class EufyRobomowMapImage(ImageEntity):
     async def async_update(self) -> None:
         """Fetch and render the latest valid map."""
         include_cleaned_paths = self._task_active()
+        if include_cleaned_paths:
+            if self._live_started_at is None:
+                # Also start a new window after an entity reload. Without a
+                # task identifier, an earlier capture cannot seed this task.
+                self._live_started_at = dt_util.utcnow()
+                self._render_key = None
+        else:
+            # Reset before fetching, even when the idle refresh fails.
+            self._live_started_at = None
+            self._live_map = None
         try:
             loaded = await self._source.async_refresh(
                 streaming=include_cleaned_paths,
@@ -180,15 +195,25 @@ class EufyRobomowMapImage(ImageEntity):
             return
 
         if include_cleaned_paths:
-            snapshot = (
-                merge_live_snapshots(self._live_snapshot, loaded.snapshot)
-                if self._live_snapshot is not None
-                else loaded.snapshot
-            )
-            self._live_snapshot = snapshot
-        else:
-            snapshot = loaded.snapshot
-            self._live_snapshot = None
+            if (
+                self._source.status.state == "healthy"
+                and self._live_started_at is not None
+                and self._live_started_at <= loaded.captured_at <= dt_util.utcnow()
+                and (
+                    self._live_map is None
+                    or loaded.captured_at >= self._live_map.captured_at
+                )
+            ):
+                snapshot = (
+                    merge_live_snapshots(self._live_map.snapshot, loaded.snapshot)
+                    if self._live_map is not None
+                    else loaded.snapshot
+                )
+                self._live_map = replace(loaded, snapshot=snapshot)
+            # A stream request may first return an old cache or a 304. Keep its
+            # map visible, but only fresh captures contribute live paths/pose.
+            loaded = self._live_map or loaded
+            include_cleaned_paths = self._live_map is not None
 
         render_key = (loaded.snapshot_id, include_cleaned_paths)
         if render_key == self._render_key:
@@ -197,7 +222,7 @@ class EufyRobomowMapImage(ImageEntity):
         self._content = await self._hass.async_add_executor_job(
             partial(
                 render_map_svg,
-                snapshot,
+                loaded.snapshot,
                 include_cleaned_paths=include_cleaned_paths,
             )
         )

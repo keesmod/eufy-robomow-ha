@@ -21,6 +21,26 @@ The session store has kept storage version 1 since 0.7.0 and the options have
 kept their keys since 0.11.0. An older version ignores an option it does not
 know, but saving the options there drops it.
 
+## 0.16.1 - 2026-09-26
+
+### Keep live coverage within the observed task
+
+- A new task can initially receive the previous idle cache while its native
+  stream starts. Keep that map visible, but accumulate paths and tracking only
+  from healthy captures received within the new live window. HTTP 304 does not
+  make an old capture fresh.
+- Reset live accumulation before an idle refresh, including when that refresh
+  fails. A reload during mowing starts a new observation window. Without a task
+  identifier, earlier coverage cannot safely be restored from the cache.
+- Evidence: synthetic regressions for old caches, reloads, missing tracking,
+  failed refreshes, repeated content and capture freshness. The owned E15's
+  moving native stream was observed with integration 0.16.0, bridge 0.13.0 and
+  library 0.25.1. Its hardware evidence and remaining limits are recorded in #8.
+- Upgrade: replace the integration and restart Home Assistant after a passing
+  configuration check. The bridge needs no update. Rollback: restore 0.16.0,
+  which can mix the preceding cache's coverage into a new task. Map caches,
+  options, entity identities and session storage stay unchanged.
+
 ## 0.16.0 - 2026-09-26
 
 ### Bridge cloud activity
