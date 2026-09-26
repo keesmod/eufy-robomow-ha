@@ -13,6 +13,7 @@ from homeassistant.util import dt as dt_util
 from .bridge_client import (
     BridgeClient,
     BridgeClientError,
+    BridgeCloudStatus,
     BridgeCommandOutcome,
     BridgeSettingOutcome,
     parse_state_document,
@@ -90,6 +91,9 @@ RETURN_CLOUD_INTERVAL = POLL_INTERVAL - 1
 # the mower may have changed by itself (its app schedule, the app, a low battery)
 # and the activity is unknown again. Nothing is inferred from the age.
 BRIDGE_COMMAND_ACTIVITY_MAX_AGE = timedelta(minutes=30)
+# Cloud receipt age bounds how long the bridge's cache may supply display and
+# map-stream activity. This is not a device-report timestamp or write evidence.
+BRIDGE_CLOUD_STATUS_MAX_AGE = timedelta(seconds=90)
 
 
 class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
@@ -120,6 +124,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
     bridge_status: str | None = None
     bridge_activity: str | None = None
     bridge_error: str | None = None
+    bridge_cloud_status: BridgeCloudStatus | None = None
     # The activity the last confirmed bridge command reflected and when the
     # library received that report. A confirmed dock records ``docked``: its
     # map-saving payload is the dock arrival the library observed.
@@ -184,6 +189,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self.bridge_status = None
         self.bridge_activity = None
         self.bridge_error = None
+        self.bridge_cloud_status = None
         self.bridge_command_activity = None
         self.bridge_command_activity_at = None
         self.bridge_routes_control = False
@@ -383,8 +389,8 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self.shape_since = self.last_local_update
 
     @property
-    def bridge_activity_evidence(self) -> tuple[str, str, datetime | None] | None:
-        """The newest evidenced bridge activity as (activity, source, observed_at).
+    def bridge_local_activity_evidence(self) -> tuple[str, str, datetime | None] | None:
+        """The newest local bridge activity as (activity, source, observed_at).
 
         ``report`` is the reported status of the last successful poll. ``command``
         is the activity a confirmed command reflected, while it is younger than
@@ -410,13 +416,40 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         return newest[2], newest[1], newest[0]
 
     @property
+    def bridge_activity_evidence(self) -> tuple[str, str, datetime | None] | None:
+        """Local evidence first, then bounded cloud activity for display and maps.
+
+        A recent cloud receipt does not prove that the device recently updated
+        the cloud record. Its source stays explicit and cannot confirm commands.
+        Both the bridge's age and this process's clock must accept the receipt.
+        """
+        local = self.bridge_local_activity_evidence
+        if local is not None:
+            return local
+        cloud = self.bridge_cloud_status
+        if (
+            cloud is None
+            or cloud.source != "cloud"
+            or cloud.status != "reported"
+            or cloud.activity is None
+            or cloud.stale
+            or cloud.error is not None
+            or cloud.observed_at is None
+            or cloud.age_ms is None
+            or not 0 <= cloud.age_ms <= BRIDGE_CLOUD_STATUS_MAX_AGE.total_seconds() * 1000
+            or not timedelta(0) <= dt_util.utcnow() - cloud.observed_at <= BRIDGE_CLOUD_STATUS_MAX_AGE
+        ):
+            return None
+        return cloud.activity, "cloud", cloud.observed_at
+
+    @property
     def bridge_task_active(self) -> bool:
-        """A task runs according to the newest evidenced bridge activity.
+        """A task runs according to the selected bridge activity.
 
         Only a mowing, paused or returning activity counts, reported by the last
-        successful poll or reflected by a recent confirmed command. A missing,
-        invalid or unconfirmed status, a failed poll and the age of an
-        observation never do.
+        successful poll, reflected by a recent confirmed command or supplied by
+        a bounded cloud receipt. A missing, invalid or unconfirmed status and a
+        failed poll never start or continue a stream.
         """
         evidence = self.bridge_activity_evidence
         return (
@@ -677,6 +710,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self.bridge_error = None
         self.bridge_status = telemetry.status
         self.bridge_activity = telemetry.activity
+        self.bridge_cloud_status = telemetry.cloud_status
         if telemetry.command_activity is not None:
             # A report of the command still running on the bridge, for example
             # returning within a second of a dock that confirms only at arrival.

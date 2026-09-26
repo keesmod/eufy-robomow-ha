@@ -166,6 +166,7 @@ def test_state_document_maps_only_reported_typed_fields() -> None:
     assert telemetry.status == "missing"
     assert telemetry.activity is None, "a missing status is never turned into an activity"
     assert telemetry.dps == {"8": 85, "134": "Wifi", "109": 70}
+    assert telemetry.cloud_status is None, "an older bridge has no cloud activity"
 
     reported = parse_state_document(
         _document(
@@ -207,6 +208,95 @@ def test_state_document_keeps_missing_and_invalid_status_explicit(status: dict[s
     assert telemetry.status == expected
     assert telemetry.activity is None, "only a reported status carries an activity"
     assert telemetry.dps == {"8": 85, "134": "Wifi", "109": 70}, "the other fields are unaffected"
+
+
+def _cloud_status(**overrides: Any) -> dict[str, Any]:
+    document: dict[str, Any] = {
+        "source": "cloud",
+        "observed_at": OBSERVED_AT,
+        "age_ms": 12,
+        "stale": False,
+        "error": None,
+        "status": {"state": "reported", "value": "mowing"},
+    }
+    document.update(overrides)
+    return document
+
+
+@pytest.mark.parametrize("activity", ["mowing", "paused", "returning", "idle"])
+def test_cloud_status_keeps_its_source_and_receipt_separate_from_lan(activity: str) -> None:
+    telemetry = parse_state_document(
+        _document(cloud_status=_cloud_status(status={"state": "reported", "value": activity})),
+        MOWER_ID,
+    )
+    cloud = telemetry.cloud_status
+    assert cloud is not None
+    assert (cloud.source, cloud.status, cloud.activity) == ("cloud", "reported", activity)
+    assert cloud.observed_at == datetime(2026, 9, 19, 10, 0, 1, 250000, tzinfo=UTC)
+    assert (cloud.age_ms, cloud.stale, cloud.error) == (12, False, None)
+    assert (telemetry.status, telemetry.activity, telemetry.command_activity) == ("missing", None, None)
+    assert telemetry.dps == {"8": 85, "134": "Wifi", "109": 70}
+
+
+@pytest.mark.parametrize("state", ["missing", "invalid", "unavailable"])
+def test_cloud_unreported_status_never_carries_an_activity(state: str) -> None:
+    telemetry = parse_state_document(
+        _document(cloud_status=_cloud_status(
+            observed_at=None,
+            age_ms=None,
+            stale=True,
+            error="mower_request_failed",
+            status={"state": state, "value": "mowing"},
+        )),
+        MOWER_ID,
+    )
+    cloud = telemetry.cloud_status
+    assert cloud is not None
+    assert (cloud.status, cloud.activity, cloud.observed_at, cloud.age_ms) == (state, None, None, None)
+    assert cloud.error == "mower_request_failed"
+    assert telemetry.error is None, "a cloud error does not invalidate successful LAN telemetry"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"source": "local-tuya-3.5"},
+        {"observed_at": "yesterday"},
+        {"observed_at": "2026-09-19T10:00:01"},
+        {"observed_at": 12},
+        {"observed_at": None},
+        {"age_ms": None},
+        {"age_ms": -1},
+        {"age_ms": True},
+        {"age_ms": 1.5},
+        {"age_ms": "12"},
+        {"stale": "no"},
+        {"error": 5},
+        {"error": "upstream private message"},
+        {"status": None},
+        {"status": {"state": []}},
+        {"status": {"state": "unconfirmed"}},
+        {"status": {"state": "reported"}},
+        {"status": {"state": "reported", "value": "unsupported_activity"}},
+        {"status": {"state": "reported", "value": ["mowing"]}},
+    ],
+)
+def test_invalid_cloud_status_is_isolated_from_lan(overrides: dict[str, Any]) -> None:
+    telemetry = parse_state_document(_document(cloud_status=_cloud_status(**overrides)), MOWER_ID)
+    cloud = telemetry.cloud_status
+    assert cloud is not None
+    assert (cloud.status, cloud.activity, cloud.error, cloud.stale) == ("invalid", None, "invalid_cloud_status", True)
+    assert cloud.source is None, "an invalid source must never be labelled cloud"
+    assert telemetry.error is None
+    assert telemetry.dps == {"8": 85, "134": "Wifi", "109": 70}
+
+
+@pytest.mark.parametrize("value", [None, "mowing", [], True])
+def test_malformed_cloud_block_does_not_lose_local_telemetry(value: Any) -> None:
+    telemetry = parse_state_document(_document(cloud_status=value), MOWER_ID)
+    assert telemetry.cloud_status is not None
+    assert telemetry.cloud_status.error == "invalid_cloud_status"
+    assert telemetry.dps["8"] == 85
 
 
 @pytest.mark.parametrize(

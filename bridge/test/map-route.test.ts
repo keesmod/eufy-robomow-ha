@@ -454,6 +454,54 @@ test('unconfirmed cleanup stops acquisition until a restart and keeps the last g
   }
 });
 
+test('unconfirmed cancellation stays visible after publication and stops further demands', async (t) => {
+  const f = await mapFixture(t);
+  await f.get(mapPath(ID_A), STREAM);
+  const acquisition = await nextDemand(f, 1);
+  acquisition.publish(streams(), T0);
+  await waitFor(() => f.bridge.state().maps?.captured_at !== null, 'the valid map to be served');
+  const good = await f.get(mapPath(ID_A), STREAM);
+  acquisition.end('cancel_unconfirmed', { cancellationConfirmed: false, cancellationFailure: 'response_mismatch', cleanupConfirmed: true });
+  await settled(f);
+  const retained = await f.get(mapPath(ID_A), STREAM);
+  assert.equal(retained.status, 200);
+  assert.deepEqual(retained.raw, good.raw);
+  assert.equal(retained.headers.etag, good.headers.etag);
+  assert.equal(retained.headers['x-eufy-map-stale'], 'true');
+  assert.equal(retained.headers['x-eufy-map-error'], 'mower_map_cancel_unconfirmed');
+  const status = (await f.state()).maps;
+  assert.equal(status?.error, 'mower_map_cancel_unconfirmed');
+  assert.equal(status?.last_demand?.published, 1);
+  assert.equal(status?.last_demand?.cancellation_confirmed, false);
+  assert.equal(status?.last_demand?.cancellation_failure, 'response_mismatch');
+  assert.equal(status?.last_demand?.cleanup_confirmed, true);
+  f.clock.now += 3_600_000;
+  await f.get(mapPath(ID_A), STREAM);
+  await f.get(mapPath(ID_A));
+  assert.equal(f.bridge.state().maps?.acquiring, false);
+  assert.equal(f.maps.created.length, 1, 'neither stream nor idle may restart an uncertain transfer');
+  assertPrivate(JSON.stringify(status));
+});
+
+test('a protocol failure after publication retains the bundle and delays the next demand', async (t) => {
+  const f = await mapFixture(t);
+  await f.get(mapPath(ID_A), STREAM);
+  const acquisition = await nextDemand(f, 1);
+  acquisition.publish(streams(), T0);
+  acquisition.end('protocol_error', { cancellationConfirmed: false, cleanupConfirmed: true });
+  await settled(f);
+  const retained = await f.get(mapPath(ID_A), STREAM);
+  assert.equal(retained.status, 200);
+  assert.equal(retained.headers['x-eufy-map-stale'], 'true');
+  assert.equal(retained.headers['x-eufy-map-error'], 'mower_map_protocol_error');
+  f.clock.now += 59_999;
+  await f.get(mapPath(ID_A), STREAM);
+  assert.equal(f.maps.created.length, 1);
+  f.clock.now += 1;
+  await f.get(mapPath(ID_A), STREAM);
+  await nextDemand(f, 2);
+});
+
 test('shutdown aborts a running demand, waits for its cleanup and leaves no handles', async (t) => {
   const handles = await baselineHandles();
   const f = await mapFixture(t);

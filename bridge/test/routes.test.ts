@@ -68,6 +68,13 @@ class DiscoveringAdapter implements MowerAdapter {
    * the library reports the capability as unavailable, like for any custom adapter.
    */
   readCloudWorkParameters?: (id: string, signal: AbortSignal) => Promise<{ observedAt: string; value: string | null | undefined }>;
+  cloudStatusValue: string | null | undefined;
+
+  async readCloudState(id: string, signal: AbortSignal) {
+    if (!this.readCloudWorkParameters) throw new EufyError('mower_protocol_unavailable');
+    const read = await this.readCloudWorkParameters(id, signal);
+    return { observedAt: read.observedAt, statusValue: this.cloudStatusValue, workParametersValue: read.value };
+  }
 
   async connect(_answer: AuthAnswer | undefined, _signal: AbortSignal): Promise<AuthState> {
     this.connects += 1;
@@ -484,6 +491,7 @@ test('the state route serves the four typed fields with freshness, closes the se
     settings: MISSING_SETTINGS,
     command: null,
     work_parameters: UNAVAILABLE_WORK_PARAMETERS,
+    cloud_status: { source: 'cloud', observed_at: null, age_ms: null, stale: true, error: 'mower_protocol_unavailable', status: { state: 'unavailable' } },
   });
   const list = (await f.get(MOWERS_PATH)).json as DiscoveryDocument;
   assert.equal(list.mowers[0]?.state_available, true);
@@ -1593,4 +1601,96 @@ test('a cloud reading that began before a confirmed write never replaces the ref
   const after = ((await f.get(path)).json as MowerStateDocument).work_parameters;
   assert.equal(after.source, 'local-tuya-3.5');
   assert.equal(after.blade_speed.value, 'high');
+});
+
+test('cloud activity has its own source, receipt age, refresh and failure without replacing LAN status', async (t) => {
+  const log = sessionLog();
+  const f = await fixture(t, { host: HOST_A }, {
+    openLocalSession: sessions(log, async () => telemetry(new Date(T0).toISOString())),
+  });
+  let reads = 0;
+  let failure = false;
+  f.adapter.cloudStatusValue = wirePayload({ 1: 2, 3: 1 });
+  f.adapter.readCloudWorkParameters = async (id) => {
+    assert.equal(id, ID_A);
+    reads++;
+    if (failure) throw new EufyError('mower_request_failed');
+    return { observedAt: new Date(f.clock.now).toISOString(), value: workValue() };
+  };
+  await f.bridge.connect();
+  const path = `${MOWERS_PATH}/${ID_A}/state`;
+  const first = (await f.get(path)).json as MowerStateDocument;
+  assert.deepEqual(first.cloud_status, {
+    source: 'cloud', observed_at: new Date(T0).toISOString(), age_ms: 0, stale: false, error: null,
+    status: { state: 'reported', value: 'mowing' },
+  });
+  assert.equal(first.status.state, 'missing');
+  assert.equal(first.source, 'local-tuya-3.5');
+  assert.equal(first.command, null);
+  assert.equal(first.work_parameters.state, 'reported');
+  f.clock.now += 10_000;
+  const cached = (await f.get(path)).json as MowerStateDocument;
+  assert.equal(cached.cloud_status.age_ms, 10_000);
+  assert.equal(reads, 1, 'one request supplies both fields and is cached between activity refreshes');
+  f.clock.now += 20_000;
+  f.adapter.cloudStatusValue = '';
+  const idle = (await f.get(path)).json as MowerStateDocument;
+  assert.deepEqual(idle.cloud_status.status, { state: 'reported', value: 'idle' });
+  assert.equal(reads, 2, 'activity refreshes before the settings cache expires');
+  assert.equal(idle.work_parameters.observed_at, first.work_parameters.observed_at);
+  f.clock.now += 30_000;
+  failure = true;
+  const failed = (await f.get(path)).json as MowerStateDocument;
+  assert.equal(failed.stale, false, 'cloud failure leaves healthy LAN telemetry intact');
+  assert.equal(failed.cloud_status.stale, true);
+  assert.equal(failed.cloud_status.error, 'mower_request_failed');
+  assert.equal(failed.cloud_status.observed_at, idle.cloud_status.observed_at);
+  assert.deepEqual(failed.cloud_status.status, idle.cloud_status.status);
+  failure = false;
+  f.clock.now += 30_000;
+  f.adapter.cloudStatusValue = null;
+  const invalid = (await f.get(path)).json as MowerStateDocument;
+  assert.deepEqual(invalid.cloud_status.status, { state: 'invalid' });
+  assert.equal(invalid.cloud_status.error, null);
+  f.clock.now += 30_000;
+  f.adapter.cloudStatusValue = undefined;
+  assert.deepEqual(((await f.get(path)).json as MowerStateDocument).cloud_status.status, { state: 'missing' });
+  assert.equal(log.commands.length, 0);
+  assert.equal(log.workParameters.length, 0);
+});
+
+test('cloud activity expires while a slow refresh is pending and cannot make stale LAN state command-ready', async (t) => {
+  const log = sessionLog();
+  let localFails = false;
+  const f = await fixture(t, { host: HOST_A, ...CONTROL_MODE }, {
+    openLocalSession: sessions(log, async () => {
+      if (localFails) throw new EufyError('mower_local_unreachable');
+      return telemetry(new Date(T0).toISOString());
+    }),
+    workParametersWaitMs: 10,
+  });
+  f.adapter.cloudStatusValue = wirePayload({ 1: 2, 3: 1 });
+  f.adapter.readCloudWorkParameters = async () => ({ observedAt: new Date(T0).toISOString(), value: workValue() });
+  await f.bridge.connect();
+  const path = `${MOWERS_PATH}/${ID_A}/state`;
+  assert.equal(((await f.get(path)).json as MowerStateDocument).cloud_status.stale, false);
+  f.clock.now += 90_001;
+  let release: () => void = () => {};
+  f.adapter.readCloudWorkParameters = () => new Promise((resolve) => {
+    release = () => resolve({ observedAt: new Date(f.clock.now).toISOString(), value: workValue() });
+  });
+  const expired = (await f.get(path)).json as MowerStateDocument;
+  assert.equal(expired.cloud_status.stale, true);
+  assert.equal(expired.cloud_status.age_ms, 90_001);
+  assert.equal(expired.cloud_status.error, null);
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  localFails = true;
+  const failed = (await f.get(path)).json as MowerStateDocument;
+  assert.equal(failed.stale, true);
+  assert.equal(failed.cloud_status.stale, false);
+  const refused = await f.post(commandPath(ID_A, 'start'));
+  assert.equal(refused.status, 409);
+  assert.deepEqual(refused.json, { error: 'telemetry_stale' });
+  assert.equal(log.commands.length, 0, 'cloud evidence never enables or confirms a physical command');
 });
