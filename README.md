@@ -345,6 +345,9 @@ under `/config/eufy_robomow_maps/`. If acquisition fails, the previous valid map
 remains available. Idle maps refresh every five minutes. During an active mowing
 task, Home Assistant requests changed stream snapshots every two seconds,
 accumulates and deduplicates coverage deltas, and renders the newest mower pose.
+Since 0.16.1, only healthy captures from the current observation window seed
+that coverage and pose. An earlier cached map stays visible without entering
+the new task's accumulation. Reloading during mowing starts a new window.
 With the external source, clear the source URL to remove the map entity; no
 mower setting or geometry is changed.
 
@@ -363,7 +366,7 @@ last good map after a failed acquisition, `acquisition_status` becomes
 request names it too, for example `map_provisioning_unreadable`. The image
 entity, its unique id, the session history and the dashboard stay the same
 for both sources. Choosing the bridge source is refused unless the bridge
-reports `routes.maps`, which needs its operator-supplied map provisioning,
+reports `routes.maps`, which needs cloud or operator-supplied file provisioning,
 see the [deployment guide](docs/bridge-deployment.md#map-provisioning-optional).
 The external URL stays stored, switch back to **external** to recover the
 previous source.
@@ -401,12 +404,13 @@ and `stop` is the route that returns the mower to the dock. Its state route
 serves the typed settings, and with the separate `settings_mode: write` it adds
 `POST /v1/mowers/{id}/settings/{key}` for mow height, volume, smart no-go zones
 and sparse lawn optimization, with rain and child protection read only.
-With an operator-supplied map provisioning file it adds the read-only
+With cloud provisioning or an operator-supplied file it adds the read-only
 `GET /v1/mowers/{id}/map`, which serves the map bundle described above from
 the library's portable map acquisition after the library's decoder accepted
 the snapshot, with `ETag`, an explicit age and the last good bundle after a
-failed acquisition. No live map has been acquired through the bridge yet,
-that map acceptance is issue #8. The Python integration consumes it through the optional **bridge**
+failed acquisition. Docked downloads and a short supervised moving-map run
+are confirmed on the owned E15, see the [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).
+The Python integration consumes it through the optional **bridge**
 mower backend described above, for state and, behind both control opt-ins, for
 start, pause, resume and dock, and through the **bridge** map source for the
 map. It ships as a reproducible container image and as a
@@ -447,6 +451,11 @@ built and verified and what is confirmed on hardware.
 between the backends, rollback and the later retirement of the Android map
 helper.
 
+- **0.16.1, coverage belongs to the observed task.** A cached map from before
+  a task or entity reload no longer seeds live coverage or tracking. The fix
+  passed replay of the recorded moving session and was installed and read
+  back separately, without another mowing run. Replace the integration folder.
+  Bridge 0.13.0 and library 0.25.1 are unchanged.
 - **0.15.3, pathways inside the lawn.** The map no longer draws a pathway
   that never leaves the lawn, which the eufy app does not show either. A
   pathway that reaches outside the lawn is drawn in full as before. Replace
@@ -562,8 +571,8 @@ helper.
   never switched to live pulls because bridge mode has no DP 1. A failed or
   refused request names the source's error code in `acquisition_last_error`.
   The external source, the local backend and the Android map source are
-  unchanged. No live map has been acquired through the bridge, that map
-  acceptance is issue #8.
+  unchanged. At that version, live bridge acquisition was still untested.
+  Current observations are in the [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).
 - **0.10.0, dock through the bridge.** With mower bridge 0.6.0 on library
   0.17.0 the bridge backend exposes dock next to start and pause in control
   mode and routes it through the bridge's `stop` class. On the owned E15
@@ -601,7 +610,14 @@ helper.
 ## Known limitations
 
 - **Zone mowing** — the owned E15 app shows Entire, Zone, Box and Spot, but area identifiers and command transport have not been validated. No zone action is exposed; see [zone research](docs/zone-control-research.md).
-- **Map acquisition** — experimental. The external source needs a separate compatible source. Bridge 0.12.1 with library 0.24.0 obtains fresh provisioning for each native acquisition in explicit `cloud` mode. The operator-supplied provisioning file remains supported. Fresh docked downloads and matching static geometry are confirmed on the owned E15. Updates during mowing and longer observation remain open in issue #8.
+- **Map acquisition** — experimental. Bridge 0.13.0 with library 0.25.1 obtains
+  fresh provisioning for each native acquisition in explicit `cloud` mode.
+  File provisioning and the compatible external source remain available.
+  A short supervised E15 run confirmed moving-map updates, with a median bridge
+  publication interval of 2.002 seconds and a maximum of 6.048 seconds.
+  Integration 0.16.1 corrects prior-cache accumulation, verified by offline replay.
+  The installation remains `observe_only`. Longer daily use, host-reboot recovery
+  and the session-renewal edge remain open in the [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).
 - **Live marker semantics** — the live mower/station interpretation matches repeated E15 observations but is not a vendor-documented protocol contract. It is display-only and never drives mower control.
 
 ---
