@@ -192,7 +192,7 @@ class _StaticMapSource(MapSource):
     def __init__(
         self,
         *args,
-        response: bytes | BaseException,
+        response: bytes | BaseException | None,
         response_etag: str | None = None,
         **kwargs,
     ) -> None:
@@ -250,6 +250,28 @@ def test_map_source_throttles_idle_and_switches_to_streaming(tmp_path: Path) -> 
     asyncio.run(source.async_refresh(streaming=True))
     asyncio.run(source.async_refresh(streaming=True))
 
+    assert source.streaming_requests == [False, True]
+
+
+def test_external_stream_304_preserves_original_capture_time_and_raw_cache(tmp_path: Path) -> None:
+    cache_file = tmp_path / "latest.mapbundle"
+    encoded = _bundle()
+    source = _StaticMapSource(
+        cast(HomeAssistant, _FakeHass()),
+        settings=_settings(),
+        device_id=_DEVICE_ID,
+        cache_file=cache_file,
+        response=encoded,
+    )
+    original = asyncio.run(source.async_refresh())
+    source._response = None  # A conditional GET returns 304 after changing to stream mode.
+
+    unchanged = asyncio.run(source.async_refresh(streaming=True))
+
+    assert unchanged is original
+    assert unchanged.captured_at == datetime.fromtimestamp(1_700_000_000, tz=UTC)
+    assert source.status.state == "healthy", "HTTP success does not make a capture newer"
+    assert read_cached_bundle(cache_file) == encoded
     assert source.streaming_requests == [False, True]
 
 
