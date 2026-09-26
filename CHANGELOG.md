@@ -21,6 +21,28 @@ The session store has kept storage version 1 since 0.7.0 and the options have
 kept their keys since 0.11.0. An older version ignores an option it does not
 know, but saving the options there drops it.
 
+## 0.16.0 - 2026-09-26
+
+### Bridge cloud activity
+
+- Reads the bridge's separate cloud status when no local status or recent
+  confirmed command supplies activity. A healthy recent cloud reading can
+  select map streaming during mowing, paused work or returning. Its cloud source,
+  receipt time and failures remain visible. Missing, invalid, failed, future or
+  expired readings cannot select streaming.
+- Cloud status never confirms a command or changes which command is sent.
+  Mission status `idle` no longer means `docked` in bridge mode, because the
+  payload also occurs when an inactive mower is away from the dock. The raw
+  activity remains visible while Home Assistant's dock position is unknown.
+- Requires bridge 0.13.0 for cloud status. Older bridges retain their previous
+  local/command evidence. No entity identity, option or session storage migration.
+- Evidence: synthetic parser, coordinator, entity and command-boundary tests.
+  Moving native-map acceptance remains open in #8.
+
+Upgrade: back up and replace the integration, run the configuration check and
+restart Home Assistant. Rollback: restore integration 0.15.4 and the preceding
+bridge app backup. Keep `observe_only` unless separately opting into controls.
+
 ## 0.15.4 - 2026-09-25
 
 ### Complete map downloads

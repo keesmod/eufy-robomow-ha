@@ -227,6 +227,8 @@ export interface MapDemandSummary {
   ended_at: string;
   end: MapAcquisitionEnd;
   cancellation_confirmed: boolean;
+  /** Fixed library failure category only, never protocol payloads or exception text. */
+  cancellation_failure?: MapAcquisitionResult['cancellationFailure'];
   cleanup_confirmed: boolean;
   /** Snapshots this demand published. */
   published: number;
@@ -242,7 +244,7 @@ export interface MapStatus {
   age_ms: number | null;
   /** True when a bundle is served but the last demand failed. */
   stale: boolean;
-  /** Stable code of the last failed demand, null after a demand that published. */
+  /** Stable code of the last failed demand, null after a demand that published and ended cleanly. */
   error: string | null;
   acquiring: boolean;
   /** A stream request arrived within the lease. */
@@ -277,7 +279,8 @@ function etagMatches(header: string | undefined, etag: string): boolean {
  * `stream` request keeps demands running for the lease, otherwise one demand per idle interval
  * refreshes the map and ends once the full cleaning path arrived. Every complete snapshot passes
  * the library's decoder before it replaces the bundle, and a failed demand never removes it.
- * Nothing is replayed, and after a demand that published nothing the next one waits.
+ * Nothing is replayed. Failed demands back off, and uncertain cancellation or cleanup blocks
+ * further acquisition until the bridge restarts.
  */
 export class MowerMaps {
   readonly #provision: (id: string, signal: AbortSignal) => Promise<MapSessionProvisioning>;
@@ -415,6 +418,7 @@ export class MowerMaps {
         ended_at: iso(this.#now()),
         end: result.reason,
         cancellation_confirmed: result.cancellationConfirmed,
+        ...(result.cancellationFailure ? { cancellation_failure: result.cancellationFailure } : {}),
         cleanup_confirmed: cleanupConfirmed,
         published: demand.published,
         rejected: demand.rejected,
@@ -425,6 +429,13 @@ export class MowerMaps {
       // bridge stops acquiring as well until it restarts, the last good bundle stays served.
       this.#disabled = true;
       failure = 'mower_map_cleanup_unconfirmed';
+    } else if (result?.reason === 'cancel_unconfirmed') {
+      // Closing our sockets does not confirm the peer stopped its transfer. Do not start
+      // another demand after uncertain cancellation, even when this one produced a map.
+      this.#disabled = true;
+      failure = 'mower_map_cancel_unconfirmed';
+    } else if (failure === null && result && !['demand_expired', 'aborted', 'disconnected', 'shutdown', 'stream_ended'].includes(result.reason)) {
+      failure = `mower_map_${result.reason}`;
     }
     if (failure === null && demand.published === 0) failure = result ? endCode(demand, result.reason) : 'internal_error';
     this.#finish(failure);

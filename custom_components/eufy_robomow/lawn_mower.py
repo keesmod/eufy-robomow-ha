@@ -37,16 +37,15 @@ LOCAL_ACTIVITIES: dict[str, LawnMowerActivity] = {
 # definition. Nothing here is inferred from age, absence or inactivity. Library
 # 0.22.0 reads DP 107 as the mower's mission status: every mowing mission reports
 # mowing or paused, the recharge mission returning, and a message without a
-# mission idle, which reads as docked like the local backend's idle task. No E15
-# payload identifies docked, charging or error, and a missing or invalid status
-# field leaves the activity unknown.
+# mission idle. Idle does not establish a dock arrival: the same mission status
+# can occur after a stop on the lawn. It remains an explicit attribute while the
+# entity activity is unknown. Missing and invalid status also stay unknown.
 BRIDGE_ACTIVITIES: dict[str, LawnMowerActivity] = {
     "mowing": LawnMowerActivity.MOWING,
     "paused": LawnMowerActivity.PAUSED,
     "returning": LawnMowerActivity.RETURNING,
     "docked": LawnMowerActivity.DOCKED,
     "charging": LawnMowerActivity.DOCKED,
-    "idle": LawnMowerActivity.DOCKED,
     "error": LawnMowerActivity.ERROR,
 }
 
@@ -110,9 +109,8 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
     @property
     def activity(self) -> LawnMowerActivity | None:
         if self.coordinator.backend == BACKEND_BRIDGE:
-            # A reported poll or, while recent, the activity a confirmed command
-            # reflected. The E15's query replies carry no DP 107, so without the
-            # command the activity would stay unknown and resume unreachable.
+            # Local reports and recent confirmed commands take precedence over
+            # the optional cloud reading, whose receipt time and source stay explicit.
             evidence = self.coordinator.bridge_activity_evidence
             return BRIDGE_ACTIVITIES.get(evidence[0]) if evidence else None
         # DP 1, DP 2 and DP 118 from the local status reply, and DP 107 from a
@@ -123,7 +121,7 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
 
     @property
     def extra_state_attributes(self) -> dict:
-        attributes = {
+        attributes: dict[str, object] = {
             "operating_mode": self.coordinator.operating_mode,
             "backend": self.coordinator.backend,
             "telemetry_updated_at": self.coordinator.last_local_update,
@@ -145,10 +143,27 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
             )
             attributes["bridge_error"] = self.coordinator.bridge_error
             attributes["bridge_control"] = self.coordinator.bridge_control
+            cloud = self.coordinator.bridge_cloud_status
+            attributes["bridge_cloud_status"] = cloud.status if cloud else None
+            attributes["bridge_cloud_activity"] = cloud.activity if cloud else None
+            attributes["bridge_cloud_source"] = cloud.source if cloud else None
+            attributes["bridge_cloud_observed_at"] = (
+                cloud.observed_at.isoformat() if cloud and cloud.observed_at else None
+            )
+            attributes["bridge_cloud_age_ms"] = cloud.age_ms if cloud else None
+            attributes["bridge_cloud_stale"] = cloud.stale if cloud else None
+            attributes["bridge_cloud_error"] = cloud.error if cloud else None
         return attributes
 
     async def async_start_mowing(self) -> None:
-        action = "resume" if self.activity == LawnMowerActivity.PAUSED else "start"
+        if self.coordinator.backend == BACKEND_BRIDGE:
+            # Cloud display data never selects a physical command. The bridge
+            # still validates its own fresh local state before any write.
+            local = self.coordinator.bridge_local_activity_evidence
+            paused = local is not None and local[0] == "paused"
+        else:
+            paused = self.activity == LawnMowerActivity.PAUSED
+        action = "resume" if paused else "start"
         await self.coordinator.async_send_mower_command(action)
 
     async def async_pause(self) -> None:

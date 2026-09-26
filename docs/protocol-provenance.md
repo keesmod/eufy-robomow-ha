@@ -68,8 +68,9 @@ the source and evidence of the
 Every mowing mission reports `mowing` or `paused`, the Box, zone and scheduled
 tasks included. A message without mission, sub-mission, state or error flag
 reports `idle`, the default payload, hibernation and field 6 = 1 included.
-Mower bridge 0.10.1 serves these readings, and bridge mode shows `idle` as
-docked and ends its session there.
+Mower bridge 0.10.1 serves these readings. Integration 0.16.0 removes the
+previous bridge mapping from `idle` to docked, because mission inactivity
+alone does not establish a physical dock arrival.
 
 Exact remaining limits. No payload identifies `docked`, `charging` or `error`,
 and dock arrival is never inferred from inactivity. `idle` means no mission and
@@ -80,6 +81,15 @@ transitional first frame, the map-saving payload, a paused return and missions
 that do not mow are withheld, so a query that carries one of them reports
 `status` as `invalid`, and a query without DP 107 reports `missing`. Nothing is
 derived from the age of a report or the absence of a data point.
+
+Bridge 0.13.0 reads cloud activity separately through library 0.25.1
+`queryCloudState`. One authenticated device-get response supplies DP 107 and
+DP 155, with explicit cloud receipt time. The owned E15 returned typed `idle`
+on this route while the owner reported it docked on 2026-09-26. Integration
+0.16.0 can use a healthy cloud receipt no older than 90 seconds for display and
+map streaming, after local and confirmed-command evidence. This is not a
+device timestamp and never confirms a bridge command. Live moving-map
+acceptance remains in #8.
 
 The local backend's status reply never carries DP 107, but the cloud DPS do.
 Since integration 0.12.1 the local backend reads DP 107 from them with the
