@@ -107,16 +107,15 @@ and the settings route also writes the mow speed and the blade speed.
   declared point. Rain and child protection and the bird-view capture are read
   only, in either settings mode.
   Settings writes need no `control` mode and `control` mode opens no settings
-  write. The map route exists only with map provisioning, which
-  the bridge cannot obtain itself: the library's acquisition needs private,
-  expiring `MapSessionProvisioning` from the current relay route, and the
-  operator supplies it as a file. Without it the state document reports
+  write. The map route needs private, expiring `MapSessionProvisioning`.
+  In explicit `cloud` mode the library supplies fresh provisioning for every
+  acquisition. File mode retains the operator-supplied file route. Without
+  configured provisioning the state document reports
   `routes.maps` as `false` and the map route answers `404`.
-- No live map acquisition has run through the bridge. The library's
-  acquisition and decoder are software-verified, a fresh acquisition decoded
-  end to end on the owned E15 is still open in the library, and this bridge
-  tests the route, the bundle and the demand scheduling with synthetic
-  snapshots only. Map acceptance on the owned E15 is issue #8.
+- Longer native-map use, host-reboot recovery and the session-renewal edge
+  remain open. Bridge 0.13.0 on library 0.25.1 passed docked acquisitions and
+  a short supervised E15 moving-map run, with cancellation and cleanup confirmed.
+  See the [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).
 - No map editing, zone or selection, and no path history across demands. The
   bundle carries the three transport files as the library retained them. The
   library's `MowerPathAccumulator` is not part of this contract, the

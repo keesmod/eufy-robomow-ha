@@ -3,15 +3,15 @@
 How to run the dedicated mower bridge from `bridge/` as a container or as a
 local Home Assistant app, and how to upgrade, restart, back up and roll it
 back. Everything here is local: no image is published and no app repository is
-listed. Version 0.10.1 serves state routes with the typed settings and, only
+listed. Version 0.13.0 serves state routes with the typed settings and, only
 behind the explicit `operating_mode: control` opt-in with a stop route, the
 start, pause, resume and stop routes. The separate `settings_mode: write`
 opt-in enables the settings route for mow height, volume, smart no-go zones
-and sparse lawn optimization. It pins library 0.22.0, which reads DP 107 as
+and sparse lawn optimization. It pins library 0.25.1, which reads DP 107 as
 the mower's mission status, confirms the start, pause, resume and stop commands,
 and reads and writes the settings behind its own opt-in.
 On the owned E15 a stop ends the task and returns the mower to the dock. With
-an operator-supplied map provisioning file it also serves the read-only map
+cloud provisioning or an operator-supplied file it also serves the read-only map
 route, see [Map provisioning](#map-provisioning-optional).
 
 ## What is separate from a camera installation
@@ -120,7 +120,7 @@ The app data lives in the app's `/data`, which Home Assistant backups include.
 For fresh account-based provisioning, set app option
 `map_provisioning_mode: cloud`, or environment variable
 `EUFY_MOWER_MAP_PROVISIONING_MODE=cloud`. Leave `map_provisioning_file` unset.
-Bridge 0.12.0 on library 0.24.0 then requests private provisioning for each
+Bridge 0.13.0 on library 0.25.1 requests fresh private provisioning for each
 acquisition and uses its existing session renewal when needed. No file needs
 manual renewal. Back up the private data directory and options before enabling
 this experimental route. Native map acceptance and controlled source migration
@@ -274,8 +274,10 @@ distance, pad direction, path distance, travel and blade speed) read the
 bridge's `work_parameters` in bridge mode, and the travel and blade speeds are
 written through the same settings route and opt-ins, see
 [Work parameters through the bridge](protocol-provenance.md#work-parameters-through-the-bridge).
-The map
-route is read-only, needs the operator's provisioning and has not acquired a
-live map through the bridge yet, that map acceptance is part of
-keesmod/eufy-robomow-ha#8 as well. Physical control keeps its explicit opt-in
-and supervised validation.
+The read-only map route accepts cloud or file provisioning. Docked downloads
+and a short supervised E15 moving-map run passed on bridge 0.13.0 and library
+0.25.1. Integration 0.16.1's coverage fix passed offline replay of that run and
+separate installation readback. Longer daily use, host-reboot recovery and the
+session-renewal edge remain open, see the [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).
+The current installation remains `observe_only`. Physical control keeps its
+explicit opt-in and supervised validation.

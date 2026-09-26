@@ -17,7 +17,7 @@ backends and rollback are described in
 
 | Component | Version | Pinned inputs |
 | --- | --- | --- |
-| Integration `eufy_robomow` | 0.16.0 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
+| Integration `eufy_robomow` | 0.16.1 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
 | Mower bridge, container image | 0.13.0 | `@keesmod/eufy-mega-client` 0.25.1 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
 | Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.13.0 | the same inputs, built by the Supervisor on the host |
 
@@ -28,7 +28,8 @@ archive matched the release manifest and checksums, with SHA-256
 The decompressed archive is byte-identical to the candidate that passed a
 30-second docked demand and a ten-second explicit abort, both with confirmed
 cancellation and cleanup. [Library PR #203](https://github.com/keesmod/eufy-mega-client/pull/203)
-records the observation. This does not complete moving-map acceptance.
+records the docked observation. The later short moving-map run and the
+integration 0.16.1 replay fix are recorded in the [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).
 
 The checksums of every candidate that was built are recorded in #8. The
 candidates of 0.15.0 and 0.15.1 with bridge 0.11.0, built from `64ce862` and
@@ -197,10 +198,17 @@ below retain their stated scope.
   integration 0.15.4 confirmed the HA source switch, a visible cached map during
   a bridge outage, automatic fresh acquisition after restart and rollback to a
   healthy external source. Existing identities, session objects, dashboard
-  references and both map caches were preserved. Continuous updates while
-  mowing and longer observation remain open.
-- The `external` map source. It has been in daily use on the owner's
-  installation since 0.5.0, but native map acceptance has not passed.
+  references and both map caches were preserved. On 2026-09-26, bridge 0.13.0
+  and library 0.25.1 passed a short supervised E15 moving-map run. During the
+  active window, bridge publications had a median interval of 2.002 seconds
+  and a maximum of 6.048 seconds, with cancellation and cleanup confirmed.
+  Integration 0.16.1 prevents old cached paths and tracking from seeding the
+  current task. It passed offline replay and separate installation readback,
+  without a further mowing run. The configuration remains `observe_only`.
+  Longer daily use, host-reboot recovery and the session-renewal edge remain
+  open, see the [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).
+- The compatible `external` HTTPS map source remains available as a manual
+  recovery route.
 - The no-go zones on the map since 0.15.1, from map-record field 12. The
   owner's one zone was compared with the app before the change, and the
   drawing is software-verified with synthetic geometry.
@@ -214,8 +222,8 @@ below retain their stated scope.
 
 ## Outstanding obligations
 
-- Native map acceptance, item 2 of #8.
-- Observed native updates during mowing and longer daily-use observation.
+- Broader native map acceptance, item 2 of #8: longer daily use,
+  host-reboot recovery and the session-renewal edge beyond the short observed run.
 - The licensing boundary and an explicit authorisation before any publication.
 
 ## Compatibility
