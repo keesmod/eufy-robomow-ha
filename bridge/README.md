@@ -729,7 +729,7 @@ document's `maps.error`:
 | `mower_map_negotiation_timeout`, `mower_map_connection_failed`, `mower_map_protocol_error`, `mower_map_stream_ended`, `mower_map_cancel_unconfirmed` | The library's failed demand reason, also after a valid map. Unconfirmed cancellation blocks further acquisition |
 | `mower_map_cleanup_unconfirmed`                                                                                               | Local cleanup was not confirmed, no further demand until a restart         |
 | `map_undecodable`, `map_boundary_missing`, `map_file_size`                                                                    | The demand's snapshots failed the gate                                     |
-| `request_aborted`                                                                                                             | The bridge stopped during the demand                                       |
+| `request_aborted`                                                                                                             | The bridge stopped during the demand, or a session renewal ended its provisioning |
 
 The bundle is private lawn geometry. It is served only with the bearer token,
 never logged and never part of the state document. The bridge keeps the last
