@@ -18,8 +18,17 @@ backends and rollback are described in
 | Component | Version | Pinned inputs |
 | --- | --- | --- |
 | Integration `eufy_robomow` | 0.16.1 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
-| Mower bridge, container image | 0.13.0 | `@keesmod/eufy-mega-client` 0.25.1 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
-| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.13.0 | the same inputs, built by the Supervisor on the host |
+| Mower bridge, container image | 0.13.1 | `@keesmod/eufy-mega-client` 0.25.2 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
+| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.13.1 | the same inputs, built by the Supervisor on the host |
+
+Library [0.25.2](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.25.2)
+was published separately with the owner's approval from `c41af2c`
+([library PR #205](https://github.com/keesmod/eufy-mega-client/pull/205)). It
+renews a map-enabled cloud session before map provisioning would be refused.
+Its downloaded archive matched the release manifest and checksums, with SHA-256
+`296876ef8dc52a9d931ef4f0efe3cf258563f11a06e853c7a4bebce32f71fd9f`, and is
+byte-identical to the release rehearsal of the same commit. This change is
+software-verified only.
 
 Library [0.25.1](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.25.1)
 was published separately with the owner's approval from `de5b45b`. Its downloaded
@@ -205,8 +214,10 @@ below retain their stated scope.
   Integration 0.16.1 prevents old cached paths and tracking from seeding the
   current task. It passed offline replay and separate installation readback,
   without a further mowing run. The configuration remains `observe_only`.
-  Longer daily use, host-reboot recovery and the session-renewal edge remain
-  open, see the [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).
+  Longer daily use and host-reboot recovery remain open, see the
+  [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).
+  Bridge 0.13.1 on library 0.25.2 renews the cloud session before map
+  provisioning would be refused. That is software-verified only.
 - The compatible `external` HTTPS map source remains available as a manual
   recovery route.
 - The no-go zones on the map since 0.15.1, from map-record field 12. The
@@ -223,7 +234,8 @@ below retain their stated scope.
 ## Outstanding obligations
 
 - Broader native map acceptance, item 2 of #8: longer daily use,
-  host-reboot recovery and the session-renewal edge beyond the short observed run.
+  host-reboot recovery, an observed natural session renewal with bridge 0.13.1
+  and a renewal during a running stream demand, beyond the short observed run.
 - The licensing boundary and an explicit authorisation before any publication.
 
 ## Compatibility
