@@ -617,10 +617,10 @@ helper.
   moving-map updates, with a median bridge publication interval of 2.002
   seconds and a maximum of 6.048 seconds.
   Integration 0.16.1 corrects prior-cache accumulation, verified by offline replay.
-  The installation remains `observe_only`. Longer daily use and host-reboot
-  recovery remain open in the [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).
   Bridge 0.13.1 renews the cloud session before map provisioning would be
-  refused, software-verified only.
+  refused. On 2026-09-27 that renewal, a mowing task's map stream and a host
+  reboot passed on the owned E15, see the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097). Longer daily use
+  remains open.
 - **Live marker semantics** — the live mower/station interpretation matches repeated E15 observations but is not a vendor-documented protocol contract. It is display-only and never drives mower control.
 
 ---

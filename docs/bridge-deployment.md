@@ -278,8 +278,8 @@ written through the same settings route and opt-ins, see
 The read-only map route accepts cloud or file provisioning. Docked downloads
 and a short supervised E15 moving-map run passed on bridge 0.13.0 and library
 0.25.1. Integration 0.16.1's coverage fix passed offline replay of that run and
-separate installation readback. Longer daily use and host-reboot recovery
-remain open, see the [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).
-Bridge 0.13.1's session-renewal fix is software-verified only.
-The current installation remains `observe_only`. Physical control keeps its
-explicit opt-in and supervised validation.
+separate installation readback. On 2026-09-27 bridge 0.13.1 passed a control
+window, a session renewal during a running stream demand and a host reboot,
+see the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097). Longer daily use remains open. The current
+installation runs in `control` after the owner's opt-in. Physical control
+keeps its explicit opt-in and supervised validation.

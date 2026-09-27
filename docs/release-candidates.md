@@ -27,8 +27,10 @@ was published separately with the owner's approval from `c41af2c`
 renews a map-enabled cloud session before map provisioning would be refused.
 Its downloaded archive matched the release manifest and checksums, with SHA-256
 `296876ef8dc52a9d931ef4f0efe3cf258563f11a06e853c7a4bebce32f71fd9f`, and is
-byte-identical to the release rehearsal of the same commit. This change is
-software-verified only.
+byte-identical to the release rehearsal of the same commit. On the owned E15
+the bridge renewed 79 seconds before the local expiry between idle demands,
+and once during a running stream demand, which ended normally, see the
+[first](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857287766) and [second](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097) receipts.
 
 Library [0.25.1](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.25.1)
 was published separately with the owner's approval from `de5b45b`. Its downloaded
@@ -176,6 +178,14 @@ Integration with the bridge backend:
   (0.15.0 with bridge 0.11.0 on library 0.23.0, 2026-09-25).
 - The bridge renewed its lapsed cloud session by itself (bridge 0.8.0,
   2026-09-24).
+- Start from idle at the station and from charging, pause, resume through
+  start while paused, and dock, each confirmed by the bridge's fresh report,
+  with the starts and the dock also checked in the eufy app (0.16.1 with
+  bridge 0.13.1 on library 0.25.2,
+  2026-09-27, [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097)).
+- The cloud session renewed before map provisioning would be refused, between
+  idle demands and during a running stream demand, which ended normally
+  (bridge 0.13.1 on library 0.25.2, 2026-09-27).
 - No command was repeated after an uncertain answer, a bridge restart or a
   backend switch (2026-09-24).
 
@@ -192,6 +202,12 @@ Deployment:
   also covered the integration from 0.14.2 to 0.14.1 and back, and the app from
   0.10.1 to 0.10.0 and back. Every entity id, unique id, session and dashboard
   reference was kept, and no command was sent (2026-09-25).
+- The app was updated from 0.13.0 to 0.13.1 with a Supervisor backup, and the
+  persisted session was kept (2026-09-27).
+- After a host reboot the Supervisor started the app by itself. The bridge
+  restored its session without a login, the mower entity offered control again
+  and the map was healthy about 4.7 minutes after the reboot request, with no
+  manual step (2026-09-27, [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097)).
 
 ## Experimental
 
@@ -213,11 +229,13 @@ below retain their stated scope.
   and a maximum of 6.048 seconds, with cancellation and cleanup confirmed.
   Integration 0.16.1 prevents old cached paths and tracking from seeding the
   current task. It passed offline replay and separate installation readback,
-  without a further mowing run. The configuration remains `observe_only`.
-  Longer daily use and host-reboot recovery remain open, see the
-  [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).
-  Bridge 0.13.1 on library 0.25.2 renews the cloud session before map
-  provisioning would be refused. That is software-verified only.
+  without a further mowing run. On 2026-09-27 bridge 0.13.1 on library
+  0.25.2 streamed 87 demands during a mowing task, with 2,447 publications and
+  none rejected. Three ended with `connection_failed` while the mower's Wi-Fi
+  signal was weakest, and the bridge resumed after its retry interval each
+  time. The session renewal and a host reboot passed, see the
+  [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097). The installation now runs in `control`. Longer daily use
+  remains open.
 - The compatible `external` HTTPS map source remains available as a manual
   recovery route.
 - The no-go zones on the map since 0.15.1, from map-record field 12. The
@@ -233,9 +251,8 @@ below retain their stated scope.
 
 ## Outstanding obligations
 
-- Broader native map acceptance, item 2 of #8: longer daily use,
-  host-reboot recovery, an observed natural session renewal with bridge 0.13.1
-  and a renewal during a running stream demand, beyond the short observed run.
+- Broader native map acceptance, item 2 of #8: longer daily use beyond the
+  observed windows.
 - The licensing boundary and an explicit authorisation before any publication.
 
 ## Compatibility
@@ -263,7 +280,8 @@ Combinations run on the owner's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
-| 0.15.1 | 0.11.0 (0.23.0) | the current candidate, matched file for file after its deployment on 2026-09-25 |
+| 0.16.1 | 0.13.1 (0.25.2) | the current candidate, matched file for file after its deployment, control window, session renewals and host reboot of 2026-09-27 |
+| 0.15.1 | 0.11.0 (0.23.0) | matched file for file after its deployment on 2026-09-25 |
 | 0.15.0 | 0.11.0 (0.23.0) | matched file for file after its deployment, speed window of 2026-09-25 |
 | 0.14.2 | 0.10.1 (0.22.0) | bridge-mode check, settings windows and migration rehearsal of 2026-09-25 |
 | 0.14.0 | 0.10.0 (0.20.0) | deployed with settings read only, 2026-09-25 |
