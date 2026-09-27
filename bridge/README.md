@@ -272,7 +272,8 @@ Bridge state, for example:
 `auth.state` is the library's authentication state, so a session whose reuse
 window has passed reads as `disconnected` until a route renews it. With cloud
 map provisioning this starts 65 seconds plus `cloud_timeout_ms` plus 5 seconds
-before the end of the window, while the old session still works.
+before the end of the window, while the old session is still valid but the
+library already refuses new requests on it.
 `auth.last_error` is the stable library or bridge error code of the last
 attempt, the startup attempt or a renewal, or `null` after success, and
 `auth.attempted_at` is the time of that attempt. `mowers` summarises the discovery cache. In `control` mode
