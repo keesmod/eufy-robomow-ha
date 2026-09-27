@@ -248,7 +248,8 @@ and since integration 0.11.0 the map entity can read the bridge's map route.
 Activity reports mowing, paused, returning and idle from the E15 mission
 status read by library 0.22.0, see [DP 107 activity](protocol-provenance.md#dp-107-activity).
 Every mowing mission counts, the Box, zone and scheduled tasks included. Idle
-reads as docked and ends a bridge-mode session. Docked, charging and error have
+ends a bridge-mode session. Since integration 0.16.0 it no longer reads as
+docked, because it also occurs away from the dock. Docked, charging and error have
 no confirmed payload and are never inferred, and mowing progress stays
 unconfirmed. Commands need two opt-ins: the integration's operating mode
 `control` and the bridge's `operating_mode: control` with its required
@@ -262,8 +263,8 @@ the map-saving payload the library received at dock arrival. The library's
 `return` over DP 3 is ignored by the owned firmware from paused and from the
 stopped task, so the bridge has no return route and cannot stop the mower in
 place. Leave the bridge at `observe_only` unless the owner opts in to
-control. The bridge ran in control in the supervised windows of 2026-09-24
-and 2026-09-27, see keesmod/eufy-robomow-ha#8. Since integration 0.14.0 the cut
+control. The bridge ran in control in the supervised windows of 2026-09-24,
+2026-09-25 and 2026-09-27, see keesmod/eufy-robomow-ha#8. Since integration 0.14.0 the cut
 height, volume and the five local switches read the bridge's state document in
 bridge mode. Writes need the integration's `control` mode and the bridge's
 separate `settings_mode: write`, and only cut height, volume, smart no-go
@@ -282,5 +283,4 @@ separate installation readback. On 2026-09-27 bridge 0.13.1 passed a control
 window, a session renewal during a running stream demand and a host reboot,
 see the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097). Longer daily use remains open. The current
 installation runs in `control` after the owner's opt-in, with settings writes
-disabled. Physical control
-keeps its explicit opt-in and supervised validation.
+disabled. Physical control keeps its explicit opt-in and supervised validation.
