@@ -116,10 +116,11 @@ and the settings route also writes the mow speed and the blade speed.
   docked acquisitions and a short supervised E15 moving-map run, with
   cancellation and cleanup confirmed. Bridge 0.13.1 on library 0.25.2 renews
   the cloud session before map provisioning would be refused. On 2026-09-27 it
-  renewed during a running stream demand, which ended normally, and recovered
-  from a host reboot, see the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097). A weak Wi-Fi signal at the far
-  side of the lawn ended three stream demands with `connection_failed`, and the
-  bridge resumed after its retry interval.
+  renewed during a running stream demand, which ended normally. After a host
+  reboot it started through `boot: auto` and restored its session, see the
+  [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097). Three stream demands ended with
+  `connection_failed` while the mower reported its weakest Wi-Fi readings. The
+  bridge served the last good map and resumed after its retry interval.
 - No map editing, zone or selection, and no path history across demands. The
   bundle carries the three transport files as the library retained them. The
   library's `MowerPathAccumulator` is not part of this contract, the

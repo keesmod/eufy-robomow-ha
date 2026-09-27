@@ -261,9 +261,9 @@ task and the mower returns to the dock by itself, and a confirmed dock carries
 the map-saving payload the library received at dock arrival. The library's
 `return` over DP 3 is ignored by the owned firmware from paused and from the
 stopped task, so the bridge has no return route and cannot stop the mower in
-place. Leave the bridge at `observe_only` unless a supervised test with the
-app at hand is planned, the bridge has not yet run in control mode against
-the mower, see keesmod/eufy-robomow-ha#8. Since integration 0.14.0 the cut
+place. Leave the bridge at `observe_only` unless the owner opts in to
+control. The bridge ran in control in the supervised windows of 2026-09-24
+and 2026-09-27, see keesmod/eufy-robomow-ha#8. Since integration 0.14.0 the cut
 height, volume and the five local switches read the bridge's state document in
 bridge mode. Writes need the integration's `control` mode and the bridge's
 separate `settings_mode: write`, and only cut height, volume, smart no-go
@@ -281,5 +281,6 @@ and a short supervised E15 moving-map run passed on bridge 0.13.0 and library
 separate installation readback. On 2026-09-27 bridge 0.13.1 passed a control
 window, a session renewal during a running stream demand and a host reboot,
 see the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097). Longer daily use remains open. The current
-installation runs in `control` after the owner's opt-in. Physical control
+installation runs in `control` after the owner's opt-in, with settings writes
+disabled. Physical control
 keeps its explicit opt-in and supervised validation.

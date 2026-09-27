@@ -94,7 +94,8 @@ tests on Home Assistant 2026.7.2, and the rehearsal ran on Home Assistant
 owner's Home Assistant OS installation with the owned E15 (T2880) on firmware
 6.9.28. A read-only check of the owner's running Anker eufy app on
 2026-09-25 confirmed that version again. The earlier control and settings
-windows did not re-read the firmware during each window.
+windows did not re-read the firmware during each window, and the 2026-09-27
+receipts do not record it.
 
 ## Build and verify
 
@@ -181,8 +182,8 @@ Integration with the bridge backend:
 - Start from idle at the station and from charging, pause, resume through
   start while paused, and dock, each confirmed by the bridge's fresh report,
   with the starts and the dock also checked in the eufy app (0.16.1 with
-  bridge 0.13.1 on library 0.25.2,
-  2026-09-27, [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097)).
+  bridge 0.13.1 on library 0.25.2, 2026-09-27,
+  [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097)).
 - The cloud session renewed before map provisioning would be refused, between
   idle demands and during a running stream demand, which ended normally
   (bridge 0.13.1 on library 0.25.2, 2026-09-27).
@@ -204,10 +205,12 @@ Deployment:
   reference was kept, and no command was sent (2026-09-25).
 - The app was updated from 0.13.0 to 0.13.1 with a Supervisor backup, and the
   persisted session was kept (2026-09-27).
-- After a host reboot the Supervisor started the app by itself. The bridge
-  restored its session without a login, the mower entity offered control again
-  and the map was healthy about 4.7 minutes after the reboot request, with no
-  manual step (2026-09-27, [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097)).
+- After a host reboot the Supervisor started the app through `boot: auto`.
+  The bridge restored its session without a login, the mower entity offered
+  control again and the map was healthy about 4.7 minutes after the reboot
+  request. The mower entity read `unknown` instead of `docked` until a
+  confirmed command or a local report (2026-09-27,
+  [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097)).
 
 ## Experimental
 
@@ -228,14 +231,15 @@ below retain their stated scope.
   active window, bridge publications had a median interval of 2.002 seconds
   and a maximum of 6.048 seconds, with cancellation and cleanup confirmed.
   Integration 0.16.1 prevents old cached paths and tracking from seeding the
-  current task. It passed offline replay and separate installation readback,
-  without a further mowing run. On 2026-09-27 bridge 0.13.1 on library
-  0.25.2 streamed 87 demands during a mowing task, with 2,447 publications and
-  none rejected. Three ended with `connection_failed` while the mower's Wi-Fi
-  signal was weakest, and the bridge resumed after its retry interval each
-  time. The session renewal and a host reboot passed, see the
-  [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097). The installation now runs in `control`. Longer daily use
-  remains open.
+  current task. It passed offline replay and separate installation readback.
+  The mowing task of 2026-09-27 ran on 0.16.1, but its receipt does not assess
+  path coverage. On 2026-09-27 bridge 0.13.1 on library 0.25.2 streamed 87
+  demands during a mowing task, with 2,447 publications and none rejected.
+  Three ended with `connection_failed` while the mower reported its weakest
+  Wi-Fi readings, and the bridge resumed after its retry interval each time.
+  A session renewal during a running stream demand and a host reboot passed,
+  see the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097). The installation now runs in
+  `control` with settings writes disabled. Longer daily use remains open.
 - The compatible `external` HTTPS map source remains available as a manual
   recovery route.
 - The no-go zones on the map since 0.15.1, from map-record field 12. The
