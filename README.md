@@ -613,8 +613,9 @@ helper.
 - **Map acquisition** — experimental. Bridge 0.13.1 with library 0.25.2 obtains
   fresh provisioning for each native acquisition in explicit `cloud` mode.
   File provisioning and the compatible external source remain available.
-  A short supervised E15 run confirmed moving-map updates, with a median bridge
-  publication interval of 2.002 seconds and a maximum of 6.048 seconds.
+  A short supervised E15 run on bridge 0.13.0 and library 0.25.1 confirmed
+  moving-map updates, with a median bridge publication interval of 2.002
+  seconds and a maximum of 6.048 seconds.
   Integration 0.16.1 corrects prior-cache accumulation, verified by offline replay.
   The installation remains `observe_only`. Longer daily use and host-reboot
   recovery remain open in the [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).

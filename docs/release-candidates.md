@@ -234,8 +234,8 @@ below retain their stated scope.
 ## Outstanding obligations
 
 - Broader native map acceptance, item 2 of #8: longer daily use,
-  host-reboot recovery and an observed natural session renewal with bridge
-  0.13.1, beyond the short observed run.
+  host-reboot recovery, an observed natural session renewal with bridge 0.13.1
+  and a renewal during a running stream demand, beyond the short observed run.
 - The licensing boundary and an explicit authorisation before any publication.
 
 ## Compatibility

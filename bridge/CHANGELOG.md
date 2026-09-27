@@ -34,9 +34,14 @@ the previous version with its options and data.
   that window failed with `mower_map_invalid_provisioning` until the session
   expired and the next idle demand arrived.
 - The bridge code is unchanged. Every route that calls the library already
-  renews a lapsed session first. A provisioning call still running when a
-  renewal starts fails once without retry, and the next demand provisions
-  afresh. Without cloud map provisioning the session window is unchanged.
+  renews a lapsed session first. A renewal now starts while the old session is
+  still valid, so a cloud call, provisioning or LAN handshake still running on
+  it fails once with `request_aborted`, before any write and without retry.
+  A failed map demand is followed by the next one after the retry interval.
+  After signaling, a running map demand uses only its carrier and the relay
+  credentials of its RTC read, so a renewal is not expected to end it. That
+  is not observed yet. Without cloud map provisioning the session window is
+  unchanged.
 - Evidence: software-verified. The library's synthetic regressions pin the
   boundary, restore, fresh login and lease behavior, and the bridge suite
   passes on the published archive. A natural renewal on the owned E15
