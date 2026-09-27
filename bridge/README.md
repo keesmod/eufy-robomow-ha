@@ -112,9 +112,11 @@ and the settings route also writes the mow speed and the blade speed.
   acquisition. File mode retains the operator-supplied file route. Without
   configured provisioning the state document reports
   `routes.maps` as `false` and the map route answers `404`.
-- Longer native-map use, host-reboot recovery and the session-renewal edge
-  remain open. Bridge 0.13.0 on library 0.25.1 passed docked acquisitions and
-  a short supervised E15 moving-map run, with cancellation and cleanup confirmed.
+- Longer native-map use and host-reboot recovery remain open. Bridge 0.13.0
+  on library 0.25.1 passed docked acquisitions and a short supervised E15
+  moving-map run, with cancellation and cleanup confirmed. Bridge 0.13.1 on
+  library 0.25.2 renews the cloud session before map provisioning would be
+  refused. That fix is software-verified only.
   See the [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).
 - No map editing, zone or selection, and no path history across demands. The
   bundle carries the three transport files as the library retained them. The
@@ -268,7 +270,10 @@ Bridge state, for example:
 ```
 
 `auth.state` is the library's authentication state, so a session whose reuse
-window has passed reads as `disconnected` until a route renews it.
+window has passed reads as `disconnected` until a route renews it. With cloud
+map provisioning this starts 65 seconds plus `cloud_timeout_ms` plus 5 seconds
+before the end of the window, while the old session is still valid but the
+library already refuses new requests on it.
 `auth.last_error` is the stable library or bridge error code of the last
 attempt, the startup attempt or a renewal, or `null` after success, and
 `auth.attempted_at` is the time of that attempt. `mowers` summarises the discovery cache. In `control` mode
@@ -724,7 +729,7 @@ document's `maps.error`:
 | `mower_map_negotiation_timeout`, `mower_map_connection_failed`, `mower_map_protocol_error`, `mower_map_stream_ended`, `mower_map_cancel_unconfirmed` | The library's failed demand reason, also after a valid map. Unconfirmed cancellation blocks further acquisition |
 | `mower_map_cleanup_unconfirmed`                                                                                               | Local cleanup was not confirmed, no further demand until a restart         |
 | `map_undecodable`, `map_boundary_missing`, `map_file_size`                                                                    | The demand's snapshots failed the gate                                     |
-| `request_aborted`                                                                                                             | The bridge stopped during the demand                                       |
+| `request_aborted`                                                                                                             | The bridge stopped during the demand, or a session renewal ended its provisioning |
 
 The bundle is private lawn geometry. It is served only with the bearer token,
 never logged and never part of the state document. The bridge keeps the last
