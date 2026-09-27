@@ -112,9 +112,11 @@ and the settings route also writes the mow speed and the blade speed.
   acquisition. File mode retains the operator-supplied file route. Without
   configured provisioning the state document reports
   `routes.maps` as `false` and the map route answers `404`.
-- Longer native-map use, host-reboot recovery and the session-renewal edge
-  remain open. Bridge 0.13.0 on library 0.25.1 passed docked acquisitions and
-  a short supervised E15 moving-map run, with cancellation and cleanup confirmed.
+- Longer native-map use and host-reboot recovery remain open. Bridge 0.13.0
+  on library 0.25.1 passed docked acquisitions and a short supervised E15
+  moving-map run, with cancellation and cleanup confirmed. Bridge 0.13.1 on
+  library 0.25.2 renews the cloud session before map provisioning would be
+  refused. That fix is software-verified only.
   See the [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).
 - No map editing, zone or selection, and no path history across demands. The
   bundle carries the three transport files as the library retained them. The

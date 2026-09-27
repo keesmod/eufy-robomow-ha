@@ -21,6 +21,32 @@ files, because the mower id the integration stores depends on them. A rollback
 of the app restores the app backup that the update created, which brings back
 the previous version with its options and data.
 
+## 0.13.1 - 2026-09-27
+
+### Renew the cloud session before map provisioning is refused
+
+- Pins library 0.25.2. With cloud map provisioning the library now reports the
+  cloud session as lapsed once at most 65 seconds plus one request timeout and
+  a five-second margin remain, 85 seconds with the default `cloud_timeout_ms`.
+  The bridge's existing renewal then runs before the next provisioning, and the
+  following discovery restores the device binding. Before, a session with at
+  most 65 seconds left still counted as connected, so every provisioning in
+  that window failed with `mower_map_invalid_provisioning` until the session
+  expired and the next idle demand arrived.
+- The bridge code is unchanged. Every route that calls the library already
+  renews a lapsed session first. A provisioning call still running when a
+  renewal starts fails once without retry, and the next demand provisions
+  afresh. Without cloud map provisioning the session window is unchanged.
+- Evidence: software-verified. The library's synthetic regressions pin the
+  boundary, restore, fresh login and lease behavior, and the bridge suite
+  passes on the published archive. A natural renewal on the owned E15
+  installation has not been observed yet. That remains part of #8.
+
+Upgrade: install the matching app with a backup of its options and private
+state. No new option, identity or persisted-session migration. The integration
+needs no update. Rollback: restore the 0.13.0 app backup, which reintroduces
+the near-expiry provisioning refusal.
+
 ## 0.13.0 - 2026-09-26
 
 ### Cloud activity and confirmed map cancellation

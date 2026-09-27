@@ -610,14 +610,16 @@ helper.
 ## Known limitations
 
 - **Zone mowing** — the owned E15 app shows Entire, Zone, Box and Spot, but area identifiers and command transport have not been validated. No zone action is exposed; see [zone research](docs/zone-control-research.md).
-- **Map acquisition** — experimental. Bridge 0.13.0 with library 0.25.1 obtains
+- **Map acquisition** — experimental. Bridge 0.13.1 with library 0.25.2 obtains
   fresh provisioning for each native acquisition in explicit `cloud` mode.
   File provisioning and the compatible external source remain available.
   A short supervised E15 run confirmed moving-map updates, with a median bridge
   publication interval of 2.002 seconds and a maximum of 6.048 seconds.
   Integration 0.16.1 corrects prior-cache accumulation, verified by offline replay.
-  The installation remains `observe_only`. Longer daily use, host-reboot recovery
-  and the session-renewal edge remain open in the [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).
+  The installation remains `observe_only`. Longer daily use and host-reboot
+  recovery remain open in the [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).
+  Bridge 0.13.1 renews the cloud session before map provisioning would be
+  refused, software-verified only.
 - **Live marker semantics** — the live mower/station interpretation matches repeated E15 observations but is not a vendor-documented protocol contract. It is display-only and never drives mower control.
 
 ---
