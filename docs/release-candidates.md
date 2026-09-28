@@ -18,8 +18,14 @@ backends and rollback are described in
 | Component | Version | Pinned inputs |
 | --- | --- | --- |
 | Integration `eufy_robomow` | 0.16.1 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
-| Mower bridge, container image | 0.13.1 | `@keesmod/eufy-mega-client` 0.25.2 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
-| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.13.1 | the same inputs, built by the Supervisor on the host |
+| Mower bridge, container image | 0.13.2 | `@keesmod/eufy-mega-client` 0.25.2 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
+| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.13.2 | the same inputs, built by the Supervisor on the host |
+
+Bridge 0.13.2 only raises the default of `local_timeout_ms` from 5000 to 10000,
+so a LAN step outlasts the mower's Wi-Fi outages of 5 to 7 seconds. It is
+software-verified. The owner's installation has run bridge 0.13.1 with that
+option set to 10000 since 2026-09-28, see the
+[bridge changelog](../bridge/CHANGELOG.md) and #8.
 
 Library [0.25.2](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.25.2)
 was published separately with the owner's approval from `c41af2c`
@@ -284,7 +290,7 @@ Combinations run on the owner's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
-| 0.16.1 | 0.13.1 (0.25.2) | the current candidate, matched file for file after its deployment, control window, session renewals and host reboot of 2026-09-27 |
+| 0.16.1 | 0.13.1 (0.25.2) | the previous candidate, matched file for file after its deployment, control window, session renewals and host reboot of 2026-09-27, run with `local_timeout_ms: 10000` since 2026-09-28 |
 | 0.15.1 | 0.11.0 (0.23.0) | matched file for file after its deployment on 2026-09-25 |
 | 0.15.0 | 0.11.0 (0.23.0) | matched file for file after its deployment, speed window of 2026-09-25 |
 | 0.14.2 | 0.10.1 (0.22.0) | bridge-mode check, settings windows and migration rehearsal of 2026-09-25 |

@@ -21,6 +21,53 @@ files, because the mower id the integration stores depends on them. A rollback
 of the app restores the app backup that the update created, which brings back
 the previous version with its options and data.
 
+## 0.13.2 - 2026-09-28
+
+### Wait ten seconds for each LAN step by default
+
+- The default of `local_timeout_ms` rises from 5000 to 10000. Its range of
+  1000 to 60000 is unchanged. The library applies it to each step of a LAN
+  session: connecting with the session-key exchange is one step, and a query
+  is another. Library 0.25.2 stays pinned and the bridge code is otherwise
+  unchanged.
+- The owned E15 drops off Wi-Fi for 5 to 7 seconds at a time, docked and while
+  mowing, even at 77 % signal, at rates from none for hours to several per
+  10 minutes. TCP resends the connection request after about 1, 3 and 7
+  seconds, so with 5 seconds a state query that started in such an outage
+  ended with `request_timeout`, and the integration marked the mower entities
+  unavailable for one poll. Over 13 hours in the night to 2026-09-28 there were
+  30 such timeouts, and every one that was checked fell inside an outage. With
+  10 seconds the attempt at about 7 seconds reaches the mower once it is back
+  and leaves about 3 seconds for the session-key exchange.
+- Trade-off: a mower that is really unreachable now fails a step after 10
+  seconds instead of 5. A state query that connects and then gets no answer
+  can take up to 20 seconds at the bridge. The integration's HTTP timeout of
+  15 seconds still bounds each state request, so such a poll still ends within
+  15 seconds with the entities unavailable. Commands and settings writes open
+  their LAN session with the same deadline. A command's LAN part takes up to
+  two `local_timeout_ms` steps, to connect and then for the command, plus
+  `control_read_back_ms`. The integration waits 75 seconds for a command, so
+  `2 × local_timeout_ms + control_read_back_ms` must stay below 75000 ms,
+  which with the default 10000 ms means a read-back below 55000 ms. This
+  does not count a session renewal or discovery that the bridge may run before
+  the LAN session. Each is bounded by 30 seconds and was already outside the
+  budget before this change. Past the timeout the integration keeps the
+  command uncertain. The bridge may still write the command and finish its
+  read-back, but that outcome is not reported. Nothing is repeated.
+
+Evidence: software-verified. The bridge suite passes with the new default and
+pins the 10000 ms deadline of the state, command and setting sessions. On the
+owner's installation the app option `local_timeout_ms` was set to 10000 on
+bridge 0.13.1 at 07:56 UTC on 2026-09-28. In the first 70 minutes 4 outages
+caused no timeout, where before about half of the outages did. The final
+measurement follows separately in #8.
+
+Upgrade: install the matching app with a backup of its options and private
+state. An installation that sets `local_timeout_ms` keeps its value. Without
+the option the bridge now waits up to 10000 ms per step. No new option,
+identity or persisted-session migration. The integration needs no update.
+Rollback: restore the 0.13.1 app backup, or set `local_timeout_ms: 5000`.
+
 ## 0.13.1 - 2026-09-27
 
 ### Renew the cloud session before map provisioning is refused

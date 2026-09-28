@@ -21,7 +21,7 @@ export const DEFAULT_PORT = 8090;
 export const DEFAULT_BIND_ADDRESS = '127.0.0.1';
 export const DEFAULT_DATA_DIR = '/data/eufy-mower';
 export const DEFAULT_CLOUD_TIMEOUT_MS = 15_000;
-export const DEFAULT_LOCAL_TIMEOUT_MS = 5_000;
+export const DEFAULT_LOCAL_TIMEOUT_MS = 10_000;
 /** A command is refused when the last successful state observation of that mower is older. */
 export const DEFAULT_CONTROL_MAX_STATE_AGE_MS = 30_000;
 /** Library read-back bound after every write. The library accepts 1000 to 60000. */
