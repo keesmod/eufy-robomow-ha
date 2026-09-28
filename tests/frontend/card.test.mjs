@@ -88,7 +88,7 @@ test('the card renders a connected unknown activity on the bridge without empty 
   assert.match(el('mode').textContent, /meldt nu geen activiteit/);
   assert.equal(el('settings-details').hidden, false);
   for (const id of ['start', 'pause', 'dock']) assert.equal(el(id).disabled, true, id);
-  for (const id of ['progress-metric', 'distance-row', 'area-row', 'area-note', 'duration-row']) assert.equal(el(id).hidden, true, id);
+  for (const id of ['progress-metric', '.progress-track', 'distance-row', 'area-row', 'area-note', 'duration-row']) assert.equal(el(id).hidden, true, id);
   const mowing = render('mowing', {backend:'bridge'}, {current_session:{mowing_seconds:120}});
   assert.equal(mowing('duration-row').hidden, false);
   assert.equal(mowing('duration').textContent, '2 min');
@@ -100,7 +100,7 @@ test('the card renders a connected unknown activity on the bridge without empty 
   assert.equal(stale('settings-details').hidden, true);
   const local = render('docked', {backend:'local'});
   assert.equal(local('start').disabled, false);
-  for (const id of ['progress-metric', 'distance-row', 'area-row', 'duration-row']) assert.equal(local(id).hidden, false, id);
+  for (const id of ['progress-metric', '.progress-track', 'distance-row', 'area-row', 'duration-row']) assert.equal(local(id).hidden, false, id);
 });
 test('the history table drops distance and area columns without values', () => {
   const row = {started_at:'2026-09-27T15:42:14Z', mowing_seconds:0, distance_m:null, area_raw:null, start_observed:false, end_observed:false, observation_gap:true, pause_count:1, paused_seconds:12};
