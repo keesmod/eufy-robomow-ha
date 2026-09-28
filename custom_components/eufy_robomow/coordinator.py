@@ -94,6 +94,12 @@ BRIDGE_COMMAND_ACTIVITY_MAX_AGE = timedelta(minutes=30)
 # Cloud receipt age bounds how long the bridge's cache may supply display and
 # map-stream activity. This is not a device-report timestamp or write evidence.
 BRIDGE_CLOUD_STATUS_MAX_AGE = timedelta(seconds=90)
+# How long local evidence overrides a differing cloud reading for the session
+# history. On 2026-09-27 the cloud record still showed the previous activity
+# about 47 seconds after a confirmed dock and caught up within about two
+# minutes of a confirmed start. A later differing reading is observed, so a task
+# that ends or starts outside Home Assistant is not held for 30 minutes.
+BRIDGE_CLOUD_SESSION_LAG = timedelta(seconds=120)
 
 
 class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
@@ -952,8 +958,9 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         The E15's LAN answers carry no activity, so on the bridge backend the
         cloud reading, refreshed about every 30 seconds, is the only regular
         source. Its time is the bridge's receipt time and the cloud record can
-        lag the mower, so local evidence wins: a reading that differs from a
-        reported status or a recent confirmed command is not observed.
+        lag the mower, so local evidence wins for BRIDGE_CLOUD_SESSION_LAG: a
+        reading received within that bound after a reported status or a
+        confirmed command, and differing from it, is not observed.
         """
         if self.session_store is None:
             return
@@ -962,7 +969,11 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             return
         self._session_cloud_observed_at = cloud[2]
         local = self.bridge_local_activity_evidence
-        if local is not None and local[0] != cloud[0]:
+        if (
+            local is not None
+            and local[0] != cloud[0]
+            and (local[2] is None or cloud[2] - local[2] <= BRIDGE_CLOUD_SESSION_LAG)
+        ):
             return
         self.session_store.observe_activity(cloud[0], cloud[2], cloud=True)
 

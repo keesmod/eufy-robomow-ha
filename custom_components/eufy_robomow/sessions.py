@@ -87,10 +87,17 @@ class SessionHistory:
     ) -> bool:
         """Attribute the time since the previous observation and record the phase."""
         if self._previous_at is not None and now < self._previous_at:
-            # An observation older than the last one, for example a command's
-            # report overtaken by a cloud receipt, applies from the last one on.
-            # Moving back in time would count the same seconds twice.
-            now = self._previous_at
+            if (self._previous_at - now).total_seconds() <= MAX_OBSERVATION_GAP:
+                # A slightly older observation, for example a command's report
+                # overtaken by a cloud receipt, applies from the last one on.
+                # Moving back in time would count the same seconds twice.
+                now = self._previous_at
+            else:
+                # The clock stepped back. That interval is unknown, and counting
+                # resumes from this observation.
+                if self.current:
+                    self.current["observation_gap"] = True
+                self._previous_at = None
         if active and self.current is None:
             self.current = {
                 "id": uuid4().hex,

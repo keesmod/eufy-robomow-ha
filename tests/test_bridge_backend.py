@@ -1188,6 +1188,64 @@ def test_a_cloud_reading_that_differs_from_a_confirmed_command_is_not_observed(t
     _run(scenario, tmp_path)
 
 
+async def _started_then_cloud(hass: HomeAssistant, t0: datetime, readings: list[tuple[int, str]]) -> SessionStore:
+    """Idle at ``t0``, a confirmed start at ``t0`` + 5 s, then one cloud reading per (offset, activity)."""
+    bridge = _FakeBridge(
+        [_cloud_poll("idle", t0)] + [_cloud_poll(activity, t0 + timedelta(seconds=offset)) for offset, activity in readings],
+        state=_control_state(),
+        command_answers=[_reflected("start", (t0 + timedelta(seconds=5)).isoformat().replace("+00:00", "Z"))],
+    )
+    coordinator = _coordinator(hass, bridge)
+    store = SessionStore(hass, "test-entry")
+    coordinator.session_store = store
+    with _clock(t0 + timedelta(seconds=1)):
+        await coordinator._async_update_data()
+    with _clock(t0 + timedelta(seconds=6)):
+        await coordinator.async_send_mower_command("start")
+    for offset, _ in readings:
+        with _clock(t0 + timedelta(seconds=offset + 1)):
+            await coordinator._async_update_data()
+    return store
+
+
+def test_a_task_started_in_home_assistant_ends_when_the_cloud_says_so(tmp_path: Path) -> None:
+    t0 = datetime(2026, 9, 28, 7, 0, tzinfo=UTC)
+
+    async def scenario(hass: HomeAssistant) -> None:
+        store = await _started_then_cloud(hass, t0, [
+            (30, "idle"), (60, "mowing"), (90, "mowing"), (120, "mowing"), (150, "mowing"),
+            (180, "returning"), (210, "returning"), (240, "idle"),
+        ])
+        history = store.history
+        assert history.current is None, "a differing reading after the lag bound is observed"
+        session = history.recent[0]
+        assert session["ended_at"] == (t0 + timedelta(seconds=240)).isoformat()
+        assert (session["mowing_seconds"], session["returning_seconds"], session["unknown_seconds"]) == (120, 60, 55), (
+            "the lagging idle at 30 s is not observed, so 5 s to 60 s is unknown"
+        )
+        assert (session["start_observed"], session["end_observed"], session["cloud_observed"]) == (True, True, True)
+
+    _run(scenario, tmp_path)
+
+
+def test_an_app_task_after_a_home_assistant_task_is_a_separate_session(tmp_path: Path) -> None:
+    t0 = datetime(2026, 9, 28, 7, 0, tzinfo=UTC)
+
+    async def scenario(hass: HomeAssistant) -> None:
+        store = await _started_then_cloud(hass, t0, [
+            (30, "mowing"), (60, "mowing"), (150, "idle"), (180, "idle"), (210, "mowing"), (240, "mowing"),
+        ])
+        history = store.history
+        assert len(history.recent) == 1, "the first task ended on the observed idle"
+        assert history.recent[0]["ended_at"] == (t0 + timedelta(seconds=150)).isoformat()
+        assert history.current is not None
+        assert history.current["started_at"] == (t0 + timedelta(seconds=210)).isoformat()
+        assert history.current["start_observed"] is True
+        assert history.current["mowing_seconds"] == 30
+
+    _run(scenario, tmp_path)
+
+
 def test_bridge_backend_fails_the_update_on_stale_data_errors_or_bad_documents(tmp_path: Path) -> None:
     async def scenario(hass: HomeAssistant) -> None:
         bridge = _FakeBridge(

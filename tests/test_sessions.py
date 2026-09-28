@@ -153,3 +153,13 @@ def test_an_older_observation_applies_from_the_last_one_without_counting_twice()
     assert (h.current["mowing_seconds"], h.current["paused_seconds"]) == (0, 20), "no second is counted twice"
     assert h.current["pause_count"] == 1
 
+
+def test_a_clock_step_back_is_a_gap_and_counting_resumes():
+    h = SessionHistory()
+    h.observe_activity("mowing", NOW + timedelta(hours=1))
+    h.observe_activity("mowing", NOW)
+    assert h.current["observation_gap"] is True, "the stepped-back interval is unknown"
+    h.observe_activity("mowing", NOW + timedelta(seconds=20))
+    assert h.current["mowing_seconds"] == 20, "counting resumes on the new clock"
+    assert h.current["unknown_seconds"] == 0
+
