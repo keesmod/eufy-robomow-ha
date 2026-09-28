@@ -32,7 +32,7 @@ or replayed.
 
 The bridge starts only in `observe_only`. Physical control, when it arrives in
 a later step, keeps the explicit opt-in, current telemetry and supervised
-validation required by the repository rules. The first version serves one
+validation required by the [contribution guide](../../CONTRIBUTING.md). The first version serves one
 read-only state document and no mower data. Discovery and state routes,
 control, settings and map routes, the integration's backend option and the
 container packaging follow one step per issue, in the order listed in #12.
