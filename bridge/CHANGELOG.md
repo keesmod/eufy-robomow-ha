@@ -21,6 +21,35 @@ files, because the mower id the integration stores depends on them. A rollback
 of the app restores the app backup that the update created, which brings back
 the previous version with its options and data.
 
+## 0.13.4 - 2026-09-28
+
+### Keep a command within the integration's timeout
+
+- In `control` mode the bridge refuses to start when
+  `2 × local_timeout_ms + control_read_back_ms` is not below 75000 ms, the
+  integration's command timeout. A command's LAN part takes up to two
+  `local_timeout_ms` steps, to connect and then for the command, plus the
+  read-back. Before, each option was checked only against its own range.
+- The configuration error names `control_read_back_ms` and both values. With
+  the default `local_timeout_ms` of 10000 the largest read-back is 54999 ms.
+  The defaults need 40000 ms.
+- 0.13.2 raised the default `local_timeout_ms` to 10000. An installation that
+  kept a read-back of 60000 ms then needed up to 80000 ms, so Home Assistant
+  could report a command uncertain while the bridge still confirmed it.
+- `observe_only` is unaffected. Settings writes use the library's own
+  read-back bound and are not covered. No command replay, new option, route
+  or library update.
+
+Evidence: software-verified. The bridge suite covers the boundary at the
+default and a changed `local_timeout_ms`, the defaults and `observe_only`.
+
+Upgrade: in `control` mode, first bring `control_read_back_ms` within the rule
+for the configured `local_timeout_ms`, for example 54000 with the default. Then
+install the matching app with a backup. An over-budget configuration stops the
+app at startup with `invalid configuration`. The integration needs no update.
+Rollback: restore the 0.13.3 app backup. The lowered read-back also works with
+0.13.3.
+
 ## 0.13.3 - 2026-09-28
 
 ### One recovery probe after an unconfirmed map cancellation
@@ -40,8 +69,9 @@ the previous version with its options and data.
 
 Evidence: software-verified with synthetic HTTP-route regressions for the
 cool-down, clock corrections, concurrent requests, one probe, recovery, failed
-probes, delayed shutdown and stopping the bridge. Hardware recovery remains
-open in #71. On 2026-09-28 the owner accepted the unknown remote lifetime for
+probes, delayed shutdown and stopping the bridge. Hardware recovery was not
+observed. #71 was closed on 2026-09-28 at the owner's request with that
+observation waived. On 2026-09-28 the owner accepted the unknown remote lifetime for
 this bounded rule and its future use. Local exclusivity remains required.
 The fifteen-minute policy exceeds the observed interval between the failed
 cancellation and a working map after the 2026-09-28 installation restart.

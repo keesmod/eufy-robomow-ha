@@ -2,7 +2,9 @@
 
 This is the evidence and recovery policy for [#71](https://github.com/keesmod/eufy-robomow-ha/issues/71).
 Bridge/app 0.13.3 adds one automatic read-only probe. Library 0.25.2 and
-integration 0.16.1 stay unchanged. Recovery on the owned E15 remains unverified.
+integration 0.16.1 stay unchanged. Recovery on the owned E15 was not observed.
+#71 was closed on 2026-09-28 at the owner's request with that observation
+waived, see [closure](#closure-of-71).
 
 On 2026-09-28 the owner explicitly accepted the unknown remote transfer lifetime
 for this recovery rule, including future use of the same rule. The code guarantees
@@ -119,5 +121,23 @@ Home Assistant Core did not restart. The
 records the archive checksum and entity checks.
 
 `last_recovery` was null. This installation check is not evidence of recovery
-from an unconfirmed cancellation without a restart. That acceptance remains
-open in #71.
+from an unconfirmed cancellation without a restart.
+
+## Closure of #71
+
+Two read-only observations on 2026-09-28 found no unconfirmed cancellation.
+From 14:07 to 14:18 UTC in idle operation, 18 acquisitions published valid
+maps, see the [idle observation](https://github.com/keesmod/eufy-robomow-ha/issues/71#issuecomment-5871855831).
+From 15:38 UTC during a short mowing round the owner confirmed and supervised,
+5 acquisitions published 102 valid maps, see the
+[mowing observation](https://github.com/keesmod/eufy-robomow-ha/issues/71#issuecomment-5873479410).
+Every acquisition confirmed cancellation and cleanup, the bridge process did
+not restart and both recovery fields stayed null.
+
+At 15:52 UTC the owner closed #71 and waived the remaining hardware
+criterion, because recurrence seems unlikely, see the
+[closing comment](https://github.com/keesmod/eufy-robomow-ha/issues/71#issuecomment-5873618452).
+Automatic recovery after a real `mower_map_cancel_unconfirmed` therefore
+remains unobserved. The recovery policy above is unchanged. If the failure
+recurs, reopen #71 with the original failure, the recovery outcome and the
+bridge process start.

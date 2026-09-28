@@ -35,8 +35,10 @@ with none unavailable or newly unknown. Integration 0.16.1 was unchanged and
 Home Assistant Core did not restart. The app archive SHA-256 is
 `d66d1f6bc3662d1c1ef184d2d47f9e87c70c0d419d7090a3aaa7fd8b6e20448c`.
 This verifies installation and ordinary acquisition, not recovery after a
-natural unconfirmed cancellation. That observation remains open in #71, see the
-[installation receipt](https://github.com/keesmod/eufy-robomow-ha/issues/71#issuecomment-5870459019).
+natural unconfirmed cancellation. #71 was closed at the owner's request with
+that observation waived, see the
+[installation receipt](https://github.com/keesmod/eufy-robomow-ha/issues/71#issuecomment-5870459019)
+and the [closure](map-recovery.md#closure-of-71).
 
 Bridge 0.13.2 only raises the default of `local_timeout_ms` from 5000 to 10000,
 so a LAN step outlasts the mower's Wi-Fi outages of 5 to 7 seconds, see the
@@ -287,7 +289,8 @@ below retain their stated scope.
   with no map error, and 14 session renewals passed without error, see the
   [daily-use receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5864644965).
   Bridge 0.13.3 adds one recovery probe after a fifteen-minute cool-down.
-  Hardware recovery remains unverified in #71, see [recovery limits](map-recovery.md).
+  Hardware recovery was not observed, and #71 was closed at the owner's
+  request with that observation waived, see [recovery limits](map-recovery.md).
 - The compatible `external` HTTPS map source remains available as a manual
   recovery route.
 - The no-go zones on the map since 0.15.1, from map-record field 12. The
@@ -303,10 +306,6 @@ below retain their stated scope.
 
 ## Outstanding obligations
 
-- Hardware recovery of native map acquisition after an unconfirmed
-  cancellation without a bridge restart, #71. Bridge 0.13.3 has synthetic
-  coverage for one bounded probe. Its fifteen-minute cool-down is an operator
-  policy, not a verified peer timeout. See [recovery evidence](map-recovery.md).
 - The licensing boundary and an explicit authorisation before any publication.
 
 ## Compatibility

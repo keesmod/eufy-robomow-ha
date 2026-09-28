@@ -287,7 +287,8 @@ without error, see the
 [daily-use receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5864644965).
 Bridge 0.13.3 permits one fresh map probe fifteen minutes after an unconfirmed
 cancellation with confirmed local shutdown. Failed probes and unconfirmed
-cleanup still require restart. Hardware recovery remains open in #71, see
+cleanup still require restart. Hardware recovery was not observed, and #71
+was closed at the owner's request with that observation waived, see
 [recovery evidence and limits](map-recovery.md). The current installation runs in
 `control` after the owner's opt-in, with settings writes disabled. Physical
 control keeps its explicit opt-in and supervised validation.
