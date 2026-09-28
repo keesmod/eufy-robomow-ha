@@ -214,9 +214,13 @@ and mark it stale. Shutdown cancels a pending provisioning request.
 
 The library stores derived MQTT credentials in the existing private session
 file. Provisioning, local keys and raw RTC responses never enter the bridge
-API or logs. This path has software coverage, with fresh native hardware
-acceptance still required in #8. Keep the external Android map source
-recoverable and use one acquisition owner during the first trial.
+API or logs. This path has software coverage, and its hardware observations
+on the owned E15 are recorded in #8 and in
+[Release candidates](../docs/release-candidates.md). Broader acceptance stays
+open while #71, recovery after an unconfirmed map cancellation without a
+restart, is open. The owner's Android map helper was retired on 2026-09-25
+with verified archives. The compatible `external` HTTPS source remains a
+manual recovery route. Use one acquisition owner at a time.
 
 The default `file` mode preserves the existing route:
 
