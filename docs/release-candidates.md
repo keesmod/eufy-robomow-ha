@@ -18,8 +18,28 @@ backends and rollback are described in
 | Component | Version | Pinned inputs |
 | --- | --- | --- |
 | Integration `eufy_robomow` | 0.16.1 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
-| Mower bridge, container image | 0.13.3 | `@keesmod/eufy-mega-client` 0.25.2 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
-| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.13.3 | the same inputs, built by the Supervisor on the host |
+| Mower bridge, container image | 0.13.4 | `@keesmod/eufy-mega-client` 0.25.2 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
+| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.13.4 | the same inputs, built by the Supervisor on the host |
+
+Bridge/app 0.13.4 from `022810d` (#77) refuses a `control` configuration whose
+two LAN steps and read-back reach the integration's 75-second command timeout,
+see [#75](https://github.com/keesmod/eufy-robomow-ha/issues/75). The owner's
+`control_read_back_ms` of 60000 exceeded that budget once `local_timeout_ms`
+became 10000, explicitly on 0.13.1 from 07:56 UTC on 2026-09-28 and by default
+from 0.13.2.
+Before the update it was lowered to 54000,
+with a private backup of the app options. App 0.13.4 replaced 0.13.3 on
+2026-09-28 from 17:41:10 to 17:41:28 UTC with Supervisor backup `a9a11d61`.
+All 17 installed app files matched the candidate list. The startup log shows
+0.13.4 accepting `local_timeout_ms` 10000 with `control_read_back_ms` 54000.
+The state route reported `control` with that read-back, auth connected, one
+discovered mower and a fresh map whose acquisition confirmed cancellation and
+cleanup. The integration's stored mower id matched the bridge's. All 23 enabled
+entities remained present with none unavailable, and the map entity was
+healthy again at 17:42:59 UTC. Integration 0.16.1 was unchanged and Home
+Assistant Core did not restart. The app archive SHA-256 is
+`8344727619b9518977f09cf3d07ec7d654f5a6dbce8e5b4dbce271d51f6b9c53`. See the
+[installation receipt](https://github.com/keesmod/eufy-robomow-ha/issues/75#issuecomment-5875389046).
 
 Bridge/app 0.13.3 from `5071678` (#73) adds one read-only recovery probe after
 an unconfirmed map cancellation and a fifteen-minute wait. The owner accepted
@@ -256,6 +276,17 @@ Deployment:
   bridge came back in `control`, the mower entity was never unavailable and
   the map was healthy again at 11:54:17 UTC (2026-09-28,
   [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5869490828)).
+- The app was updated from 0.13.2 to 0.13.3 with Supervisor backup
+  `ca0d4988`. The installed app sources matched the candidate, identities and
+  settings were unchanged and an ordinary map acquisition confirmed
+  cancellation and cleanup (2026-09-28,
+  [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/71#issuecomment-5870459019)).
+- The app was updated from 0.13.3 to 0.13.4 with Supervisor backup
+  `a9a11d61` after `control_read_back_ms` was lowered from 60000 to 54000.
+  All 17 installed app files matched the candidate list, the bridge came back
+  in `control` with read-back 54000 and the map was healthy again at 17:42:59
+  UTC (2026-09-28,
+  [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/75#issuecomment-5875389046)).
 
 ## Experimental
 
@@ -333,8 +364,9 @@ Combinations run on the owner's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
-| 0.16.1 | 0.13.3 (0.25.2) | the current candidate, whose app matched file for file after the 2026-09-28 update, with identities, settings and integration unchanged and ordinary native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified |
-| 0.16.1 | 0.13.2 (0.25.2) | the previous candidate, whose app matched file for file after its deployment on 2026-09-28, while integration 0.16.1 differs from the candidate only by one code comment |
+| 0.16.1 | 0.13.4 (0.25.2) | the current candidate, whose app matched file for file after the 2026-09-28 update, with `control_read_back_ms` lowered to 54000 within the enforced budget, identities and integration unchanged and native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified, see the #71 waiver |
+| 0.16.1 | 0.13.3 (0.25.2) | the previous candidate, whose app matched file for file after the 2026-09-28 update, with identities, settings and integration unchanged and ordinary native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified |
+| 0.16.1 | 0.13.2 (0.25.2) | an earlier candidate, whose app matched file for file after its deployment on 2026-09-28, while integration 0.16.1 differs from the candidate only by one code comment |
 | 0.16.1 | 0.13.1 (0.25.2) | an earlier candidate, matched file for file after its deployment, control window, session renewals and host reboot of 2026-09-27, run with `local_timeout_ms: 10000` on 2026-09-28 until the 0.13.2 update |
 | 0.15.1 | 0.11.0 (0.23.0) | matched file for file after its deployment on 2026-09-25 |
 | 0.15.0 | 0.11.0 (0.23.0) | matched file for file after its deployment, speed window of 2026-09-25 |
