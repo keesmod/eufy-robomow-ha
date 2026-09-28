@@ -449,7 +449,7 @@ test('the single host applies only to a sole mower while the hosts map is exact'
   );
   assert.deepEqual((await f.get(`${MOWERS_PATH}/${ID_A}/state`)).json, { error: 'mower_host_unconfigured' });
   assert.equal((await f.get(`${MOWERS_PATH}/${ID_B}/state`)).status, 200);
-  assert.deepEqual(log.opened, [{ id: ID_B, options: { host: HOST_B, timeoutMs: 5_000 } }]);
+  assert.deepEqual(log.opened, [{ id: ID_B, options: { host: HOST_B, timeoutMs: 10_000 } }]);
 });
 
 test('the state route serves the four typed fields with freshness, closes the session and joins concurrent queries', async (t) => {
@@ -887,7 +887,7 @@ test('control mode routes start, pause and resume behind a fresh observation, se
   });
   assert.deepEqual(log.commands, [{ kind: 'start' }]);
   assert.equal(log.opened.length, 2, 'the command opened its own bounded session');
-  assert.deepEqual(log.opened[1], { id: ID_A, options: { host: HOST_A, timeoutMs: 5_000 } });
+  assert.deepEqual(log.opened[1], { id: ID_A, options: { host: HOST_A, timeoutMs: 10_000 } });
   assert.equal(log.disconnects, 2, 'the command session is closed');
   assert.equal(log.lastConnected(), false);
   // Freshness is the age of the last successful observation against the documented maximum.
@@ -1181,7 +1181,7 @@ test('write mode routes one setting, serves the outcome and closes the session',
     reports: 1,
   });
   assert.deepEqual(log.settings, [{ name: 'mowHeight', value: 45 }]);
-  assert.deepEqual(log.opened, [{ id: ID_A, options: { host: HOST_A, timeoutMs: 5_000 } }]);
+  assert.deepEqual(log.opened, [{ id: ID_A, options: { host: HOST_A, timeoutMs: 10_000 } }]);
   assert.equal(log.disconnects, 1, 'the setting session is closed');
   assert.equal(log.lastConnected(), false);
   // A switch value is a boolean. A timed out write is uncertain and carries the other value it saw.
