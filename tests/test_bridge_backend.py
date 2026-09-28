@@ -1241,6 +1241,37 @@ def test_local_evidence_holds_a_differing_cloud_reading_for_120_seconds(tmp_path
     _run(scenario, tmp_path)
 
 
+@pytest.mark.parametrize(("received", "polled"), [(15, 31), (-60, 25)])
+def test_a_cloud_receipt_from_before_a_confirmed_command_is_held_back(received: int, polled: int, tmp_path: Path) -> None:
+    t0 = datetime(2026, 9, 28, 7, 0, tzinfo=UTC)
+
+    def stamp(offset: int) -> str:
+        return (t0 + timedelta(seconds=offset)).isoformat().replace("+00:00", "Z")
+
+    async def scenario(hass: HomeAssistant) -> None:
+        late = _document(observed_at=stamp(polled), cloud_status=_cloud_status(
+            observed_at=stamp(received), age_ms=(polled - received) * 1000, status={"state": "reported", "value": "idle"},
+        ))
+        bridge = _FakeBridge(
+            [_cloud_poll("idle", t0), late],
+            state=_control_state(),
+            command_answers=[_reflected("start", stamp(20))],
+        )
+        coordinator = _coordinator(hass, bridge)
+        store = SessionStore(hass, "test-entry")
+        coordinator.session_store = store
+        with _clock(t0 + timedelta(seconds=1)):
+            await coordinator._async_update_data()
+        with _clock(t0 + timedelta(seconds=21)):
+            await coordinator.async_send_mower_command("start")
+        with _clock(t0 + timedelta(seconds=polled)):
+            await coordinator._async_update_data()
+        assert store.history.current is not None, "a receipt from before the confirmed start is stale"
+        assert store.history.current["cloud_observed"] is False
+
+    _run(scenario, tmp_path)
+
+
 def test_local_evidence_from_before_a_clock_step_back_holds_nothing(tmp_path: Path) -> None:
     t0 = datetime(2026, 9, 28, 8, 0, tzinfo=UTC)
 

@@ -40,8 +40,9 @@ know, but saving the options there drops it.
   task that ends or starts outside Home Assistant is not held back.
 - An observation up to 45 seconds older than the previous one applies from the
   previous time on, so no second is counted twice. A larger clock step back is
-  a gap, and counting resumes from there. Local evidence from before such a
-  step suppresses no cloud reading.
+  a gap, and counting resumes from there. Local evidence more than 90 seconds
+  newer than an accepted cloud reading can only follow a clock step back, so it
+  suppresses nothing.
 - A session with a cloud observation carries `cloud_observed: true`, because
   its times are the bridge's receipt times, not device times.
 - The map save at arrival is no cloud activity, so the end of a naturally
