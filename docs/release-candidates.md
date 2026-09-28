@@ -17,9 +17,23 @@ backends and rollback are described in
 
 | Component | Version | Pinned inputs |
 | --- | --- | --- |
-| Integration `eufy_robomow` | 0.16.2 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.4 |
+| Integration `eufy_robomow` | 0.16.3 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.4 |
 | Mower bridge, container image | 0.13.4 | `@keesmod/eufy-mega-client` 0.25.2 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
 | Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.13.4 | the same inputs, built by the Supervisor on the host |
+
+Integration 0.16.3 from `db343c7` (#84) records bridge-mode sessions from the
+bridge's bounded cloud readings, see
+[#83](https://github.com/keesmod/eufy-robomow-ha/issues/83). Local evidence
+keeps precedence from 90 seconds before to 120 seconds after it, and a session
+with a cloud reading carries `cloud_observed`. It replaced 0.16.2 on 2026-09-28
+after a private backup and a passing configuration check. All 25 installed
+files matched the candidate, and Home Assistant Core restarted from 19:27:27 to
+19:28:00 UTC. The entry loaded with the same 23 entity ids and none
+unavailable, the 50 stored sessions were kept and a resting mower opened no
+session. A task recorded from cloud readings is not yet observed. The
+integration archive SHA-256 is
+`919c104381e666d45e7c307ef56b0a6383116f62d47574adbd2b6c2cb8f25579`. See the
+[installation receipt](https://github.com/keesmod/eufy-robomow-ha/issues/83#issuecomment-5876965056).
 
 Integration 0.16.2 from `b379117` (#80) carries card 0.7.4, see
 [#79](https://github.com/keesmod/eufy-robomow-ha/issues/79). On the bridge
@@ -306,6 +320,11 @@ Deployment:
   matched the candidate, the config entry and its 23 entity ids were kept and
   the dashboard resource moved to card 0.7.4 (2026-09-28,
   [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/79#issuecomment-5875742543)).
+- The integration was updated from 0.16.2 to 0.16.3 by replacing its folder
+  after a private backup and a passing configuration check. All 25 files
+  matched the candidate, and the config entry, its 23 entity ids and the 50
+  stored sessions were kept (2026-09-28,
+  [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/83#issuecomment-5876965056)).
 
 ## Experimental
 
@@ -383,8 +402,9 @@ Combinations run on the owner's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
-| 0.16.2 | 0.13.4 (0.25.2) | the current candidate, whose integration matched file for file after the 2026-09-28 update with card 0.7.4, the entry and its entity ids unchanged |
-| 0.16.1 | 0.13.4 (0.25.2) | the previous candidate, whose app matched file for file after the 2026-09-28 update, with `control_read_back_ms` lowered to 54000 within the enforced budget, identities and integration unchanged and native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified, see the #71 waiver |
+| 0.16.3 | 0.13.4 (0.25.2) | the current candidate, whose integration matched file for file after the 2026-09-28 update, with the entry, its entity ids and the stored sessions kept. A task recorded from cloud readings is not yet observed |
+| 0.16.2 | 0.13.4 (0.25.2) | the previous candidate, whose integration matched file for file after the 2026-09-28 update with card 0.7.4, the entry and its entity ids unchanged |
+| 0.16.1 | 0.13.4 (0.25.2) | an earlier candidate, whose app matched file for file after the 2026-09-28 update, with `control_read_back_ms` lowered to 54000 within the enforced budget, identities and integration unchanged and native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified, see the #71 waiver |
 | 0.16.1 | 0.13.3 (0.25.2) | an earlier candidate, whose app matched file for file after the 2026-09-28 update, with identities, settings and integration unchanged and ordinary native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified |
 | 0.16.1 | 0.13.2 (0.25.2) | an earlier candidate, whose app matched file for file after its deployment on 2026-09-28, while integration 0.16.1 differed from the candidate only by one code comment until the 0.16.2 update |
 | 0.16.1 | 0.13.1 (0.25.2) | an earlier candidate, matched file for file after its deployment, control window, session renewals and host reboot of 2026-09-27, run with `local_timeout_ms: 10000` on 2026-09-28 until the 0.13.2 update |
