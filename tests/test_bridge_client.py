@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 import json
+from pathlib import Path
+import re
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -14,6 +16,7 @@ import pytest
 from homeassistant.core import HomeAssistant
 
 from custom_components.eufy_robomow.bridge_client import (
+    _COMMAND_TIMEOUT,
     BridgeClient,
     BridgeClientError,
     BridgeCommandOutcome,
@@ -460,8 +463,17 @@ def test_client_posts_a_command_once_without_a_body_and_returns_the_outcome() ->
     assert kwargs["headers"] == {"Authorization": f"Bearer {TOKEN}", "Accept": "application/json"}
     assert kwargs["ssl"] is True
     assert "data" not in kwargs and "json" not in kwargs, "the bridge ignores request bodies"
-    assert kwargs["timeout"].total == 75, "connect time plus the bridge's 60 second read-back bound"
+    assert kwargs["timeout"].total == 75, "two LAN steps plus the read-back, a budget the bridge enforces"
     assert kwargs["timeout"].connect == 5
+
+
+def test_the_command_timeout_is_the_budget_the_bridge_enforces() -> None:
+    """Bridge 0.13.4 refuses a control configuration that does not fit this timeout."""
+    source = (Path(__file__).resolve().parents[1] / "bridge/src/config.ts").read_text()
+    match = re.search(r"^export const COMMAND_TIMEOUT_BUDGET_MS = ([0-9_]+);$", source, re.MULTILINE)
+    assert match is not None
+    assert _COMMAND_TIMEOUT.total is not None
+    assert int(match.group(1).replace("_", "")) == _COMMAND_TIMEOUT.total * 1000
 
 
 def test_client_pins_the_certificate_on_commands_too() -> None:
