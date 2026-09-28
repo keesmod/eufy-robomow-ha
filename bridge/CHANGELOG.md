@@ -41,8 +41,8 @@ the previous version with its options and data.
 Evidence: software-verified with synthetic HTTP-route regressions for the
 cool-down, clock corrections, concurrent requests, one probe, recovery, failed
 probes, delayed shutdown and stopping the bridge. Hardware recovery remains
-open in #71. Activation needs a peer expiry bound or explicit owner acceptance
-of the unknown remote lifetime.
+open in #71. On 2026-09-28 the owner accepted the unknown remote lifetime for
+this bounded rule and its future use. Local exclusivity remains required.
 The fifteen-minute policy exceeds the observed interval between the failed
 cancellation and a working map after the 2026-09-28 installation restart.
 That observation does not establish a firmware timeout or prove that waiting

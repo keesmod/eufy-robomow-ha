@@ -4,10 +4,13 @@ This is the evidence and recovery policy for [#71](https://github.com/keesmod/eu
 Bridge/app 0.13.3 adds one automatic read-only probe. Library 0.25.2 and
 integration 0.16.1 stay unchanged. Recovery on the owned E15 remains unverified.
 
-Activation is blocked pending either evidence for a peer transfer expiry bound
-or the owner's explicit acceptance of one probe with an unknown remote lifetime.
-The standing deployment approval does not resolve the issue's no-overlap
-requirement. This candidate guarantees local exclusivity only.
+On 2026-09-28 the owner explicitly accepted the unknown remote transfer lifetime
+for this recovery rule, including future use of the same rule. The code guarantees
+local exclusivity only. The fifteen-minute wait does not prove remote termination.
+This acceptance permits merge and installation after the required checks and
+backup. It does not establish hardware recovery or allow overlapping local
+acquisitions, a shorter wait, repeated failed probes or unconfirmed local cleanup.
+Do not ask again for this same bounded uncertainty.
 
 ## What survived the 2026-09-28 restart
 
