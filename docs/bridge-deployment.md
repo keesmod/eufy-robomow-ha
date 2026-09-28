@@ -3,7 +3,7 @@
 How to run the dedicated mower bridge from `bridge/` as a container or as a
 local Home Assistant app, and how to upgrade, restart, back up and roll it
 back. Everything here is local: no image is published and no app repository is
-listed. Version 0.13.2 serves state routes with the typed settings and, only
+listed. Version 0.13.3 serves state routes with the typed settings and, only
 behind the explicit `operating_mode: control` opt-in with a stop route, the
 start, pause, resume and stop routes. The separate `settings_mode: write`
 opt-in enables the settings route for mow height, volume, smart no-go zones
