@@ -33,21 +33,33 @@ know, but saving the options there drops it.
 - Each new cloud reading the entity accepts for display, reported, fresh and
   within both 90-second age bounds, is now one session observation. The bridge
   refreshes it about every 30 seconds.
-- Local evidence wins. A reading that differs from a reported status or a
-  confirmed command younger than 30 minutes is not observed, because the cloud
-  record can lag the mower.
-- An observation older than the previous one applies from the previous time on,
-  so no second is counted twice.
+- Local evidence wins for 120 seconds. A reading received within that bound
+  after a reported status or a confirmed command, and differing from it, is not
+  observed, because the cloud record can lag the mower. On 2026-09-27 it lagged
+  about 47 seconds after a dock. A later differing reading is observed, so a
+  task that ends or starts outside Home Assistant is not held back.
+- An observation up to 45 seconds older than the previous one applies from the
+  previous time on, so no second is counted twice. A larger clock step back is
+  a gap, and counting resumes from there.
 - A session with a cloud observation carries `cloud_observed: true`, because
   its times are the bridge's receipt times, not device times.
 - The map save at arrival is no cloud activity, so the end of a naturally
   finished task is usually recorded as not observed. Distance, area and
   progress stay unknown on the bridge backend.
 
-Evidence: software-verified. Tests cover a task seen only through the cloud,
-one receipt polled several times, stale, failed, over-age, old and invalid
-readings, a lagging reading after a confirmed start, out-of-order observations
-and the session flag. Removing any of these rules makes a test fail. The cause
+Evidence: software-verified. Tests cover:
+
+- a task seen only through the cloud;
+- one receipt polled several times;
+- stale, failed, over-age, old and invalid readings;
+- a lagging reading after a confirmed start;
+- a task started in Home Assistant that ends through the cloud;
+- an app task after a Home Assistant task;
+- out-of-order observations and a clock step back;
+- the session flag.
+
+Removing any of these rules makes a test fail. On the owner's installation
+the cloud readings arrived exactly 30 seconds apart. The cause
 was established from the owner's stored sessions in
 [#82](https://github.com/keesmod/eufy-robomow-ha/issues/82), see
 [#83](https://github.com/keesmod/eufy-robomow-ha/issues/83).
