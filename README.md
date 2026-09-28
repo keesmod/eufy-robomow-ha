@@ -290,7 +290,9 @@ pause, so the local backend refuses one while the task flag is false.
 
 Fifty observed session summaries are stored privately in Home Assistant; the
 card shows the latest twenty. Pauses and telemetry gaps remain visible, and a
-restart does not invent missing mowing time. Area remains in raw units until the
+restart does not invent missing mowing time. On the bridge backend a session follows
+confirmed commands and the bridge's bounded cloud readings, about every 30
+seconds, and a session with a cloud reading is marked `cloud_observed`. Area remains in raw units until the
 scale is validated. Existing lifetime counters are not reconstructed as sessions.
 One of the map sources described below is still required for map display.
 
