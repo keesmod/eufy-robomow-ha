@@ -625,8 +625,8 @@ helper.
   overnight in daily use with the mower at its station, the map healthy and
   14 session renewals without error, see the
   [daily-use receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5864644965).
-  An unconfirmed map cancellation still blocks map demands until the bridge
-  restarts, see #71.
+  Bridge 0.13.3 adds one recovery probe after a fifteen-minute cool-down.
+  Hardware recovery remains unverified in #71, see [recovery limits](docs/map-recovery.md).
 - **Live marker semantics** — the live mower/station interpretation matches repeated E15 observations but is not a vendor-documented protocol contract. It is display-only and never drives mower control.
 
 ---

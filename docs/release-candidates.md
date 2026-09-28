@@ -269,8 +269,8 @@ below retain their stated scope.
   overnight in daily use with the mower at its station. The map stayed healthy,
   with no map error, and 14 session renewals passed without error, see the
   [daily-use receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5864644965).
-  An unconfirmed map cancellation still blocks map demands until the bridge
-  restarts, see #71.
+  Bridge 0.13.3 adds one recovery probe after a fifteen-minute cool-down.
+  Hardware recovery remains unverified in #71, see [recovery limits](map-recovery.md).
 - The compatible `external` HTTPS map source remains available as a manual
   recovery route.
 - The no-go zones on the map since 0.15.1, from map-record field 12. The
@@ -286,10 +286,10 @@ below retain their stated scope.
 
 ## Outstanding obligations
 
-- Recovery of native map acquisition after an unconfirmed cancellation without
-  a bridge restart, #71. At the end of a mowing task on 2026-09-28 the bridge
-  reported `mower_map_cancel_unconfirmed`, and by design it then blocks map
-  demands until it restarts.
+- Hardware recovery of native map acquisition after an unconfirmed
+  cancellation without a bridge restart, #71. Bridge 0.13.3 has synthetic
+  coverage for one bounded probe. Its fifteen-minute cool-down is an operator
+  policy, not a verified peer timeout. See [recovery evidence](map-recovery.md).
 - The licensing boundary and an explicit authorisation before any publication.
 
 ## Compatibility

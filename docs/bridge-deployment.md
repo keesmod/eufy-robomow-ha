@@ -285,7 +285,9 @@ see the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomme
 use with the mower at its station, the map healthy and 14 session renewals
 without error, see the
 [daily-use receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5864644965).
-An unconfirmed map cancellation still blocks map demands until the bridge
-restarts, see keesmod/eufy-robomow-ha#71. The current installation runs in
+Bridge 0.13.3 permits one fresh map probe fifteen minutes after an unconfirmed
+cancellation with confirmed local shutdown. Failed probes and unconfirmed
+cleanup still require restart. Hardware recovery remains open in #71, see
+[recovery evidence and limits](map-recovery.md). The current installation runs in
 `control` after the owner's opt-in, with settings writes disabled. Physical
 control keeps its explicit opt-in and supervised validation.

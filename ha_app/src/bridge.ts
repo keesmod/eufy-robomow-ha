@@ -224,6 +224,7 @@ export interface BridgeDependencies {
   mapIdleIntervalMs?: number;
   mapRetryIntervalMs?: number;
   mapWatchIntervalMs?: number;
+  mapMonotonicNow?: () => number;
   workParametersRefreshMs?: number;
   workParametersWaitMs?: number;
   cloudStateRefreshMs?: number;
@@ -708,6 +709,7 @@ export class MowerBridge {
             watchIntervalMs: dependencies.mapWatchIntervalMs ?? DEFAULT_MAP_WATCH_INTERVAL_MS,
           },
           now: () => this.#now(),
+          monotonicNow: dependencies.mapMonotonicNow ?? (() => performance.now()),
           lifetime: this.#lifetime.signal,
         })
       : undefined;
