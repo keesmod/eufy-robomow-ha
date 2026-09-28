@@ -1272,7 +1272,7 @@ def test_a_cloud_receipt_from_before_a_confirmed_command_is_held_back(received: 
     _run(scenario, tmp_path)
 
 
-@pytest.mark.parametrize("offset", [-3600 + 300, -95])
+@pytest.mark.parametrize("offset", [-3600 + 300, -86])
 def test_local_evidence_from_before_a_clock_step_back_holds_nothing(offset: int, tmp_path: Path) -> None:
     t0 = datetime(2026, 9, 28, 8, 0, tzinfo=UTC)
 

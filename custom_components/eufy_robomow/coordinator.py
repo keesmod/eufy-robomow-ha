@@ -958,11 +958,12 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         The E15's LAN answers carry no activity, so on the bridge backend the
         cloud reading, refreshed about every 30 seconds, is the only regular
         source. Its time is the bridge's receipt time and the cloud record can
-        lag the mower, so local evidence wins for BRIDGE_CLOUD_SESSION_LAG: a
-        reading received within that bound after a reported status or a
-        confirmed command, and differing from it, is not observed. Local
-        evidence more than BRIDGE_CLOUD_STATUS_MAX_AGE newer than an accepted
-        reading can only follow a clock step back, so it suppresses nothing.
+        lag the mower, so local evidence wins: a reading received from
+        BRIDGE_CLOUD_STATUS_MAX_AGE before to BRIDGE_CLOUD_SESSION_LAG after a
+        reported status or a confirmed command, and differing from it, is not
+        observed. Local evidence more than BRIDGE_CLOUD_STATUS_MAX_AGE newer
+        than an accepted reading can only follow a clock step back, so it
+        suppresses nothing.
         """
         if self.session_store is None:
             return

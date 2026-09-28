@@ -33,9 +33,9 @@ know, but saving the options there drops it.
 - Each new cloud reading the entity accepts for display, reported, fresh and
   within both 90-second age bounds, is now one session observation. The bridge
   refreshes it about every 30 seconds.
-- Local evidence wins for 120 seconds. A reading received within that bound
-  after a reported status or a confirmed command, and differing from it, is not
-  observed, because the cloud record can lag the mower. On 2026-09-27 it lagged
+- Local evidence wins. A reading received from 90 seconds before to 120
+  seconds after a reported status or a confirmed command, and differing from
+  it, is not observed, because the cloud record can lag the mower. On 2026-09-27 it lagged
   about 47 seconds after a dock. A later differing reading is observed, so a
   task that ends or starts outside Home Assistant is not held back.
 - An observation up to 45 seconds older than the previous one applies from the
