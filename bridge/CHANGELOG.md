@@ -44,11 +44,16 @@ the previous version with its options and data.
   can take up to 20 seconds at the bridge. The integration's HTTP timeout of
   15 seconds still bounds each state request, so such a poll still ends within
   15 seconds with the entities unavailable. Commands and settings writes open
-  their LAN session with the same deadline. With the default read-back times
-  they stay below the integration's command timeout of 75 seconds. A
-  `control_read_back_ms` above 55000 can outlast that timeout. The integration
-  then reports the command as uncertain, although the bridge may still confirm
-  it later. Nothing is repeated.
+  their LAN session with the same deadline. A command's LAN part takes up to
+  two `local_timeout_ms` steps, to connect and then for the command, plus
+  `control_read_back_ms`. The integration waits 75 seconds for a command, so
+  `2 × local_timeout_ms + control_read_back_ms` must stay below 75000 ms,
+  which with the default 10000 ms means a read-back of at most 55000 ms. This
+  does not count a session renewal or discovery that the bridge may run before
+  the LAN session. Each is bounded by 30 seconds and was already outside the
+  budget before this change. Past the timeout the integration keeps the
+  command uncertain. The bridge may still write the command and finish its
+  read-back, but that outcome is not reported. Nothing is repeated.
 
 Evidence: software-verified. The bridge suite passes with the new default and
 pins the 10000 ms deadline of the state, command and setting sessions. On the
