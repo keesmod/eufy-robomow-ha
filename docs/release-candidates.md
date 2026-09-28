@@ -274,6 +274,12 @@ Deployment:
   bridge came back in `control`, the mower entity was never unavailable and
   the map was healthy again at 11:54:17 UTC (2026-09-28,
   [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5869490828)).
+- The app was updated from 0.13.3 to 0.13.4 with Supervisor backup
+  `a9a11d61` after `control_read_back_ms` was lowered from 60000 to 54000.
+  All 17 installed app files matched the candidate list, the bridge came back
+  in `control` with read-back 54000 and the map was healthy again at 17:42:59
+  UTC (2026-09-28,
+  [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/75#issuecomment-5875389046)).
 
 ## Experimental
 
@@ -351,7 +357,7 @@ Combinations run on the owner's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
-| 0.16.1 | 0.13.4 (0.25.2) | the current candidate, whose app matched file for file after the 2026-09-28 update, with `control_read_back_ms` lowered to 54000 within the enforced budget, identities and integration unchanged and native-map acquisition healthy |
+| 0.16.1 | 0.13.4 (0.25.2) | the current candidate, whose app matched file for file after the 2026-09-28 update, with `control_read_back_ms` lowered to 54000 within the enforced budget, identities and integration unchanged and native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified, see the #71 waiver |
 | 0.16.1 | 0.13.3 (0.25.2) | the previous candidate, whose app matched file for file after the 2026-09-28 update, with identities, settings and integration unchanged and ordinary native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified |
 | 0.16.1 | 0.13.2 (0.25.2) | an earlier candidate, whose app matched file for file after its deployment on 2026-09-28, while integration 0.16.1 differs from the candidate only by one code comment |
 | 0.16.1 | 0.13.1 (0.25.2) | an earlier candidate, matched file for file after its deployment, control window, session renewals and host reboot of 2026-09-27, run with `local_timeout_ms: 10000` on 2026-09-28 until the 0.13.2 update |
