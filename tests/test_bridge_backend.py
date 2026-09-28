@@ -1272,12 +1272,13 @@ def test_a_cloud_receipt_from_before_a_confirmed_command_is_held_back(received: 
     _run(scenario, tmp_path)
 
 
-def test_local_evidence_from_before_a_clock_step_back_holds_nothing(tmp_path: Path) -> None:
+@pytest.mark.parametrize("offset", [-3600 + 300, -95])
+def test_local_evidence_from_before_a_clock_step_back_holds_nothing(offset: int, tmp_path: Path) -> None:
     t0 = datetime(2026, 9, 28, 8, 0, tzinfo=UTC)
 
     async def scenario(hass: HomeAssistant) -> None:
-        # The start is confirmed at t0 + 5 s, then the clock steps back one hour.
-        store = await _started_then_cloud(hass, t0, [(-3600 + 300, "idle")])
+        # The start is confirmed at t0 + 5 s, then the clock steps back an hour, or just over 90 s.
+        store = await _started_then_cloud(hass, t0, [(offset, "idle")])
         assert store.history.current is None, "a command from the future cannot suppress a current reading"
 
     _run(scenario, tmp_path)
