@@ -1228,6 +1228,30 @@ def test_a_task_started_in_home_assistant_ends_when_the_cloud_says_so(tmp_path: 
     _run(scenario, tmp_path)
 
 
+def test_local_evidence_holds_a_differing_cloud_reading_for_120_seconds(tmp_path: Path) -> None:
+    t0 = datetime(2026, 9, 28, 7, 0, tzinfo=UTC)
+
+    async def scenario(hass: HomeAssistant) -> None:
+        store = await _started_then_cloud(hass, t0, [(65, "idle"), (115, "idle")])
+        assert store.history.current is not None, "a differing reading 60 s and 110 s after the start still lags"
+        store = await _started_then_cloud(hass, t0, [(135, "idle")])
+        assert store.history.current is None, "130 s after the start the differing reading ends the session"
+        assert store.history.recent[0]["ended_at"] == (t0 + timedelta(seconds=135)).isoformat()
+
+    _run(scenario, tmp_path)
+
+
+def test_local_evidence_from_before_a_clock_step_back_holds_nothing(tmp_path: Path) -> None:
+    t0 = datetime(2026, 9, 28, 8, 0, tzinfo=UTC)
+
+    async def scenario(hass: HomeAssistant) -> None:
+        # The start is confirmed at t0 + 5 s, then the clock steps back one hour.
+        store = await _started_then_cloud(hass, t0, [(-3600 + 300, "idle")])
+        assert store.history.current is None, "a command from the future cannot suppress a current reading"
+
+    _run(scenario, tmp_path)
+
+
 def test_an_app_task_after_a_home_assistant_task_is_a_separate_session(tmp_path: Path) -> None:
     t0 = datetime(2026, 9, 28, 7, 0, tzinfo=UTC)
 

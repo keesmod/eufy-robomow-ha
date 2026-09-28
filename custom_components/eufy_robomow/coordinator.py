@@ -960,7 +960,9 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         source. Its time is the bridge's receipt time and the cloud record can
         lag the mower, so local evidence wins for BRIDGE_CLOUD_SESSION_LAG: a
         reading received within that bound after a reported status or a
-        confirmed command, and differing from it, is not observed.
+        confirmed command, and differing from it, is not observed. Local
+        evidence more than BRIDGE_CLOUD_STATUS_MAX_AGE newer than an accepted
+        reading can only follow a clock step back, so it suppresses nothing.
         """
         if self.session_store is None:
             return
@@ -972,7 +974,10 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         if (
             local is not None
             and local[0] != cloud[0]
-            and (local[2] is None or cloud[2] - local[2] <= BRIDGE_CLOUD_SESSION_LAG)
+            and (
+                local[2] is None
+                or -BRIDGE_CLOUD_STATUS_MAX_AGE <= cloud[2] - local[2] <= BRIDGE_CLOUD_SESSION_LAG
+            )
         ):
             return
         self.session_store.observe_activity(cloud[0], cloud[2], cloud=True)

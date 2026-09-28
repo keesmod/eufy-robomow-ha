@@ -156,7 +156,9 @@ def test_an_older_observation_applies_from_the_last_one_without_counting_twice()
 
 def test_a_clock_step_back_is_a_gap_and_counting_resumes():
     h = SessionHistory()
+    h.observe_activity("idle", NOW + timedelta(hours=1) - timedelta(seconds=10))
     h.observe_activity("mowing", NOW + timedelta(hours=1))
+    assert h.current["observation_gap"] is False, "an observed start"
     h.observe_activity("mowing", NOW)
     assert h.current["observation_gap"] is True, "the stepped-back interval is unknown"
     h.observe_activity("mowing", NOW + timedelta(seconds=20))
