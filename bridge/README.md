@@ -175,7 +175,7 @@ may contain only the keys below, as strings or integers, and must stay under
 | `EUFY_MOWER_OPERATING_MODE`   | `operating_mode`  | no       | `observe_only`     | `observe_only` or `control`                            |
 | `EUFY_MOWER_SETTINGS_MODE`    | `settings_mode`   | no       | `read_only`        | `read_only` or `write`. `write` enables the settings route and the library's separate settings opt-in. Independent of `operating_mode` |
 | `EUFY_MOWER_CLOUD_TIMEOUT_MS` | `cloud_timeout_ms`| no       | `15000`            | 1000 to 60000, deadline per Eufy Home or Tuya request |
-| `EUFY_MOWER_LOCAL_TIMEOUT_MS` | `local_timeout_ms`| no       | `5000`             | 1000 to 60000, deadline for connecting and for each LAN query |
+| `EUFY_MOWER_LOCAL_TIMEOUT_MS` | `local_timeout_ms`| no       | `10000`            | 1000 to 60000, deadline for connecting and for each LAN query |
 | `EUFY_MOWER_HOST`             | `host`            | no       |                    | LAN address of the mower, used only when exactly one mower is discovered |
 | `EUFY_MOWER_HOSTS`            | `hosts`           | no       |                    | `id=host` pairs separated by commas, or an object of id to host in the file |
 | `EUFY_MOWER_CONTROL_STOP_ROUTE` | `control_stop_route` | in `control` mode | | 1 to 200 printable ASCII characters. The operator's own words for how the mower is stopped when a command misbehaves, for example `pause here, then Stop and Charge in the eufy app`. Passed to the library opt-in, never logged or served |
