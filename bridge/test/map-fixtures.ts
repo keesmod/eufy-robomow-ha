@@ -163,6 +163,7 @@ export class FakeMapAcquisition implements MapAcquisitionPort {
   shutdowns = 0;
   cleared = 0;
   failShutdown = false;
+  shutdownGate: Promise<void> | undefined;
   onAbort: { cancellationConfirmed: boolean; cleanupConfirmed: boolean } = { cancellationConfirmed: true, cleanupConfirmed: true };
   ended: MapAcquisitionEnd | undefined;
   #snapshot: MapAcquisitionSnapshot | undefined;
@@ -209,6 +210,7 @@ export class FakeMapAcquisition implements MapAcquisitionPort {
 
   async shutdown(): Promise<void> {
     this.shutdowns += 1;
+    await this.shutdownGate;
     if (this.failShutdown) throw new EufyError('shutdown_incomplete');
   }
 

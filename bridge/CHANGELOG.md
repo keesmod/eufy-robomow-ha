@@ -21,6 +21,37 @@ files, because the mower id the integration stores depends on them. A rollback
 of the app restores the app backup that the update created, which brings back
 the previous version with its options and data.
 
+## 0.13.3 - 2026-09-28
+
+### One recovery probe after an unconfirmed map cancellation
+
+- After `cancel_unconfirmed` with confirmed local cleanup and returned
+  shutdown, wait fifteen minutes. The next map request starts exactly one
+  fresh acquisition, even if a stream lease is active. Only a valid new map
+  plus confirmed cancellation and cleanup restores the normal schedule.
+- Any failed probe, including failed provisioning or a demand without a valid
+  map, blocks acquisition until restart. Unconfirmed local cleanup always
+  requires restart. The last good map stays served with its stale flag and
+  error while recovery is pending.
+- The state document adds `maps.recovery` and `maps.last_recovery`. The latter
+  keeps the latest probe result when ordinary demands resume, so a later
+  observation can read its times and cancellation and cleanup confirmations.
+- No command replay, settings write, new option or library update.
+
+Evidence: software-verified with synthetic HTTP-route regressions for the
+cool-down, clock corrections, concurrent requests, one probe, recovery, failed
+probes, delayed shutdown and stopping the bridge. Hardware recovery remains
+open in #71. On 2026-09-28 the owner accepted the unknown remote lifetime for
+this bounded rule and its future use. Local exclusivity remains required.
+The fifteen-minute policy exceeds the observed interval between the failed
+cancellation and a working map after the 2026-09-28 installation restart.
+That observation does not establish a firmware timeout or prove that waiting
+alone terminates a peer transfer. See the [recovery evidence and limits](../docs/map-recovery.md).
+
+Upgrade: install the matching app with a backup of its options and private
+state. The integration needs no update. Rollback: restore the 0.13.2 app
+backup. This restores the permanent block after an unconfirmed cancellation.
+
 ## 0.13.2 - 2026-09-28
 
 ### Wait ten seconds for each LAN step by default
