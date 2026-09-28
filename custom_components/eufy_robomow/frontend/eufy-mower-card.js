@@ -1,5 +1,5 @@
 /* Eufy Mower Card — uses Home Assistant entities and authenticated image proxy. */
-export const CARD_VERSION = "0.7.3";
+export const CARD_VERSION = "0.7.4";
 const unavailable = new Set(["unknown", "unavailable", ""]);
 export const escapeHTML = (value) => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 export function ageSeconds(value, now = Date.now()) {
@@ -8,7 +8,10 @@ export function ageSeconds(value, now = Date.now()) {
 }
 export function controls(state, now = Date.now()) {
   const a = state?.attributes ?? {};
-  const fresh = state && !unavailable.has(state.state) && ageSeconds(a.telemetry_updated_at, now) < 45;
+  // Fresh telemetry means the mower is reachable. A resting mower on the bridge backend reports
+  // no activity, so it stays `unknown` while connected. Commands still need a known activity.
+  const connected = Boolean(state) && !["unavailable", ""].includes(state.state) && ageSeconds(a.telemetry_updated_at, now) < 45;
+  const fresh = connected && state.state !== "unknown";
   const writable = a.operating_mode === "control" && fresh;
   const busy = ["sending", "pending"].includes(a.command?.state);
   const features = a.supported_features ?? 0;
@@ -17,7 +20,24 @@ export function controls(state, now = Date.now()) {
     // The E15 ignores a pause during the drive home, so pause is offered while mowing only.
     pause: Boolean(writable && (features & 2) && state.state === "mowing"),
     dock: Boolean(writable && (features & 4) && ["mowing", "paused", "returning"].includes(state.state)),
-    writable, fresh,
+    writable, fresh, connected,
+    // Settings writes keep their own opt-ins in the bridge and the library, independent of the activity.
+    settings: a.operating_mode === "control" && connected,
+  };
+}
+/**
+ * Progress, distance and area come from local session sensors that the bridge backend cannot fill.
+ * Observed mowing time comes from the session store on both backends, so it stays during a session.
+ */
+export function sessionMetrics(state, current) {
+  const local = state?.attributes?.backend !== "bridge";
+  return {progress: local, distance: local, area: local, duration: local || Boolean(current)};
+}
+/** Distance and area columns are shown only when a stored session carries a value. */
+export function historyColumns(rows) {
+  return {
+    distance: rows.some(row => typeof row.distance_m === "number"),
+    area: rows.some(row => typeof row.area_raw === "number"),
   };
 }
 export function mapHealth(image, active, now = Date.now()) {
@@ -90,10 +110,10 @@ export class EufyMowerCard extends HTMLElement {
         <div class="map-footer"><div><h2>${escapeHTML(this.config.title || "Grasmaaier")}</h2><span>Kaart en maaierpositie</span></div><div class="zoom"><button data-zoom="out" aria-label="Uitzoomen">−</button><button data-zoom="reset" id="zoom-label" aria-label="Zoom herstellen">100%</button><button data-zoom="in" aria-label="Inzoomen">+</button></div></div>
       </section><aside>
         <div class="aside-top"><span>Status</span><span id="connection-status" class="badge"></span></div><h2 id="activity">Status ophalen…</h2><p id="telemetry" class="muted"></p><div class="actions"><button id="start" class="primary" data-command="start_mowing">${icon("play")}<span id="start-label">Maaien</span></button><button id="pause" data-command="pause">${icon("pause")}Pauze</button><button id="dock" data-command="dock">${icon("home-import-outline")}Naar laadstation</button></div>
-        <div class="metrics"><div><span>Batterij</span><strong id="battery">—</strong></div><div><span id="progress-label">Voortgang</span><strong id="progress">—</strong></div></div>
+        <div class="metrics"><div><span>Batterij</span><strong id="battery">—</strong></div><div id="progress-metric"><span id="progress-label">Voortgang</span><strong id="progress">—</strong></div></div>
         <div class="progress-track" role="progressbar" aria-label="Maaivoortgang" aria-valuemin="0" aria-valuemax="100"><span id="progress-bar"></span></div>
-        <div class="session-metrics"><div><span>Afstand</span><b id="distance">—</b></div><div><span>Oppervlakte*</span><b id="area">—</b></div><div><span>Waargenomen maaitijd</span><b id="duration">—</b></div></div>
-        <p class="footnote">* De schaal naar m² is nog niet gevalideerd.</p>
+        <div class="session-metrics"><div id="distance-row"><span>Afstand</span><b id="distance">—</b></div><div id="area-row"><span>Oppervlakte*</span><b id="area">—</b></div><div id="duration-row"><span>Waargenomen maaitijd</span><b id="duration">—</b></div></div>
+        <p id="area-note" class="footnote">* De schaal naar m² is nog niet gevalideerd.</p>
 
         <p id="mode" class="muted"></p><p id="command" role="status" aria-live="polite"></p><p id="error" role="alert"></p>
       </aside></div>
@@ -156,8 +176,15 @@ export class EufyMowerCard extends HTMLElement {
     const session = this._state("session")?.attributes;
     const current = session?.current_session;
     const active = ["mowing", "paused", "returning"].includes(state);
-    this._set("activity", current?.phase === "charging" ? labels.charging : (labels[state] ?? state));
-    this._set("connection", c.fresh ? "● Verbonden" : "○ Geen actuele status");
+    this._set("activity", current?.phase === "charging" ? labels.charging : (state === "unknown" && c.connected ? "Activiteit onbekend" : (labels[state] ?? state)));
+    this._set("connection", c.connected ? "● Verbonden" : "○ Geen actuele status");
+    const shown = sessionMetrics(mower, current);
+    this.shadowRoot.getElementById("progress-metric").hidden = !shown.progress;
+    this.shadowRoot.querySelector(".progress-track").hidden = !shown.progress;
+    this.shadowRoot.getElementById("distance-row").hidden = !shown.distance;
+    this.shadowRoot.getElementById("area-row").hidden = !shown.area;
+    this.shadowRoot.getElementById("area-note").hidden = !shown.area;
+    this.shadowRoot.getElementById("duration-row").hidden = !shown.duration;
     this._set("telemetry", `Status bijgewerkt ${stamp(mower?.attributes.telemetry_updated_at)}`);
     this._set("battery", this._metric("battery"));
     this._set("progress-label", current ? "Huidige sessie" : "Laatste sessiemeting");
@@ -171,9 +198,9 @@ export class EufyMowerCard extends HTMLElement {
     if (Number.isFinite(progress)) track.setAttribute("aria-valuenow", String(progress)); else track.removeAttribute("aria-valuenow");
     for (const name of ["start", "pause", "dock"]) this.shadowRoot.getElementById(name).disabled = !c[name] || (name === "start" && this._localBusy);
     this._set("start-label", state === "paused" ? "Hervatten" : "Maaien");
-    this._set("mode", mower?.attributes.operating_mode === "observe_only" ? "Alleen observeren · bediening uitgeschakeld" : (!c.fresh ? "Bediening wacht op actuele maaierstatus." : ""));
-    this._set("connection-status", c.fresh ? "Verbonden" : "Geen actuele status");
-    this._set("settings-status", c.writable ? "" : "Instellingen zijn beschikbaar zodra bediening is ingeschakeld en de maaierstatus actueel is.");
+    this._set("mode", mower?.attributes.operating_mode === "observe_only" ? "Alleen observeren · bediening uitgeschakeld" : (!c.connected ? "Bediening wacht op actuele maaierstatus." : (!c.fresh ? "De maaier meldt nu geen activiteit. De knoppen werken zodra een activiteit bekend is." : "")));
+    this._set("connection-status", c.connected ? "Verbonden" : "Geen actuele status");
+    this._set("settings-status", c.settings ? "" : "Instellingen zijn beschikbaar zodra bediening is ingeschakeld en de maaier verbonden is.");
     const command = mower?.attributes.command;
     this._set("command", command ? (command.state === "confirmed" ? evidenceLabels[command.evidence] ?? "Nieuwe status ontvangen" : commandLabels[command.state] ?? command.state) : "");
     const map = this._state("map");
@@ -189,7 +216,7 @@ export class EufyMowerCard extends HTMLElement {
     image.hidden = !safePicture;
     this.shadowRoot.getElementById("map-empty").hidden = Boolean(safePicture);
     this._set("planner-reason", this._state("planner_reason")?.state ?? "Koppel een planningssensor om regen, beregening en het volgende maaimoment hier te zien.");
-    this.shadowRoot.getElementById("settings-details").hidden = !c.writable;
+    this.shadowRoot.getElementById("settings-details").hidden = !c.settings;
     this.shadowRoot.querySelectorAll("hui-entities-card").forEach(card => { card.hass = this._hass; });
     this._history(session?.recent_sessions ?? []);
   }
@@ -199,7 +226,9 @@ export class EufyMowerCard extends HTMLElement {
     this._historySignature = signature;
     const target = this.shadowRoot.getElementById("history");
     if (!rows.length) { target.innerHTML = '<div class="empty-history">De volgende maaibeurt verschijnt hier automatisch. Eerdere sessies worden niet gereconstrueerd uit losse tellerstanden.</div>'; return; }
-    target.innerHTML = `<div class="table-scroll"><table><thead><tr><th>Sessie</th><th>Maaitijd</th><th>Afstand</th><th>Oppervlakte*</th><th>Onderbrekingen</th></tr></thead><tbody>${rows.slice(0,20).map(row => `<tr><td><b>${escapeHTML(stamp(row.started_at))}</b><small>${escapeHTML(!row.start_observed || !row.end_observed || row.observation_gap ? "Onvolledige waarneming" : "Taak beëindigd")}</small></td><td>${escapeHTML(minutes(row.mowing_seconds))}</td><td>${escapeHTML(numeric(row.distance_m))} m</td><td>${escapeHTML(numeric(row.area_raw))} ruwe eenh.</td><td>${escapeHTML(row.pause_count)} · ${escapeHTML(minutes(row.paused_seconds))}</td></tr>`).join("")}</tbody></table></div>`;
+    const shown = rows.slice(0,20);
+    const columns = historyColumns(shown);
+    target.innerHTML = `<div class="table-scroll"><table><thead><tr><th>Sessie</th><th>Maaitijd</th>${columns.distance ? "<th>Afstand</th>" : ""}${columns.area ? "<th>Oppervlakte*</th>" : ""}<th>Onderbrekingen</th></tr></thead><tbody>${shown.map(row => `<tr><td><b>${escapeHTML(stamp(row.started_at))}</b><small>${escapeHTML(!row.start_observed || !row.end_observed || row.observation_gap ? "Onvolledige waarneming" : "Taak beëindigd")}</small></td><td>${escapeHTML(minutes(row.mowing_seconds))}</td>${columns.distance ? `<td>${escapeHTML(numeric(row.distance_m))} m</td>` : ""}${columns.area ? `<td>${escapeHTML(numeric(row.area_raw))} ruwe eenh.</td>` : ""}<td>${escapeHTML(row.pause_count)} · ${escapeHTML(minutes(row.paused_seconds))}</td></tr>`).join("")}</tbody></table></div>`;
   }
   async _command(service) {
     const control = {start_mowing:"start", pause:"pause", dock:"dock"}[service];

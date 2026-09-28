@@ -263,7 +263,7 @@ is replayed on a switch.
 ### Mower dashboard and session history
 
 1. Install the integration and restart Home Assistant.
-2. Add `/eufy_robomow/eufy-mower-card.js?v=0.7.1` as a JavaScript module under
+2. Add `/eufy_robomow/eufy-mower-card.js?v=0.7.4` as a JavaScript module under
    **Settings → Dashboards → Resources** (advanced mode may be needed).
 3. Create a dashboard, enable its sidebar entry, and use
    [`examples/dashboard.yaml`](examples/dashboard.yaml). Replace entity IDs with
@@ -276,11 +276,14 @@ Omitting it keeps the combined view for existing cards. Frontend version 0.7.1
 changes presentation only; it does not add zone commands or enable planning.
 Frontend version 0.7.2 offers pause only while the mower mows. Frontend version 0.7.3 labels
 the cloud confirmation of a start.
+Frontend version 0.7.4 shows a mower with fresh telemetry and an unknown activity
+as connected, shows the settings without a known activity and hides progress,
+distance and area, which the bridge backend cannot supply.
 
 The card supports map zoom/pan, battery and session telemetry, settings, and
 start/resume, pause and return commands. It shows pending, confirmed, failed and
-uncertain results. Start requires confirmation; unavailable or stale telemetry
-and observe-only mode disable controls. An inactive-task response to Return is
+uncertain results. Start requires confirmation; unavailable or stale telemetry,
+an unknown activity and observe-only mode disable controls. An inactive-task response to Return is
 not proof of physical arrival at the dock.
 Pause is offered only while mowing: during the drive home the E15 ignores a
 pause, so the local backend refuses one while the task flag is false.
