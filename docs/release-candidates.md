@@ -31,7 +31,7 @@ the bridge cannot supply. Command gating is unchanged. It replaced 0.16.1 on
 installed files matched the candidate, and Home Assistant Core restarted from
 18:05:30 to 18:06:04 UTC. The dashboard resource was then set to `?v=0.7.4`.
 The entry loaded with the same 23 entity ids and none unavailable, the served
-card reports 0.7.4 and the map stayed healthy. The integration archive SHA-256
+card reports 0.7.4 and the map entity was healthy. The integration archive SHA-256
 is `7d0abfee20ec0b610b0ac6daa905b34f564b7fa984d82ed38cf14b9816250b42`. See the
 [installation receipt](https://github.com/keesmod/eufy-robomow-ha/issues/79#issuecomment-5875742543).
 
@@ -89,8 +89,9 @@ All installed app files matched the candidate list. The explicit
 connected. The mower entity kept its controls and was never unavailable, and
 the map was healthy again at 11:54:17 UTC. The app archive SHA-256 is
 `8cf3ab9d65344104113632df74cb3c9eec50ac63d91ad811f47158be0dd928fa`.
-Integration 0.16.1 was not touched. Its installed folder differs from the
-0.16.1 in the candidate only by one code comment in `bridge_client.py`, which
+Integration 0.16.1 was not touched. Until the 0.16.2 update its installed folder
+differed from the 0.16.1 in the candidate only by one code comment in
+`bridge_client.py`, which
 #70 changed without a version bump. See the
 [deployment receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5869490828).
 
