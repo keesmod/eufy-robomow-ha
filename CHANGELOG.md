@@ -40,7 +40,8 @@ know, but saving the options there drops it.
   task that ends or starts outside Home Assistant is not held back.
 - An observation up to 45 seconds older than the previous one applies from the
   previous time on, so no second is counted twice. A larger clock step back is
-  a gap, and counting resumes from there.
+  a gap, and counting resumes from there. Local evidence from before such a
+  step suppresses no cloud reading.
 - A session with a cloud observation carries `cloud_observed: true`, because
   its times are the bridge's receipt times, not device times.
 - The map save at arrival is no cloud activity, so the end of a naturally
@@ -55,7 +56,9 @@ Evidence: software-verified. Tests cover:
 - a lagging reading after a confirmed start;
 - a task started in Home Assistant that ends through the cloud;
 - an app task after a Home Assistant task;
-- out-of-order observations and a clock step back;
+- the 120-second bound on both sides;
+- out-of-order observations and a clock step back, in the history and in the
+  local precedence;
 - the session flag.
 
 Removing any of these rules makes a test fail. On the owner's installation
