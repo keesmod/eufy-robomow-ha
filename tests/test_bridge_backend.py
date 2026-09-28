@@ -730,7 +730,13 @@ def test_cloud_activity_drives_display_and_map_stream_without_local_or_command_e
             assert data == {"8": 85, "134": "Wifi", "109": 70}, "cloud activity is never a local DP"
             assert coordinator.bridge_command_activity is None
             assert coordinator.command is None
-            assert coordinator.session_store.history.current is None, "receipt time is not a fresh device observation"
+            current = coordinator.session_store.history.current
+            if streaming:
+                assert current is not None, "a bounded cloud reading is a session observation"
+                assert (current["phase"], current["cloud_observed"]) == (activity, True)
+                assert current["started_at"] == "2026-09-19T10:00:01.250000+00:00", "the bridge's receipt time"
+            else:
+                assert current is None
             assert entity.supported_features == LawnMowerEntityFeature(0)
             assert not bridge.commands and not bridge.settings and not bridge.work_parameters
 
@@ -1073,6 +1079,111 @@ def test_session_history_in_bridge_mode_follows_confirmed_commands(tmp_path: Pat
         assert session["ended_at"] == datetime(2026, 9, 24, 8, 36, 20, 993000, tzinfo=UTC).isoformat()
         assert session["end_observed"] is False, "five minutes without an observation is a gap, not an observed end"
         assert session["observation_gap"] is True
+
+    _run(scenario, tmp_path)
+
+
+def _cloud_poll(activity: str | None, at: datetime, **cloud: Any) -> dict[str, Any]:
+    """A bridge answer observed at ``at`` whose cloud reading the bridge received at ``at``."""
+    stamp = at.isoformat().replace("+00:00", "Z")
+    status = {"state": "reported", "value": activity} if activity else {"state": "invalid"}
+    return _document(observed_at=stamp, cloud_status=_cloud_status(observed_at=stamp, status=status, **cloud))
+
+
+def test_session_history_in_bridge_mode_follows_bounded_cloud_readings(tmp_path: Path) -> None:
+    start = datetime(2026, 9, 28, 7, 0, tzinfo=UTC)
+    readings = ["idle", "mowing", "mowing", "mowing", "returning", "idle"]
+
+    async def scenario(hass: HomeAssistant) -> None:
+        bridge = _FakeBridge([_cloud_poll(activity, start + timedelta(seconds=30 * i)) for i, activity in enumerate(readings)])
+        coordinator = _coordinator(hass, bridge, OPERATING_MODE_OBSERVE_ONLY)
+        store = SessionStore(hass, "test-entry")
+        coordinator.session_store = store
+        for i in range(len(readings)):
+            with _clock(start + timedelta(seconds=30 * i + 1)):
+                await coordinator._async_update_data()
+        history = store.history
+        assert history.current is None
+        assert len(history.recent) == 1, "a task started outside Home Assistant is recorded"
+        session = history.recent[0]
+        assert session["started_at"] == (start + timedelta(seconds=30)).isoformat()
+        assert session["ended_at"] == (start + timedelta(seconds=150)).isoformat()
+        assert (session["mowing_seconds"], session["returning_seconds"], session["unknown_seconds"]) == (90, 30, 0)
+        assert (session["start_observed"], session["end_observed"], session["observation_gap"]) == (True, True, False)
+        assert session["cloud_observed"] is True
+
+    _run(scenario, tmp_path)
+
+
+def test_cloud_readings_reach_the_session_history_once_and_only_while_valid(tmp_path: Path) -> None:
+    at = datetime(2026, 9, 28, 7, 0, tzinfo=UTC)
+
+    async def scenario(hass: HomeAssistant) -> None:
+        same = _cloud_poll("mowing", at)
+        bridge = _FakeBridge([
+            _cloud_poll("idle", at - timedelta(seconds=30)),
+            same,
+            same,
+            same,
+            _cloud_poll("paused", at + timedelta(seconds=30), stale=True),
+            _cloud_poll("paused", at + timedelta(seconds=35), error="cloud_request_failed"),
+            _cloud_poll("paused", at + timedelta(seconds=40), age_ms=90_001),
+            _cloud_poll("paused", at + timedelta(seconds=45)),
+            _cloud_poll(None, at + timedelta(seconds=50)),
+        ])
+        coordinator = _coordinator(hass, bridge, OPERATING_MODE_OBSERVE_ONLY)
+        store = SessionStore(hass, "test-entry")
+        coordinator.session_store = store
+        observed: list[tuple[str, datetime, bool]] = []
+        original = store.observe_activity
+
+        def counting(activity: str, now: datetime, *, cloud: bool = False) -> None:
+            observed.append((activity, now, cloud))
+            original(activity, now, cloud=cloud)
+
+        store.observe_activity = counting  # type: ignore[method-assign]
+        clocks = [-29, 1, 11, 21, 31, 36, 41, 45 + 91, 51 + 91]
+        for offset in clocks:
+            with _clock(at + timedelta(seconds=offset)):
+                await coordinator._async_update_data()
+        assert observed == [("idle", at - timedelta(seconds=30), True), ("mowing", at, True)], (
+            "one receipt polled three times is one observation, and stale, failed, over-age, "
+            "old and invalid readings observe nothing"
+        )
+        current = store.history.current
+        assert current is not None and current["phase"] == "mowing"
+        assert current["pause_count"] == 0
+
+    _run(scenario, tmp_path)
+
+
+def test_a_cloud_reading_that_differs_from_a_confirmed_command_is_not_observed(tmp_path: Path) -> None:
+    t0 = datetime(2026, 9, 28, 7, 0, tzinfo=UTC)
+
+    async def scenario(hass: HomeAssistant) -> None:
+        bridge = _FakeBridge(
+            [_cloud_poll("idle", t0), _cloud_poll("idle", t0 + timedelta(seconds=30)), _cloud_poll("mowing", t0 + timedelta(seconds=50))],
+            state=_control_state(),
+            command_answers=[_reflected("start", (t0 + timedelta(seconds=20)).isoformat().replace("+00:00", "Z"))],
+        )
+        coordinator = _coordinator(hass, bridge)
+        store = SessionStore(hass, "test-entry")
+        coordinator.session_store = store
+        history = store.history
+        with _clock(t0 + timedelta(seconds=1)):
+            await coordinator._async_update_data()
+        assert history.current is None
+        with _clock(t0 + timedelta(seconds=21)):
+            await coordinator.async_send_mower_command("start")
+        assert history.current is not None and history.current["start_observed"] is True
+        with _clock(t0 + timedelta(seconds=31)):
+            await coordinator._async_update_data()
+        assert history.current is not None, "a lagging cloud record does not end a confirmed start"
+        assert history.current["cloud_observed"] is False
+        with _clock(t0 + timedelta(seconds=51)):
+            await coordinator._async_update_data()
+        assert history.current["mowing_seconds"] == 30, "an agreeing reading continues the session"
+        assert history.current["cloud_observed"] is True
 
     _run(scenario, tmp_path)
 

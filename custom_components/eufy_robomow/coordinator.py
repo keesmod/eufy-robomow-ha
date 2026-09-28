@@ -130,6 +130,7 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
     # map-saving payload is the dock arrival the library observed.
     bridge_command_activity: str | None = None
     bridge_command_activity_at: datetime | None = None
+    _session_cloud_observed_at: datetime | None = None
     # The observation time of the last successful poll, the bridge's
     # ``observed_at`` in bridge mode.
     last_local_update: datetime | None = None
@@ -192,6 +193,8 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         self.bridge_cloud_status = None
         self.bridge_command_activity = None
         self.bridge_command_activity_at = None
+        # The receipt time of the last cloud reading the session history saw.
+        self._session_cloud_observed_at = None
         self.bridge_routes_control = False
         self.bridge_control = None
         self.bridge_routes_settings = False
@@ -426,6 +429,11 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         local = self.bridge_local_activity_evidence
         if local is not None:
             return local
+        return self.bridge_cloud_activity_evidence
+
+    @property
+    def bridge_cloud_activity_evidence(self) -> tuple[str, str, datetime] | None:
+        """The bridge's cloud reading, if it is reported, fresh and within both age bounds."""
         cloud = self.bridge_cloud_status
         if (
             cloud is None
@@ -722,6 +730,8 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             # Only a reported activity is an observation. Missing, invalid and
             # unconfirmed say nothing, and nothing is derived from age or absence.
             self.session_store.observe_activity(telemetry.activity, telemetry.observed_at)
+        if self.session_store:
+            self._observe_cloud_activity()
         dps = dict(telemetry.dps)
         _LOGGER.debug("Bridge state received (%d mapped keys)", len(dps))
         self._known_dps = set(dps.keys())
@@ -935,6 +945,26 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
         if activity is None or outcome.observed_at is None:
             return
         self._record_activity(activity, outcome.observed_at)
+
+    def _observe_cloud_activity(self) -> None:
+        """Give the session history each new bounded cloud reading once.
+
+        The E15's LAN answers carry no activity, so on the bridge backend the
+        cloud reading, refreshed about every 30 seconds, is the only regular
+        source. Its time is the bridge's receipt time and the cloud record can
+        lag the mower, so local evidence wins: a reading that differs from a
+        reported status or a recent confirmed command is not observed.
+        """
+        if self.session_store is None:
+            return
+        cloud = self.bridge_cloud_activity_evidence
+        if cloud is None or cloud[2] == self._session_cloud_observed_at:
+            return
+        self._session_cloud_observed_at = cloud[2]
+        local = self.bridge_local_activity_evidence
+        if local is not None and local[0] != cloud[0]:
+            return
+        self.session_store.observe_activity(cloud[0], cloud[2], cloud=True)
 
     def _record_activity(self, activity: str, observed_at: datetime) -> None:
         """Keep one reported activity from a command as the bridge-mode evidence.

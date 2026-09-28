@@ -21,6 +21,42 @@ The session store has kept storage version 1 since 0.7.0 and the options have
 kept their keys since 0.11.0. An older version ignores an option it does not
 know, but saving the options there drops it.
 
+## 0.16.3 - 2026-09-28
+
+### Record bridge-mode sessions from bounded cloud readings
+
+- On the bridge backend the E15's LAN answers carry no activity. Until now only
+  a confirmed command reached the session history. A task started by the eufy
+  app or its schedule opened no session, and a task started through Home
+  Assistant was stored with 0 mowing seconds, because observations more than
+  45 seconds apart count as unknown time.
+- Each new cloud reading the entity accepts for display, reported, fresh and
+  within both 90-second age bounds, is now one session observation. The bridge
+  refreshes it about every 30 seconds.
+- Local evidence wins. A reading that differs from a reported status or a
+  confirmed command younger than 30 minutes is not observed, because the cloud
+  record can lag the mower.
+- An observation older than the previous one applies from the previous time on,
+  so no second is counted twice.
+- A session with a cloud observation carries `cloud_observed: true`, because
+  its times are the bridge's receipt times, not device times.
+- The map save at arrival is no cloud activity, so the end of a naturally
+  finished task is usually recorded as not observed. Distance, area and
+  progress stay unknown on the bridge backend.
+
+Evidence: software-verified. Tests cover a task seen only through the cloud,
+one receipt polled several times, stale, failed, over-age, old and invalid
+readings, a lagging reading after a confirmed start, out-of-order observations
+and the session flag. Removing any of these rules makes a test fail. The cause
+was established from the owner's stored sessions in
+[#82](https://github.com/keesmod/eufy-robomow-ha/issues/82), see
+[#83](https://github.com/keesmod/eufy-robomow-ha/issues/83).
+
+Upgrade: replace the integration folder, run the configuration check and
+restart Home Assistant. Stored sessions keep their fields. The bridge and the
+dashboard resource need no update. Rollback: restore 0.16.2. Sessions recorded
+by 0.16.3 stay stored, and 0.16.2 ignores their extra field.
+
 ## 0.16.2 - 2026-09-28
 
 ### Show a resting mower on the bridge backend as connected

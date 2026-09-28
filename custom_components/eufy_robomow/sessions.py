@@ -66,22 +66,31 @@ class SessionHistory:
                     phase = "mowing"
         return self._account(active, phase, now, dps.get("113"))
 
-    def observe_activity(self, activity: str, now: datetime) -> bool:
+    def observe_activity(self, activity: str, now: datetime, *, cloud: bool = False) -> bool:
         """Observe one reported bridge activity with the same phase accounting.
 
         Mowing, paused and returning are an active task in that phase. Docked,
         charging and idle are an inactive task. No raw data point is invented,
         so area, distance and progress stay unknown, and any other value changes
         nothing. The caller passes only a reported status, never age or absence.
+        ``cloud`` marks a bounded cloud reading, whose time is the bridge's
+        receipt time rather than a device time. The session it touches says so.
         """
         if activity in _ACTIVE_ACTIVITIES:
-            return self._account(True, activity, now, None)
+            return self._account(True, activity, now, None, cloud=cloud)
         if activity in _INACTIVE_ACTIVITIES:
-            return self._account(False, "unknown", now, None)
+            return self._account(False, "unknown", now, None, cloud=cloud)
         return False
 
-    def _account(self, active: bool, phase: str, now: datetime, blob: str | None) -> bool:
+    def _account(
+        self, active: bool, phase: str, now: datetime, blob: str | None, *, cloud: bool = False
+    ) -> bool:
         """Attribute the time since the previous observation and record the phase."""
+        if self._previous_at is not None and now < self._previous_at:
+            # An observation older than the last one, for example a command's
+            # report overtaken by a cloud receipt, applies from the last one on.
+            # Moving back in time would count the same seconds twice.
+            now = self._previous_at
         if active and self.current is None:
             self.current = {
                 "id": uuid4().hex,
@@ -101,11 +110,14 @@ class SessionHistory:
                 "distance_m": None,
                 "progress": None,
                 "phase": "unknown",
+                "cloud_observed": False,
             }
             self._previous_at = None
             self._accept_blob = False
         current = self.current
         if current:
+            if cloud:
+                current["cloud_observed"] = True
             if self._previous_at is not None:
                 delta = max(0.0, (now - self._previous_at).total_seconds())
                 if delta > MAX_OBSERVATION_GAP:
@@ -167,8 +179,8 @@ class SessionStore:
         if self.history.observe(dps, now):
             self.store.async_delay_save(self.history.dump, 5)
 
-    def observe_activity(self, activity: str, now: datetime) -> None:
-        if self.history.observe_activity(activity, now):
+    def observe_activity(self, activity: str, now: datetime, *, cloud: bool = False) -> None:
+        if self.history.observe_activity(activity, now, cloud=cloud):
             self.store.async_delay_save(self.history.dump, 5)
 
     async def async_save(self) -> None:

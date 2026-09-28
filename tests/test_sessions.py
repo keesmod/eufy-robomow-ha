@@ -105,6 +105,7 @@ def test_bridge_activities_drive_the_same_phase_accounting_without_raw_data_poin
     h.observe_activity("mowing", NOW + timedelta(seconds=40))
     assert h.current["start_observed"] is True, "an inactive observation preceded this start"
     assert h.current["observation_gap"] is False
+    assert h.current["cloud_observed"] is False, "only a cloud reading marks a session"
 
 
 def test_inactive_bridge_activities_end_a_session_and_unknown_ones_never_start_one():
@@ -127,3 +128,28 @@ def test_a_long_gap_between_bridge_activities_is_unknown_time():
     assert h.current["mowing_seconds"] == 0
     assert h.current["unknown_seconds"] == 3600
     assert h.current["observation_gap"] is True
+
+
+def test_a_cloud_reading_marks_its_session():
+    h = SessionHistory()
+    h.observe_activity("mowing", NOW)
+    assert h.current["cloud_observed"] is False
+    h.observe_activity("mowing", NOW + timedelta(seconds=30), cloud=True)
+    assert h.current["cloud_observed"] is True
+    assert h.current["mowing_seconds"] == 30
+    h.observe_activity("idle", NOW + timedelta(seconds=60), cloud=True)
+    assert h.recent[0]["cloud_observed"] is True
+    assert h.recent[0]["mowing_seconds"] == 60
+
+
+def test_an_older_observation_applies_from_the_last_one_without_counting_twice():
+    h = SessionHistory()
+    h.observe_activity("mowing", NOW + timedelta(seconds=100), cloud=True)
+    h.observe_activity("paused", NOW + timedelta(seconds=90))
+    assert h.current["phase"] == "paused", "the older observation still applies"
+    assert h.current["last_observed_at"] == (NOW + timedelta(seconds=100)).isoformat()
+    h.observe_activity("mowing", NOW + timedelta(seconds=120))
+    assert h.current["started_at"] == (NOW + timedelta(seconds=100)).isoformat()
+    assert (h.current["mowing_seconds"], h.current["paused_seconds"]) == (0, 20), "no second is counted twice"
+    assert h.current["pause_count"] == 1
+
