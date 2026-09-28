@@ -48,7 +48,7 @@ the previous version with its options and data.
   two `local_timeout_ms` steps, to connect and then for the command, plus
   `control_read_back_ms`. The integration waits 75 seconds for a command, so
   `2 × local_timeout_ms + control_read_back_ms` must stay below 75000 ms,
-  which with the default 10000 ms means a read-back of at most 55000 ms. This
+  which with the default 10000 ms means a read-back below 55000 ms. This
   does not count a session renewal or discovery that the bridge may run before
   the LAN session. Each is bounded by 30 seconds and was already outside the
   budget before this change. Past the timeout the integration keeps the

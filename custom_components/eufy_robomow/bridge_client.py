@@ -51,7 +51,7 @@ _MAX_BODY_SIZE = 256 * 1024
 _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15, connect=5)
 # A command's LAN part takes up to 2 × local_timeout_ms (connect, then the
 # command) + control_read_back_ms, which must stay below this 75 s timeout.
-# With the default 10000 ms that means a read-back of at most 55000 ms. A
+# With the default 10000 ms that means a read-back below 55000 ms. A
 # session renewal or discovery before the LAN session, each bounded by 30 s,
 # is not counted. Past the timeout the command stays uncertain. The bridge may
 # still write it and finish its read-back, but that outcome is not reported.
