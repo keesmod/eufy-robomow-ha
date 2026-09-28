@@ -24,8 +24,9 @@ backends and rollback are described in
 Bridge/app 0.13.4 from `022810d` (#77) refuses a `control` configuration whose
 two LAN steps and read-back reach the integration's 75-second command timeout,
 see [#75](https://github.com/keesmod/eufy-robomow-ha/issues/75). The owner's
-`control_read_back_ms` of 60000 exceeded that budget since 0.13.2 raised the
-default `local_timeout_ms` to 10000. Before the update it was lowered to 54000,
+`control_read_back_ms` of 60000 exceeded that budget once `local_timeout_ms`
+became 10000, explicitly on 0.13.1 from 07:56 UTC and by default from 0.13.2.
+Before the update it was lowered to 54000,
 with a private backup of the app options. App 0.13.4 replaced 0.13.3 on
 2026-09-28 from 17:41:10 to 17:41:28 UTC with Supervisor backup `a9a11d61`.
 All 17 installed app files matched the candidate list. The startup log shows
@@ -274,6 +275,11 @@ Deployment:
   bridge came back in `control`, the mower entity was never unavailable and
   the map was healthy again at 11:54:17 UTC (2026-09-28,
   [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5869490828)).
+- The app was updated from 0.13.2 to 0.13.3 with Supervisor backup
+  `ca0d4988`. The installed app sources matched the candidate, identities and
+  settings were unchanged and an ordinary map acquisition confirmed
+  cancellation and cleanup (2026-09-28,
+  [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/71#issuecomment-5870459019)).
 - The app was updated from 0.13.3 to 0.13.4 with Supervisor backup
   `a9a11d61` after `control_read_back_ms` was lowered from 60000 to 54000.
   All 17 installed app files matched the candidate list, the bridge came back
