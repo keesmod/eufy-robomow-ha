@@ -621,8 +621,12 @@ helper.
   refused. On 2026-09-27 that renewal, a mowing task's map stream and a host
   reboot passed on the owned E15, see the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097).
   Three of 87 stream demands lost the connection at the weakest Wi-Fi readings,
-  and the bridge resumed after its retry interval. Longer daily use remains
-  open.
+  and the bridge resumed after its retry interval. It then ran 13 hours
+  overnight in daily use with the mower at its station, the map healthy and
+  14 session renewals without error, see the
+  [daily-use receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5864644965).
+  An unconfirmed map cancellation still blocks map demands until the bridge
+  restarts, see #71.
 - **Live marker semantics** — the live mower/station interpretation matches repeated E15 observations but is not a vendor-documented protocol contract. It is display-only and never drives mower control.
 
 ---

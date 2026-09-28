@@ -263,7 +263,12 @@ below retain their stated scope.
   Wi-Fi readings, and the bridge resumed after its retry interval each time.
   A session renewal during a running stream demand and a host reboot passed,
   see the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097). The installation now runs in
-  `control` with settings writes disabled. Longer daily use remains open.
+  `control` with settings writes disabled. Bridge 0.13.1 then ran 13 hours
+  overnight in daily use with the mower at its station. The map stayed healthy,
+  with no map error, and 14 session renewals passed without error, see the
+  [daily-use receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5864644965).
+  An unconfirmed map cancellation still blocks map demands until the bridge
+  restarts, see #71.
 - The compatible `external` HTTPS map source remains available as a manual
   recovery route.
 - The no-go zones on the map since 0.15.1, from map-record field 12. The
@@ -279,8 +284,10 @@ below retain their stated scope.
 
 ## Outstanding obligations
 
-- Broader native map acceptance, item 2 of #8: longer daily use beyond the
-  observed windows.
+- Recovery of native map acquisition after an unconfirmed cancellation without
+  a bridge restart, #71. At the end of a mowing task on 2026-09-28 the bridge
+  reported `mower_map_cancel_unconfirmed`, and by design it then blocks map
+  demands until it restarts.
 - The licensing boundary and an explicit authorisation before any publication.
 
 ## Compatibility

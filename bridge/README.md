@@ -112,15 +112,19 @@ and the settings route also writes the mow speed and the blade speed.
   acquisition. File mode retains the operator-supplied file route. Without
   configured provisioning the state document reports
   `routes.maps` as `false` and the map route answers `404`.
-- Longer native-map use remains open. Bridge 0.13.0 on library 0.25.1 passed
-  docked acquisitions and a short supervised E15 moving-map run, with
-  cancellation and cleanup confirmed. Bridge 0.13.1 on library 0.25.2 renews
-  the cloud session before map provisioning would be refused. On 2026-09-27 it
-  renewed during a running stream demand, which ended normally. After a host
-  reboot it started through `boot: auto` and restored its session, see the
+- No native-map recovery after an unconfirmed cancellation without a restart,
+  see #71. Bridge 0.13.0 on library 0.25.1 passed docked acquisitions and a
+  short supervised E15 moving-map run, with cancellation and cleanup
+  confirmed. Bridge 0.13.1 on library 0.25.2 renews the cloud session before
+  map provisioning would be refused. On 2026-09-27 it renewed during a running
+  stream demand, which ended normally. After a host reboot it started through
+  `boot: auto` and restored its session, see the
   [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097). Three stream demands ended with
   `connection_failed` while the mower reported its weakest Wi-Fi readings. The
-  bridge served the last good map and resumed after its retry interval.
+  bridge served the last good map and resumed after its retry interval. It
+  then ran 13 hours overnight in daily use with the mower at its station, the
+  map healthy and 14 session renewals without error, see the
+  [daily-use receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5864644965).
 - No map editing, zone or selection, and no path history across demands. The
   bundle carries the three transport files as the library retained them. The
   library's `MowerPathAccumulator` is not part of this contract, the
