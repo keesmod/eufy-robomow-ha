@@ -21,6 +21,43 @@ The session store has kept storage version 1 since 0.7.0 and the options have
 kept their keys since 0.11.0. An older version ignores an option it does not
 know, but saving the options there drops it.
 
+## 0.16.2 - 2026-09-28
+
+### Show a resting mower on the bridge backend as connected
+
+- Card 0.7.4 separates a connected mower with an unknown activity from a
+  mower without current status. On the bridge backend a resting mower
+  reports no activity, so the mower entity stays `unknown` by design. With
+  fresh telemetry the card now shows "Verbonden" and "Activiteit onbekend"
+  with a neutral explanation, instead of "Geen actuele status". An unknown
+  activity can also occur during a task, so the text does not claim the mower
+  rests. Stale or unavailable telemetry keeps the previous wording.
+- Commands keep their gating. Start is offered from `docked` and `paused`,
+  pause only while mowing and dock during a task. The integration and the
+  bridge still accept a start through the Home Assistant service.
+- The settings on the Instellingen tab now need `control` and fresh telemetry
+  only, not a known activity. Writes keep their own opt-ins in the bridge and
+  the library.
+- On the bridge backend the overview hides progress, distance and area, whose
+  local sensors have no bridge source. The observed mowing time comes from the
+  session store on both backends and stays visible during a session. The
+  history table shows distance and area only when a stored session carries a
+  value.
+- No change to entities, services, options or stored sessions.
+
+Evidence: software-verified. The card tests cover the connected and stale
+cases, the unchanged command gating and the settings gate, and render the
+overview and history with a minimal document stub to check the shown text,
+the hidden metrics and the history columns.
+The unknown activity at rest and the empty metrics were read from the owner's
+installation on 2026-09-28, see
+[#79](https://github.com/keesmod/eufy-robomow-ha/issues/79).
+
+Upgrade: replace the integration folder, run the configuration check and
+restart Home Assistant. Update the dashboard resource to
+`/eufy_robomow/eufy-mower-card.js?v=0.7.4`. The bridge needs no update.
+Rollback: restore 0.16.1 and set the resource back to `?v=0.7.3`.
+
 ## 0.16.1 - 2026-09-26
 
 ### Keep live coverage within the observed task
