@@ -113,7 +113,8 @@ and the settings route also writes the mow speed and the blade speed.
   configured provisioning the state document reports
   `routes.maps` as `false` and the map route answers `404`.
 - Native-map recovery after an unconfirmed cancellation is software-verified
-  in 0.13.3, with hardware observation still open in #71. Bridge 0.13.0 on library 0.25.1 passed docked acquisitions and a
+  in 0.13.3. It was not observed on hardware, and #71 was closed at the
+  owner's request with that observation waived. Bridge 0.13.0 on library 0.25.1 passed docked acquisitions and a
   short supervised E15 moving-map run, with cancellation and cleanup
   confirmed. Bridge 0.13.1 on library 0.25.2 renews the cloud session before
   map provisioning would be refused. On 2026-09-27 it renewed during a running
@@ -184,7 +185,7 @@ may contain only the keys below, as strings or integers, and must stay under
 | `EUFY_MOWER_HOSTS`            | `hosts`           | no       |                    | `id=host` pairs separated by commas, or an object of id to host in the file |
 | `EUFY_MOWER_CONTROL_STOP_ROUTE` | `control_stop_route` | in `control` mode | | 1 to 200 printable ASCII characters. The operator's own words for how the mower is stopped when a command misbehaves, for example `pause here, then Stop and Charge in the eufy app`. Passed to the library opt-in, never logged or served |
 | `EUFY_MOWER_CONTROL_MAX_STATE_AGE_MS` | `control_max_state_age_ms` | no | `30000` | 1000 to 300000. A command is refused when the last successful state observation of that mower is older |
-| `EUFY_MOWER_CONTROL_READ_BACK_MS` | `control_read_back_ms` | no | `20000` | 1000 to 60000. How long the library waits for fresh reports after every write. A command's LAN part takes up to two `local_timeout_ms` steps, to connect and then for the command, plus this read-back. So `2 × local_timeout_ms + control_read_back_ms` must stay below the integration's command timeout of 75000 ms, which with the default `local_timeout_ms` of 10000 means below 55000. A session renewal or discovery that the bridge may run before the LAN session is not counted and is bounded by 30 seconds each. Past the timeout the integration keeps the command uncertain. The bridge may still write the command and finish its read-back, but that outcome is not reported. Nothing is repeated |
+| `EUFY_MOWER_CONTROL_READ_BACK_MS` | `control_read_back_ms` | no | `20000` | 1000 to 60000. How long the library waits for fresh reports after every write. A command's LAN part takes up to two `local_timeout_ms` steps, to connect and then for the command, plus this read-back. So `2 × local_timeout_ms + control_read_back_ms` must stay below the integration's command timeout of 75000 ms, which with the default `local_timeout_ms` of 10000 means below 55000. Since 0.13.4 the bridge refuses to start in `control` mode otherwise. A session renewal or discovery that the bridge may run before the LAN session is not counted and is bounded by 30 seconds each. Past the timeout the integration keeps the command uncertain. The bridge may still write the command and finish its read-back, but that outcome is not reported. Nothing is repeated |
 | `EUFY_MOWER_MAP_PROVISIONING_MODE` | `map_provisioning_mode` | no | `file` | `cloud` obtains fresh private provisioning from the library for every acquisition. `file` retains the existing operator-supplied file route |
 | `EUFY_MOWER_MAP_PROVISIONING_FILE` | `map_provisioning_file` | no | | Absolute path of the private provisioning file in file mode. Enables the read-only map route. Cannot be combined with cloud mode |
 | `EUFY_MOWER_MAP_MOWER_ID` | `map_mower_id` | no | | 64-character id of the mower the provisioning belongs to. Required only when more than one mower is discovered and maps are enabled |
@@ -216,9 +217,9 @@ The library stores derived MQTT credentials in the existing private session
 file. Provisioning, local keys and raw RTC responses never enter the bridge
 API or logs. This path has software coverage, and its hardware observations
 on the owned E15 are recorded in #8 and in
-[Release candidates](../docs/release-candidates.md). Broader acceptance stays
-open while #71, recovery after an unconfirmed map cancellation without a
-restart, is open. The owner's Android map helper was retired on 2026-09-25
+[Release candidates](../docs/release-candidates.md). Recovery after an
+unconfirmed map cancellation without a restart was not observed on hardware.
+#71 was closed at the owner's request with that observation waived. The owner's Android map helper was retired on 2026-09-25
 with verified archives. The compatible `external` HTTPS source remains a
 manual recovery route. Use one acquisition owner at a time.
 

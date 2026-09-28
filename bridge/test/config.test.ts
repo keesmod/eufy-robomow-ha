@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  COMMAND_TIMEOUT_BUDGET_MS,
   ConfigError,
   DEFAULT_BIND_ADDRESS,
   DEFAULT_CLOUD_TIMEOUT_MS,
@@ -88,6 +89,24 @@ test('observe_only is the default and control needs the explicit stop route opt-
   assert.equal(description.control_max_state_age_ms, DEFAULT_CONTROL_MAX_STATE_AGE_MS);
   assert.equal(description.control_read_back_ms, DEFAULT_CONTROL_READ_BACK_MS);
   assert.ok(!JSON.stringify(description).includes('pause then the app'), 'the stop route is not logged');
+});
+
+test('control keeps two LAN steps and the read-back below the integration command timeout', () => {
+  const control = { operating_mode: 'control', control_stop_route: 'pause then the app' };
+  assert.equal(COMMAND_TIMEOUT_BUDGET_MS, 75_000);
+  assert.ok(2 * DEFAULT_LOCAL_TIMEOUT_MS + DEFAULT_CONTROL_READ_BACK_MS < COMMAND_TIMEOUT_BUDGET_MS, 'the defaults fit');
+  assert.equal(resolveConfig(syntheticValues({ ...control, control_read_back_ms: 54_999 })).control?.readBackMs, 54_999);
+  rejects(syntheticValues({ ...control, control_read_back_ms: 55_000 }), 'control_read_back_ms');
+  rejects(syntheticValues({ ...control, control_read_back_ms: 60_000 }), 'control_read_back_ms');
+  assert.equal(resolveConfig(syntheticValues({ ...control, local_timeout_ms: 5000, control_read_back_ms: 60_000 })).control?.readBackMs, 60_000);
+  assert.equal(resolveConfig(syntheticValues({ ...control, local_timeout_ms: 27_000 })).control?.readBackMs, DEFAULT_CONTROL_READ_BACK_MS);
+  rejects(syntheticValues({ ...control, local_timeout_ms: 27_500 }), 'control_read_back_ms');
+  assert.throws(
+    () => resolveConfig(syntheticValues({ ...control, control_read_back_ms: 60_000 })),
+    (error: unknown) => error instanceof ConfigError && error.reason.includes('local_timeout_ms 10000') && error.reason.includes('read-back 60000'),
+  );
+  const observing = resolveConfig(syntheticValues({ local_timeout_ms: 60_000, control_read_back_ms: 60_000 }));
+  assert.equal(observing.control, null, 'observe_only sends no command, so the budget does not apply');
 });
 
 test('settings stay read only by default and writes need the separate settings_mode opt-in', async () => {

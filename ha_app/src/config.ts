@@ -26,6 +26,11 @@ export const DEFAULT_LOCAL_TIMEOUT_MS = 10_000;
 export const DEFAULT_CONTROL_MAX_STATE_AGE_MS = 30_000;
 /** Library read-back bound after every write. The library accepts 1000 to 60000. */
 export const DEFAULT_CONTROL_READ_BACK_MS = 20_000;
+/**
+ * The integration's command timeout. A command's LAN part takes up to two `local_timeout_ms`
+ * steps, to connect and then for the command, plus the read-back, and must stay below it.
+ */
+export const COMMAND_TIMEOUT_BUDGET_MS = 75_000;
 export const MAX_OPTIONS_FILE_BYTES = 65_536;
 
 /** Mower account credentials. Secret. Never logged, never part of any state response. */
@@ -232,7 +237,7 @@ export function resolveConfig(values: OptionValues): BridgeConfig {
     localTimeoutMs,
     hosts: hosts(values.hosts),
     host: single ? host('host', single) : null,
-    control: operatingMode === OPERATING_MODE_CONTROL ? control(values) : null,
+    control: operatingMode === OPERATING_MODE_CONTROL ? control(values, localTimeoutMs) : null,
     maps: maps(values),
   };
 }
@@ -262,17 +267,22 @@ function maps(values: OptionValues): MapConfig | null {
 /**
  * The control opt-in. The stop route is required in the operator's own words, as the library
  * requires it, so nobody enables physical control without stating how the mower is stopped.
+ * The read-back and two LAN steps must fit the integration's command timeout, otherwise a
+ * confirmation the bridge still receives is reported as uncertain.
  */
-function control(values: OptionValues): ControlConfig {
+function control(values: OptionValues, localTimeoutMs: number): ControlConfig {
   const stopRoute = (text(values, 'control_stop_route') ?? '').trim();
   if (!stopRoute) throw new ConfigError('control_stop_route', `is required in ${OPERATING_MODE_CONTROL} mode`);
   if (!/^[\x20-\x7e]{1,200}$/.test(stopRoute))
     throw new ConfigError('control_stop_route', 'must be 1 to 200 printable ASCII characters');
-  return {
-    stopRoute,
-    maxStateAgeMs: integer(values, 'control_max_state_age_ms', DEFAULT_CONTROL_MAX_STATE_AGE_MS, 1000, 300_000),
-    readBackMs: integer(values, 'control_read_back_ms', DEFAULT_CONTROL_READ_BACK_MS, 1000, 60_000),
-  };
+  const maxStateAgeMs = integer(values, 'control_max_state_age_ms', DEFAULT_CONTROL_MAX_STATE_AGE_MS, 1000, 300_000);
+  const readBackMs = integer(values, 'control_read_back_ms', DEFAULT_CONTROL_READ_BACK_MS, 1000, 60_000);
+  if (2 * localTimeoutMs + readBackMs >= COMMAND_TIMEOUT_BUDGET_MS)
+    throw new ConfigError(
+      'control_read_back_ms',
+      `plus twice local_timeout_ms must stay below ${COMMAND_TIMEOUT_BUDGET_MS}, the integration's command timeout (read-back ${readBackMs}, local_timeout_ms ${localTimeoutMs})`,
+    );
+  return { stopRoute, maxStateAgeMs, readBackMs };
 }
 
 /** Parses the JSON options file. Unknown keys and non-scalar values are rejected. */

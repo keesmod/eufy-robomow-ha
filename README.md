@@ -626,7 +626,8 @@ helper.
   14 session renewals without error, see the
   [daily-use receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5864644965).
   Bridge 0.13.3 adds one recovery probe after a fifteen-minute cool-down.
-  Hardware recovery remains unverified in #71, see [recovery limits](docs/map-recovery.md).
+  Hardware recovery was not observed, and #71 was closed at the owner's
+  request with that observation waived, see [recovery limits](docs/map-recovery.md).
 - **Live marker semantics** — the live mower/station interpretation matches repeated E15 observations but is not a vendor-documented protocol contract. It is display-only and never drives mower control.
 
 ---
