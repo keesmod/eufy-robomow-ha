@@ -29,21 +29,26 @@ know, but saving the options there drops it.
   mower without current status. On the bridge backend a resting mower
   reports no activity, so the mower entity stays `unknown` by design. With
   fresh telemetry the card now shows "Verbonden" and "Activiteit onbekend"
-  with a short explanation, instead of "Geen actuele status". Stale or
-  unavailable telemetry keeps the previous wording.
+  with a neutral explanation, instead of "Geen actuele status". An unknown
+  activity can also occur during a task, so the text does not claim the mower
+  rests. Stale or unavailable telemetry keeps the previous wording.
 - Commands keep their gating. Start is offered from `docked` and `paused`,
   pause only while mowing and dock during a task. The integration and the
   bridge still accept a start through the Home Assistant service.
 - The settings on the Instellingen tab now need `control` and fresh telemetry
   only, not a known activity. Writes keep their own opt-ins in the bridge and
   the library.
-- On the bridge backend the overview hides progress, distance, area and the
-  observed mowing time, whose local sensors have no bridge source. The history
-  table shows distance and area only when a stored session carries a value.
+- On the bridge backend the overview hides progress, distance and area, whose
+  local sensors have no bridge source. The observed mowing time comes from the
+  session store on both backends and stays visible during a session. The
+  history table shows distance and area only when a stored session carries a
+  value.
 - No change to entities, services, options or stored sessions.
 
 Evidence: software-verified. The card tests cover the connected and stale
-cases, the unchanged command gating, the settings gate and the hidden metrics.
+cases, the unchanged command gating and the settings gate, and render the
+overview and history with a minimal document stub to check the shown text,
+the hidden metrics and the history columns.
 The unknown activity at rest and the empty metrics were read from the owner's
 installation on 2026-09-28, see
 [#79](https://github.com/keesmod/eufy-robomow-ha/issues/79).

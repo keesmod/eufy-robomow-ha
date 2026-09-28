@@ -277,8 +277,8 @@ changes presentation only; it does not add zone commands or enable planning.
 Frontend version 0.7.2 offers pause only while the mower mows. Frontend version 0.7.3 labels
 the cloud confirmation of a start.
 Frontend version 0.7.4 shows a mower with fresh telemetry and an unknown activity
-as connected, shows the settings without a known activity and hides session
-metrics that the bridge backend cannot supply.
+as connected, shows the settings without a known activity and hides progress,
+distance and area, which the bridge backend cannot supply.
 
 The card supports map zoom/pan, battery and session telemetry, settings, and
 start/resume, pause and return commands. It shows pending, confirmed, failed and

@@ -25,9 +25,13 @@ export function controls(state, now = Date.now()) {
     settings: a.operating_mode === "control" && connected,
   };
 }
-/** The bridge backend has no source for the local session sensors, so they would stay empty. */
-export function sessionMetricsAvailable(state) {
-  return state?.attributes?.backend !== "bridge";
+/**
+ * Progress, distance and area come from local session sensors that the bridge backend cannot fill.
+ * Observed mowing time comes from the session store on both backends, so it stays during a session.
+ */
+export function sessionMetrics(state, current) {
+  const local = state?.attributes?.backend !== "bridge";
+  return {progress: local, distance: local, area: local, duration: local || Boolean(current)};
 }
 /** Distance and area columns are shown only when a stored session carries a value. */
 export function historyColumns(rows) {
@@ -107,9 +111,9 @@ export class EufyMowerCard extends HTMLElement {
       </section><aside>
         <div class="aside-top"><span>Status</span><span id="connection-status" class="badge"></span></div><h2 id="activity">Status ophalen…</h2><p id="telemetry" class="muted"></p><div class="actions"><button id="start" class="primary" data-command="start_mowing">${icon("play")}<span id="start-label">Maaien</span></button><button id="pause" data-command="pause">${icon("pause")}Pauze</button><button id="dock" data-command="dock">${icon("home-import-outline")}Naar laadstation</button></div>
         <div class="metrics"><div><span>Batterij</span><strong id="battery">—</strong></div><div id="progress-metric"><span id="progress-label">Voortgang</span><strong id="progress">—</strong></div></div>
-        <div id="session-block"><div class="progress-track" role="progressbar" aria-label="Maaivoortgang" aria-valuemin="0" aria-valuemax="100"><span id="progress-bar"></span></div>
-        <div class="session-metrics"><div><span>Afstand</span><b id="distance">—</b></div><div><span>Oppervlakte*</span><b id="area">—</b></div><div><span>Waargenomen maaitijd</span><b id="duration">—</b></div></div>
-        <p class="footnote">* De schaal naar m² is nog niet gevalideerd.</p></div>
+        <div class="progress-track" role="progressbar" aria-label="Maaivoortgang" aria-valuemin="0" aria-valuemax="100"><span id="progress-bar"></span></div>
+        <div class="session-metrics"><div id="distance-row"><span>Afstand</span><b id="distance">—</b></div><div id="area-row"><span>Oppervlakte*</span><b id="area">—</b></div><div id="duration-row"><span>Waargenomen maaitijd</span><b id="duration">—</b></div></div>
+        <p id="area-note" class="footnote">* De schaal naar m² is nog niet gevalideerd.</p>
 
         <p id="mode" class="muted"></p><p id="command" role="status" aria-live="polite"></p><p id="error" role="alert"></p>
       </aside></div>
@@ -174,9 +178,13 @@ export class EufyMowerCard extends HTMLElement {
     const active = ["mowing", "paused", "returning"].includes(state);
     this._set("activity", current?.phase === "charging" ? labels.charging : (state === "unknown" && c.connected ? "Activiteit onbekend" : (labels[state] ?? state)));
     this._set("connection", c.connected ? "● Verbonden" : "○ Geen actuele status");
-    const metrics = sessionMetricsAvailable(mower);
-    this.shadowRoot.getElementById("progress-metric").hidden = !metrics;
-    this.shadowRoot.getElementById("session-block").hidden = !metrics;
+    const shown = sessionMetrics(mower, current);
+    this.shadowRoot.getElementById("progress-metric").hidden = !shown.progress;
+    this.shadowRoot.querySelector(".progress-track").hidden = !shown.progress;
+    this.shadowRoot.getElementById("distance-row").hidden = !shown.distance;
+    this.shadowRoot.getElementById("area-row").hidden = !shown.area;
+    this.shadowRoot.getElementById("area-note").hidden = !shown.area;
+    this.shadowRoot.getElementById("duration-row").hidden = !shown.duration;
     this._set("telemetry", `Status bijgewerkt ${stamp(mower?.attributes.telemetry_updated_at)}`);
     this._set("battery", this._metric("battery"));
     this._set("progress-label", current ? "Huidige sessie" : "Laatste sessiemeting");
@@ -190,7 +198,7 @@ export class EufyMowerCard extends HTMLElement {
     if (Number.isFinite(progress)) track.setAttribute("aria-valuenow", String(progress)); else track.removeAttribute("aria-valuenow");
     for (const name of ["start", "pause", "dock"]) this.shadowRoot.getElementById(name).disabled = !c[name] || (name === "start" && this._localBusy);
     this._set("start-label", state === "paused" ? "Hervatten" : "Maaien");
-    this._set("mode", mower?.attributes.operating_mode === "observe_only" ? "Alleen observeren · bediening uitgeschakeld" : (!c.connected ? "Bediening wacht op actuele maaierstatus." : (!c.fresh ? "De maaier meldt in rust geen activiteit. De knoppen werken zodra een activiteit bekend is." : "")));
+    this._set("mode", mower?.attributes.operating_mode === "observe_only" ? "Alleen observeren · bediening uitgeschakeld" : (!c.connected ? "Bediening wacht op actuele maaierstatus." : (!c.fresh ? "De maaier meldt nu geen activiteit. De knoppen werken zodra een activiteit bekend is." : "")));
     this._set("connection-status", c.connected ? "Verbonden" : "Geen actuele status");
     this._set("settings-status", c.settings ? "" : "Instellingen zijn beschikbaar zodra bediening is ingeschakeld en de maaier verbonden is.");
     const command = mower?.attributes.command;
