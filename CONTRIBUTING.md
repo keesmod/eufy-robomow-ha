@@ -25,7 +25,7 @@ Every protocol change must identify its evidence in the pull request. Repeat phy
 
 Never include passwords, access or refresh tokens, local keys, complete device identifiers, account identifiers, exact coordinates, private lawn geometry, or raw captures. Use synthetic or redacted fixtures.
 
-Physical commands require daylight, a clear lawn, continuous supervision, and known physical stop controls. Do not bypass mower safety interlocks.
+The bridge and the integration default to `observe_only`. Physical commands and settings writes require the operator's explicit opt-in, current telemetry and supervised validation. Physical commands require daylight, a clear lawn, continuous supervision, and known physical stop controls. Do not bypass mower safety interlocks.
 
 ## Licensing
 
