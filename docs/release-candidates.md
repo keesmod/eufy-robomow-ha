@@ -22,10 +22,22 @@ backends and rollback are described in
 | Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.13.2 | the same inputs, built by the Supervisor on the host |
 
 Bridge 0.13.2 only raises the default of `local_timeout_ms` from 5000 to 10000,
-so a LAN step outlasts the mower's Wi-Fi outages of 5 to 7 seconds. It is
-software-verified. The owner's installation has run bridge 0.13.1 with that
-option set to 10000 since 2026-09-28, see the
-[bridge changelog](../bridge/CHANGELOG.md) and #8.
+so a LAN step outlasts the mower's Wi-Fi outages of 5 to 7 seconds, see the
+[bridge changelog](../bridge/CHANGELOG.md). From 07:56 UTC on 2026-09-28 the
+owner's installation first ran bridge 0.13.1 with that option set to 10000.
+The measured windows then showed 0 LAN `request_timeout` errors, against 2.3
+an hour before, see the
+[measurement](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5869155614).
+App 0.13.2 from `ab9d169` (#70) replaced 0.13.1 with a Supervisor backup on
+2026-09-28 at 11:52 UTC. The installed app folder matched the candidate. The
+explicit `local_timeout_ms` option was removed, and the startup log shows the
+default of 10000. The bridge ran in `control` with `auth.state` connected, the
+mower entity kept its controls and the map was healthy again about 2 minutes
+after the restart. The app archive SHA-256 is
+`8cf3ab9d65344104113632df74cb3c9eec50ac63d91ad811f47158be0dd928fa`.
+Integration 0.16.1 stayed installed. Its folder differs from `main` only by one
+code comment in `bridge_client.py`, which #70 changed without a version bump.
+See the [summary](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5869382840).
 
 Library [0.25.2](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.25.2)
 was published separately with the owner's approval from `c41af2c`
@@ -217,6 +229,12 @@ Deployment:
   request. The mower entity read `unknown` instead of `docked` until a
   confirmed command or a local report (2026-09-27,
   [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097)).
+- The app was updated from 0.13.1 to 0.13.2 with a Supervisor backup, and the
+  installed folder matched the candidate. The explicit `local_timeout_ms`
+  option was removed for the new default of 10000. The bridge came back in
+  `control` and the map was healthy about 2 minutes after the restart
+  (2026-09-28,
+  [summary](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5869382840)).
 
 ## Experimental
 
@@ -290,7 +308,8 @@ Combinations run on the owner's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
-| 0.16.1 | 0.13.1 (0.25.2) | the previous candidate, matched file for file after its deployment, control window, session renewals and host reboot of 2026-09-27, run with `local_timeout_ms: 10000` since 2026-09-28 |
+| 0.16.1 | 0.13.2 (0.25.2) | the current candidate, deployed and matched file for file on 2026-09-28 |
+| 0.16.1 | 0.13.1 (0.25.2) | the previous candidate, matched file for file after its deployment, control window, session renewals and host reboot of 2026-09-27, run with `local_timeout_ms: 10000` on 2026-09-28 until the 0.13.2 update |
 | 0.15.1 | 0.11.0 (0.23.0) | matched file for file after its deployment on 2026-09-25 |
 | 0.15.0 | 0.11.0 (0.23.0) | matched file for file after its deployment, speed window of 2026-09-25 |
 | 0.14.2 | 0.10.1 (0.22.0) | bridge-mode check, settings windows and migration rehearsal of 2026-09-25 |
