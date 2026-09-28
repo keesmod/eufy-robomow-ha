@@ -105,3 +105,19 @@ use. Record the original failure time, returned shutdown, probe time and outcome
 both confirmations and a fresh healthy map. Confirm the bridge process did not
 restart. Do not create an outage or send a physical command to provoke the case.
 The last recovery summary survives later demands but not a bridge restart.
+
+## Installation on the owned E15 environment
+
+Bridge/app 0.13.3 from `5071678` replaced 0.13.2 on 2026-09-28 after the owner
+accepted the rule. Supervisor backup `ca0d4988`, preserved prior app sources
+and a passing configuration check preceded the update. The new process started
+at 13:03:42 UTC. Readback at 13:05:36 UTC confirmed matching sources and package
+versions, preserved identities and settings, and a healthy ordinary acquisition
+with cancellation and cleanup confirmed. Integration 0.16.1 was unchanged and
+Home Assistant Core did not restart. The
+[installation receipt](https://github.com/keesmod/eufy-robomow-ha/issues/71#issuecomment-5870459019)
+records the archive checksum and entity checks.
+
+`last_recovery` was null. This installation check is not evidence of recovery
+from an unconfirmed cancellation without a restart. That acceptance remains
+open in #71.

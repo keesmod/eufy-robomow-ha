@@ -18,8 +18,25 @@ backends and rollback are described in
 | Component | Version | Pinned inputs |
 | --- | --- | --- |
 | Integration `eufy_robomow` | 0.16.1 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
-| Mower bridge, container image | 0.13.2 | `@keesmod/eufy-mega-client` 0.25.2 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
-| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.13.2 | the same inputs, built by the Supervisor on the host |
+| Mower bridge, container image | 0.13.3 | `@keesmod/eufy-mega-client` 0.25.2 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
+| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.13.3 | the same inputs, built by the Supervisor on the host |
+
+Bridge/app 0.13.3 from `5071678` (#73) adds one read-only recovery probe after
+an unconfirmed map cancellation and a fifteen-minute wait. The owner accepted
+the unknown remote transfer lifetime for this bounded rule, including future
+use. Local acquisitions remain exclusive. See [recovery policy](map-recovery.md).
+
+It replaced app 0.13.2 on 2026-09-28 with Supervisor backup `ca0d4988` and a
+passing configuration check. The new process started at 13:03:42 UTC. Readback
+at 13:05:36 UTC confirmed exact app sources, bridge 0.13.3 on library 0.25.2,
+unchanged identities and settings, and a healthy map whose acquisition had
+confirmed cancellation and cleanup. All 23 enabled entities remained present,
+with none unavailable or newly unknown. Integration 0.16.1 was unchanged and
+Home Assistant Core did not restart. The app archive SHA-256 is
+`d66d1f6bc3662d1c1ef184d2d47f9e87c70c0d419d7090a3aaa7fd8b6e20448c`.
+This verifies installation and ordinary acquisition, not recovery after a
+natural unconfirmed cancellation. That observation remains open in #71, see the
+[installation receipt](https://github.com/keesmod/eufy-robomow-ha/issues/71#issuecomment-5870459019).
 
 Bridge 0.13.2 only raises the default of `local_timeout_ms` from 5000 to 10000,
 so a LAN step outlasts the mower's Wi-Fi outages of 5 to 7 seconds, see the
@@ -62,7 +79,7 @@ cancellation and cleanup. [Library PR #203](https://github.com/keesmod/eufy-mega
 records the docked observation. The later short moving-map run and the
 integration 0.16.1 replay fix are recorded in the [issue #8 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5845487941).
 
-The checksums of every candidate that was built are recorded in #8. The
+Candidate checksums are recorded in #8 and its follow-up #71. The
 candidates of 0.15.0 and 0.15.1 with bridge 0.11.0, built from `64ce862` and
 `0ed3691`, matched the folders deployed on the owner's installation file for
 file. Integration 0.15.2, built from `5b25e3f` (#56), also matched its 25
@@ -317,8 +334,9 @@ Combinations run on the owner's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
-| 0.16.1 | 0.13.2 (0.25.2) | the current candidate, whose app matched file for file after its deployment on 2026-09-28, while integration 0.16.1 differs from the candidate only by one code comment |
-| 0.16.1 | 0.13.1 (0.25.2) | the previous candidate, matched file for file after its deployment, control window, session renewals and host reboot of 2026-09-27, run with `local_timeout_ms: 10000` on 2026-09-28 until the 0.13.2 update |
+| 0.16.1 | 0.13.3 (0.25.2) | the current candidate, whose app matched file for file after the 2026-09-28 update, with identities, settings and integration unchanged and ordinary native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified |
+| 0.16.1 | 0.13.2 (0.25.2) | the previous candidate, whose app matched file for file after its deployment on 2026-09-28, while integration 0.16.1 differs from the candidate only by one code comment |
+| 0.16.1 | 0.13.1 (0.25.2) | an earlier candidate, matched file for file after its deployment, control window, session renewals and host reboot of 2026-09-27, run with `local_timeout_ms: 10000` on 2026-09-28 until the 0.13.2 update |
 | 0.15.1 | 0.11.0 (0.23.0) | matched file for file after its deployment on 2026-09-25 |
 | 0.15.0 | 0.11.0 (0.23.0) | matched file for file after its deployment, speed window of 2026-09-25 |
 | 0.14.2 | 0.10.1 (0.22.0) | bridge-mode check, settings windows and migration rehearsal of 2026-09-25 |
