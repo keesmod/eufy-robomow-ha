@@ -17,9 +17,23 @@ backends and rollback are described in
 
 | Component | Version | Pinned inputs |
 | --- | --- | --- |
-| Integration `eufy_robomow` | 0.16.1 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.3 |
+| Integration `eufy_robomow` | 0.16.2 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.4 |
 | Mower bridge, container image | 0.13.4 | `@keesmod/eufy-mega-client` 0.25.2 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
 | Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.13.4 | the same inputs, built by the Supervisor on the host |
+
+Integration 0.16.2 from `b379117` (#80) carries card 0.7.4, see
+[#79](https://github.com/keesmod/eufy-robomow-ha/issues/79). On the bridge
+backend a resting mower reports no activity, so its entity stays `unknown`.
+The card now shows such a mower with fresh telemetry as connected, shows the
+settings without a known activity and hides progress, distance and area, which
+the bridge cannot supply. Command gating is unchanged. It replaced 0.16.1 on
+2026-09-28 after a private backup and a passing configuration check. All 25
+installed files matched the candidate, and Home Assistant Core restarted from
+18:05:30 to 18:06:04 UTC. The dashboard resource was then set to `?v=0.7.4`.
+The entry loaded with the same 23 entity ids and none unavailable, the served
+card reports 0.7.4 and the map entity was healthy. The integration archive SHA-256
+is `7d0abfee20ec0b610b0ac6daa905b34f564b7fa984d82ed38cf14b9816250b42`. See the
+[installation receipt](https://github.com/keesmod/eufy-robomow-ha/issues/79#issuecomment-5875742543).
 
 Bridge/app 0.13.4 from `022810d` (#77) refuses a `control` configuration whose
 two LAN steps and read-back reach the integration's 75-second command timeout,
@@ -75,9 +89,9 @@ All installed app files matched the candidate list. The explicit
 connected. The mower entity kept its controls and was never unavailable, and
 the map was healthy again at 11:54:17 UTC. The app archive SHA-256 is
 `8cf3ab9d65344104113632df74cb3c9eec50ac63d91ad811f47158be0dd928fa`.
-Integration 0.16.1 was not touched. Its installed folder differs from the
-0.16.1 in the candidate only by one code comment in `bridge_client.py`, which
-#70 changed without a version bump. See the
+Integration 0.16.1 was not touched. Until the 0.16.2 update its installed folder
+differed from the 0.16.1 in the candidate only by one code comment in
+`bridge_client.py`, which #70 changed without a version bump. See the
 [deployment receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5869490828).
 
 Library [0.25.2](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.25.2)
@@ -287,6 +301,11 @@ Deployment:
   in `control` with read-back 54000 and the map was healthy again at 17:42:59
   UTC (2026-09-28,
   [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/75#issuecomment-5875389046)).
+- The integration was updated from 0.16.1 to 0.16.2 by replacing its folder
+  after a private backup and a passing configuration check. All 25 files
+  matched the candidate, the config entry and its 23 entity ids were kept and
+  the dashboard resource moved to card 0.7.4 (2026-09-28,
+  [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/79#issuecomment-5875742543)).
 
 ## Experimental
 
@@ -364,9 +383,10 @@ Combinations run on the owner's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
-| 0.16.1 | 0.13.4 (0.25.2) | the current candidate, whose app matched file for file after the 2026-09-28 update, with `control_read_back_ms` lowered to 54000 within the enforced budget, identities and integration unchanged and native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified, see the #71 waiver |
-| 0.16.1 | 0.13.3 (0.25.2) | the previous candidate, whose app matched file for file after the 2026-09-28 update, with identities, settings and integration unchanged and ordinary native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified |
-| 0.16.1 | 0.13.2 (0.25.2) | an earlier candidate, whose app matched file for file after its deployment on 2026-09-28, while integration 0.16.1 differs from the candidate only by one code comment |
+| 0.16.2 | 0.13.4 (0.25.2) | the current candidate, whose integration matched file for file after the 2026-09-28 update with card 0.7.4, the entry and its entity ids unchanged |
+| 0.16.1 | 0.13.4 (0.25.2) | the previous candidate, whose app matched file for file after the 2026-09-28 update, with `control_read_back_ms` lowered to 54000 within the enforced budget, identities and integration unchanged and native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified, see the #71 waiver |
+| 0.16.1 | 0.13.3 (0.25.2) | an earlier candidate, whose app matched file for file after the 2026-09-28 update, with identities, settings and integration unchanged and ordinary native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified |
+| 0.16.1 | 0.13.2 (0.25.2) | an earlier candidate, whose app matched file for file after its deployment on 2026-09-28, while integration 0.16.1 differed from the candidate only by one code comment until the 0.16.2 update |
 | 0.16.1 | 0.13.1 (0.25.2) | an earlier candidate, matched file for file after its deployment, control window, session renewals and host reboot of 2026-09-27, run with `local_timeout_ms: 10000` on 2026-09-28 until the 0.13.2 update |
 | 0.15.1 | 0.11.0 (0.23.0) | matched file for file after its deployment on 2026-09-25 |
 | 0.15.0 | 0.11.0 (0.23.0) | matched file for file after its deployment, speed window of 2026-09-25 |
@@ -396,7 +416,7 @@ Update the bridge app first, then the integration.
    folder with the candidate's `eufy_robomow`, run the configuration check and
    restart Home Assistant.
 3. Set the dashboard resource to the card version of the candidate, for
-   example `/eufy_robomow/eufy-mower-card.js?v=0.7.3`.
+   example `/eufy_robomow/eufy-mower-card.js?v=0.7.4`.
 4. From 0.8.0 or older, fix the Signal Strength statistics as the changelog of
    0.8.1 describes.
 
