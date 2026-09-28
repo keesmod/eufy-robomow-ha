@@ -49,8 +49,10 @@ _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _ERROR_CODE_PATTERN = re.compile(r"^[a-z0-9_]{1,64}$")
 _MAX_BODY_SIZE = 256 * 1024
 _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15, connect=5)
-# A command answers after the bridge's connect time plus its read-back bound, at
-# most 60 seconds, so its request may take far longer than a state query.
+# A command answers after the bridge's connect time, its LAN deadline and its
+# read-back bound, so its request may take far longer than a state query. The
+# default settings stay within this timeout. A large control_read_back_ms can
+# exceed it, and the command is then reported as uncertain.
 _COMMAND_TIMEOUT = aiohttp.ClientTimeout(total=75, connect=5)
 # The command classes bridge 0.6.0 routes. ``stop`` writes DP 1 false, which on
 # the owned E15 ends the task and returns the mower to the dock by itself.

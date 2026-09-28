@@ -45,7 +45,10 @@ the previous version with its options and data.
   15 seconds still bounds each state request, so such a poll still ends within
   15 seconds with the entities unavailable. Commands and settings writes open
   their LAN session with the same deadline. With the default read-back times
-  they stay below the integration's command timeout of 75 seconds.
+  they stay below the integration's command timeout of 75 seconds. A
+  `control_read_back_ms` above 55000 can outlast that timeout. The integration
+  then reports the command as uncertain, although the bridge may still confirm
+  it later. Nothing is repeated.
 
 Evidence: software-verified. The bridge suite passes with the new default and
 pins the 10000 ms deadline of the state, command and setting sessions. On the
