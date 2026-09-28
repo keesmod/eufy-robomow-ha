@@ -35,9 +35,10 @@ know, but saving the options there drops it.
   refreshes it about every 30 seconds.
 - Local evidence wins. A reading received from 90 seconds before to 120
   seconds after a reported status or a confirmed command, and differing from
-  it, is not observed, because the cloud record can lag the mower. On 2026-09-27 it lagged
-  about 47 seconds after a dock. A later differing reading is observed, so a
-  task that ends or starts outside Home Assistant is not held back.
+  it, is not observed, because the cloud record can lag the mower. On
+  2026-09-27 it lagged about 47 seconds after a dock. A later differing reading
+  is observed, so a task that ends or starts outside Home Assistant is not held
+  back.
 - An observation up to 45 seconds older than the previous one applies from the
   previous time on, so no second is counted twice. A larger clock step back is
   a gap, and counting resumes from there. Local evidence more than 90 seconds
@@ -57,7 +58,7 @@ Evidence: software-verified. Tests cover:
 - a lagging reading after a confirmed start;
 - a task started in Home Assistant that ends through the cloud;
 - an app task after a Home Assistant task;
-- the 120-second bound on both sides;
+- the 90-second and 120-second bounds of the local precedence;
 - out-of-order observations and a clock step back, in the history and in the
   local precedence;
 - the session flag.
