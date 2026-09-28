@@ -25,7 +25,8 @@ Bridge/app 0.13.4 from `022810d` (#77) refuses a `control` configuration whose
 two LAN steps and read-back reach the integration's 75-second command timeout,
 see [#75](https://github.com/keesmod/eufy-robomow-ha/issues/75). The owner's
 `control_read_back_ms` of 60000 exceeded that budget once `local_timeout_ms`
-became 10000, explicitly on 0.13.1 from 07:56 UTC and by default from 0.13.2.
+became 10000, explicitly on 0.13.1 from 07:56 UTC on 2026-09-28 and by default
+from 0.13.2.
 Before the update it was lowered to 54000,
 with a private backup of the app options. App 0.13.4 replaced 0.13.3 on
 2026-09-28 from 17:41:10 to 17:41:28 UTC with Supervisor backup `a9a11d61`.
