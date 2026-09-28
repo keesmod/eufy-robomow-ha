@@ -22,10 +22,24 @@ backends and rollback are described in
 | Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.13.2 | the same inputs, built by the Supervisor on the host |
 
 Bridge 0.13.2 only raises the default of `local_timeout_ms` from 5000 to 10000,
-so a LAN step outlasts the mower's Wi-Fi outages of 5 to 7 seconds. It is
-software-verified. The owner's installation has run bridge 0.13.1 with that
-option set to 10000 since 2026-09-28, see the
-[bridge changelog](../bridge/CHANGELOG.md) and #8.
+so a LAN step outlasts the mower's Wi-Fi outages of 5 to 7 seconds, see the
+[bridge changelog](../bridge/CHANGELOG.md). From 07:56 UTC on 2026-09-28 the
+owner's installation first ran bridge 0.13.1 with that option set to 10000.
+The measured windows then showed 0 LAN `request_timeout` errors, against 2.3
+an hour before, see the
+[measurement](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5869155614).
+App 0.13.2 from `ab9d169` (#70) replaced 0.13.1 through a Supervisor update
+with its own backup of 0.13.1 on 2026-09-28, from 11:51:45 to 11:52:04 UTC.
+All installed app files matched the candidate list. The explicit
+`local_timeout_ms` option was removed, and the startup log shows 0.13.2 with
+`local_timeout_ms` 10000. The state route reported `control` and auth
+connected. The mower entity kept its controls and was never unavailable, and
+the map was healthy again at 11:54:17 UTC. The app archive SHA-256 is
+`8cf3ab9d65344104113632df74cb3c9eec50ac63d91ad811f47158be0dd928fa`.
+Integration 0.16.1 was not touched. Its installed folder differs from the
+0.16.1 in the candidate only by one code comment in `bridge_client.py`, which
+#70 changed without a version bump. See the
+[deployment receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5869490828).
 
 Library [0.25.2](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.25.2)
 was published separately with the owner's approval from `c41af2c`
@@ -217,6 +231,12 @@ Deployment:
   request. The mower entity read `unknown` instead of `docked` until a
   confirmed command or a local report (2026-09-27,
   [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097)).
+- The app was updated from 0.13.1 to 0.13.2 with a Supervisor backup, and all
+  installed app files matched the candidate list. The explicit
+  `local_timeout_ms` option was removed for the new default of 10000. The
+  bridge came back in `control`, the mower entity was never unavailable and
+  the map was healthy again at 11:54:17 UTC (2026-09-28,
+  [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5869490828)).
 
 ## Experimental
 
@@ -245,7 +265,12 @@ below retain their stated scope.
   Wi-Fi readings, and the bridge resumed after its retry interval each time.
   A session renewal during a running stream demand and a host reboot passed,
   see the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097). The installation now runs in
-  `control` with settings writes disabled. Longer daily use remains open.
+  `control` with settings writes disabled. Bridge 0.13.1 then ran 13 hours
+  overnight in daily use with the mower at its station. The map stayed healthy,
+  with no map error, and 14 session renewals passed without error, see the
+  [daily-use receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5864644965).
+  An unconfirmed map cancellation still blocks map demands until the bridge
+  restarts, see #71.
 - The compatible `external` HTTPS map source remains available as a manual
   recovery route.
 - The no-go zones on the map since 0.15.1, from map-record field 12. The
@@ -261,8 +286,10 @@ below retain their stated scope.
 
 ## Outstanding obligations
 
-- Broader native map acceptance, item 2 of #8: longer daily use beyond the
-  observed windows.
+- Recovery of native map acquisition after an unconfirmed cancellation without
+  a bridge restart, #71. At the end of a mowing task on 2026-09-28 the bridge
+  reported `mower_map_cancel_unconfirmed`, and by design it then blocks map
+  demands until it restarts.
 - The licensing boundary and an explicit authorisation before any publication.
 
 ## Compatibility
@@ -290,7 +317,8 @@ Combinations run on the owner's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
-| 0.16.1 | 0.13.1 (0.25.2) | the previous candidate, matched file for file after its deployment, control window, session renewals and host reboot of 2026-09-27, run with `local_timeout_ms: 10000` since 2026-09-28 |
+| 0.16.1 | 0.13.2 (0.25.2) | the current candidate, whose app matched file for file after its deployment on 2026-09-28, while integration 0.16.1 differs from the candidate only by one code comment |
+| 0.16.1 | 0.13.1 (0.25.2) | the previous candidate, matched file for file after its deployment, control window, session renewals and host reboot of 2026-09-27, run with `local_timeout_ms: 10000` on 2026-09-28 until the 0.13.2 update |
 | 0.15.1 | 0.11.0 (0.23.0) | matched file for file after its deployment on 2026-09-25 |
 | 0.15.0 | 0.11.0 (0.23.0) | matched file for file after its deployment, speed window of 2026-09-25 |
 | 0.14.2 | 0.10.1 (0.22.0) | bridge-mode check, settings windows and migration rehearsal of 2026-09-25 |

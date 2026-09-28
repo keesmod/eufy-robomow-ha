@@ -281,6 +281,11 @@ and a short supervised E15 moving-map run passed on bridge 0.13.0 and library
 0.25.1. Integration 0.16.1's coverage fix passed offline replay of that run and
 separate installation readback. On 2026-09-27 bridge 0.13.1 passed a control
 window, a session renewal during a running stream demand and a host reboot,
-see the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097). Longer daily use remains open. The current
-installation runs in `control` after the owner's opt-in, with settings writes
-disabled. Physical control keeps its explicit opt-in and supervised validation.
+see the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097). It then ran 13 hours overnight in daily
+use with the mower at its station, the map healthy and 14 session renewals
+without error, see the
+[daily-use receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5864644965).
+An unconfirmed map cancellation still blocks map demands until the bridge
+restarts, see keesmod/eufy-robomow-ha#71. The current installation runs in
+`control` after the owner's opt-in, with settings writes disabled. Physical
+control keeps its explicit opt-in and supervised validation.
