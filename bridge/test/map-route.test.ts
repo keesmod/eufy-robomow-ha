@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { EufyError, type AuthAnswer, type AuthState, type MapSessionProvisioning, type MowerAdapter, type MowerDevice } from '@keesmod/eufy-mega-client';
 import { MowerBridge, type BridgeDependencies, type BridgeState } from '../src/bridge.ts';
-import { MAP_CONTENT_TYPE, libraryMapAcquisition } from '../src/maps.ts';
+import { MAP_CANCEL_COOLDOWN_MS, MAP_CONTENT_TYPE, libraryMapAcquisition } from '../src/maps.ts';
 import { MOWERS_PATH, STATE_PATH } from '../src/server.ts';
 import { TOKEN, assertNoSecrets, baselineHandles, call, settledHandles, temporaryDirectory, testConfig, type Reply } from './helpers.ts';
 import { PROVISIONING_SECRETS, SYNTHETIC_PROVISIONING, fakeMaps, readZip, streams, waitFor, writeProvisioning, type FakeMapAcquisition, type FakeMaps } from './map-fixtures.ts';
@@ -86,7 +86,7 @@ async function mapFixture(
   const config = testConfig(directory.path, {
     maps: options.configured === false ? null : { provisioningFile: options.cloud ? null : provisioning, mowerId: options.mowerId ?? null },
   });
-  const bridge = new MowerBridge(config, { adapter: () => adapter, now: () => clock.now, mapAcquisition: maps.create, mapWatchIntervalMs: 5, ...options.dependencies });
+  const bridge = new MowerBridge(config, { adapter: () => adapter, now: () => clock.now, mapMonotonicNow: () => clock.now, mapAcquisition: maps.create, mapWatchIntervalMs: 5, ...options.dependencies });
   t.after(() => bridge.stop().catch(() => {}));
   await bridge.start();
   await bridge.connect();
@@ -227,7 +227,7 @@ test('an idle request starts one demand, is answered at once and the demand ends
   assert.equal(acquisition.demands[0]?.demandMs, 30_000);
   let state = await f.state();
   assert.deepEqual(state.routes, { discovery: true, state: true, control: false, maps: true, settings: false });
-  assert.deepEqual(state.maps, { captured_at: null, age_ms: null, stale: false, error: null, acquiring: true, streaming: false, last_demand: null });
+  assert.deepEqual(state.maps, { captured_at: null, age_ms: null, stale: false, error: null, acquiring: true, streaming: false, recovery: null, last_demand: null, last_recovery: null });
 
   // A demand opens with the empty realtime placeholder path.
   acquisition.publish(streams({ path: 'realtime', name: LAWN_NAME }), T0 - 1_000);
@@ -329,7 +329,7 @@ test('without any bundle the route answers 503 with the failure code and the nex
   assert.deepEqual(failed.json, { error: 'map_provisioning_unreadable' });
   assert.equal(f.maps.created.length, 0, 'no acquisition without provisioning');
   const state = await f.state();
-  assert.deepEqual(state.maps, { captured_at: null, age_ms: null, stale: false, error: 'map_provisioning_unreadable', acquiring: false, streaming: false, last_demand: null });
+  assert.deepEqual(state.maps, { captured_at: null, age_ms: null, stale: false, error: 'map_provisioning_unreadable', acquiring: false, streaming: false, recovery: null, last_demand: null, last_recovery: null });
 
   await writeProvisioning(f.privateDirectory, SYNTHETIC_PROVISIONING, 0o644);
   f.clock.now += 30_000;
@@ -454,7 +454,7 @@ test('unconfirmed cleanup stops acquisition until a restart and keeps the last g
   }
 });
 
-test('unconfirmed cancellation stays visible after publication and stops further demands', async (t) => {
+test('unconfirmed cancellation retains the stale map through cool-down and one successful probe', async (t) => {
   const f = await mapFixture(t);
   await f.get(mapPath(ID_A), STREAM);
   const acquisition = await nextDemand(f, 1);
@@ -475,12 +475,44 @@ test('unconfirmed cancellation stays visible after publication and stops further
   assert.equal(status?.last_demand?.cancellation_confirmed, false);
   assert.equal(status?.last_demand?.cancellation_failure, 'response_mismatch');
   assert.equal(status?.last_demand?.cleanup_confirmed, true);
-  f.clock.now += 3_600_000;
-  await f.get(mapPath(ID_A), STREAM);
-  await f.get(mapPath(ID_A));
+  assert.deepEqual(status?.recovery, { state: 'cooldown', probe_after: iso(T0 + MAP_CANCEL_COOLDOWN_MS) });
+  f.clock.now += MAP_CANCEL_COOLDOWN_MS - 1;
+  await Promise.all([f.get(mapPath(ID_A), STREAM), f.get(mapPath(ID_A))]);
   assert.equal(f.bridge.state().maps?.acquiring, false);
-  assert.equal(f.maps.created.length, 1, 'neither stream nor idle may restart an uncertain transfer');
-  assertPrivate(JSON.stringify(status));
+  assert.equal(f.maps.created.length, 1, 'the active lease cannot bypass the cool-down');
+  f.clock.now += 1;
+  await Promise.all(Array.from({ length: 8 }, () => f.get(mapPath(ID_A), STREAM)));
+  const probe = await nextDemand(f, 2);
+  assert.notEqual(probe, acquisition);
+  assert.equal(acquisition.shutdowns, 1);
+  assert.equal(f.bridge.state().maps?.recovery?.state, 'probing');
+  const pending = await f.get(mapPath(ID_A));
+  assert.deepEqual(pending.raw, good.raw);
+  assert.equal(pending.headers['x-eufy-map-error'], 'mower_map_cancel_unconfirmed');
+  probe.publish(streams(), f.clock.now);
+  probe.end('demand_expired');
+  await settled(f);
+  const recovered = f.bridge.state().maps;
+  assert.equal(recovered?.recovery, null);
+  assert.equal(recovered?.error, null);
+  assert.equal(recovered?.stale, false);
+  assert.equal(recovered?.last_recovery?.cancellation_confirmed, true);
+  assert.equal(recovered?.last_recovery?.cleanup_confirmed, true);
+  assert.equal(recovered?.last_recovery?.published, 1);
+  const fresh = await f.get(mapPath(ID_A), STREAM);
+  assert.notEqual(fresh.headers.etag, good.headers.etag);
+  const resumed = await nextDemand(f, 3);
+  resumed.publish(streams(), f.clock.now);
+  resumed.end('demand_expired');
+  await settled(f);
+  f.clock.now += 30_001;
+  await f.get(mapPath(ID_A));
+  assert.equal(f.maps.created.length, 3, 'normal idle spacing resumes after the lease expires');
+  f.clock.now += 270_000;
+  await f.get(mapPath(ID_A));
+  await nextDemand(f, 4);
+  assert.deepEqual(f.bridge.state().maps?.last_recovery, recovered?.last_recovery);
+  assertPrivate(JSON.stringify(recovered));
 });
 
 test('a protocol failure after publication retains the bundle and delays the next demand', async (t) => {
@@ -513,4 +545,135 @@ test('shutdown aborts a running demand, waits for its cleanup and leaves no hand
   assert.equal(f.bridge.state().maps?.acquiring, false);
   await assert.rejects(f.bridge.map(ID_A, { mode: undefined, ifNoneMatch: undefined }), { code: 'bridge_not_running' });
   assert.deepEqual(await settledHandles(handles), handles);
+});
+
+test('each failed recovery probe blocks until restart without a retry loop', async (t) => {
+  for (const variant of ['cancel', 'connection', 'no-cancel', 'no-map', 'cleanup', 'provision'] as const) {
+    await t.test(variant, async (t) => {
+      const f = await mapFixture(t, { cloud: true });
+      await f.get(mapPath(ID_A), STREAM);
+      const first = await nextDemand(f, 1);
+      first.publish(streams(), T0);
+      first.end('cancel_unconfirmed', { cancellationConfirmed: false, cleanupConfirmed: true });
+      await settled(f);
+      f.clock.now += MAP_CANCEL_COOLDOWN_MS;
+      f.adapter.failProvision = variant === 'provision';
+      await f.get(mapPath(ID_A), STREAM);
+      if (variant !== 'provision') {
+        const probe = await nextDemand(f, 2);
+        if (variant !== 'no-map') probe.publish(streams(), f.clock.now);
+        probe.end(variant === 'cancel' ? 'cancel_unconfirmed' : variant === 'connection' ? 'connection_failed' : 'demand_expired', {
+          cancellationConfirmed: !['cancel', 'connection', 'no-cancel'].includes(variant),
+          cleanupConfirmed: variant !== 'cleanup',
+        });
+      }
+      await settled(f);
+      const failed = f.bridge.state().maps;
+      assert.equal(failed?.recovery?.state, 'blocked');
+      assert.equal(failed?.stale, true);
+      assert.notEqual(failed?.error, null);
+      if (variant === 'cleanup') assert.equal(failed?.error, 'mower_map_cleanup_unconfirmed');
+      const count = f.adapter.provisions.length;
+      for (let i = 0; i < 3; i++) {
+        f.clock.now += 24 * 60 * 60_000;
+        await Promise.all([f.get(mapPath(ID_A), STREAM), f.get(mapPath(ID_A))]);
+        assert.equal(f.bridge.state().maps?.acquiring, false);
+        assert.equal(f.adapter.provisions.length, count);
+      }
+    });
+  }
+});
+
+test('cool-down starts after shutdown returns and a probe stays exclusive through its shutdown', async (t) => {
+  const f = await mapFixture(t);
+  await f.get(mapPath(ID_A), STREAM);
+  const first = await nextDemand(f, 1);
+  const closed = Promise.withResolvers<void>();
+  first.shutdownGate = closed.promise;
+  t.after(() => closed.resolve());
+  first.publish(streams(), T0);
+  first.end('cancel_unconfirmed', { cancellationConfirmed: false, cleanupConfirmed: true });
+  await waitFor(() => first.shutdowns === 1, 'first shutdown to begin');
+  f.clock.now += MAP_CANCEL_COOLDOWN_MS * 2;
+  await f.get(mapPath(ID_A), STREAM);
+  assert.equal(f.maps.created.length, 1);
+  assert.equal(f.bridge.state().maps?.acquiring, true);
+  assert.equal(f.bridge.state().maps?.recovery, null);
+  closed.resolve();
+  await settled(f);
+  assert.equal(f.bridge.state().maps?.recovery?.probe_after, iso(f.clock.now + MAP_CANCEL_COOLDOWN_MS));
+  f.clock.now += MAP_CANCEL_COOLDOWN_MS - 1;
+  await f.get(mapPath(ID_A));
+  assert.equal(f.maps.created.length, 1);
+  f.clock.now += 1;
+  await f.get(mapPath(ID_A));
+  const probe = await nextDemand(f, 2);
+  const probeClosed = Promise.withResolvers<void>();
+  probe.shutdownGate = probeClosed.promise;
+  t.after(() => probeClosed.resolve());
+  probe.publish(streams(), f.clock.now);
+  probe.end('demand_expired');
+  await waitFor(() => probe.shutdowns === 1, 'probe shutdown to begin');
+  f.clock.now += MAP_CANCEL_COOLDOWN_MS * 2;
+  await f.get(mapPath(ID_A), STREAM);
+  assert.equal(f.maps.created.length, 2);
+  assert.equal(f.bridge.state().maps?.recovery?.state, 'probing');
+  assert.equal(f.bridge.state().maps?.error, 'mower_map_cancel_unconfirmed');
+  probeClosed.resolve();
+  await settled(f);
+  assert.equal(f.bridge.state().maps?.recovery, null);
+  await f.get(mapPath(ID_A));
+  await nextDemand(f, 3);
+});
+
+test('bridge shutdown during recovery cool-down or a probe leaves no handles or later demand', async (t) => {
+  for (const phase of ['cooldown', 'probing'] as const) {
+    await t.test(phase, async (t) => {
+      const handles = await baselineHandles();
+      const f = await mapFixture(t);
+      await f.get(mapPath(ID_A), STREAM);
+      const first = await nextDemand(f, 1);
+      first.end('cancel_unconfirmed', { cancellationConfirmed: false, cleanupConfirmed: true });
+      await settled(f);
+      assert.equal(f.bridge.state().maps?.recovery?.state, 'cooldown');
+      let probe: FakeMapAcquisition | undefined;
+      if (phase === 'probing') {
+        f.clock.now += MAP_CANCEL_COOLDOWN_MS;
+        await f.get(mapPath(ID_A), STREAM);
+        probe = await nextDemand(f, 2);
+        assert.equal(f.bridge.state().maps?.recovery?.state, 'probing');
+      }
+      await f.bridge.stop();
+      assert.equal(first.shutdowns, 1);
+      if (probe) {
+        assert.equal(probe.ended, 'aborted');
+        assert.equal(probe.shutdowns, 1);
+      }
+      f.clock.now += MAP_CANCEL_COOLDOWN_MS;
+      await assert.rejects(f.bridge.map(ID_A, { mode: 'stream', ifNoneMatch: undefined }), { code: 'bridge_not_running' });
+      assert.equal(f.maps.created.length, phase === 'probing' ? 2 : 1);
+      assert.equal(f.bridge.state().maps?.acquiring, false);
+      assert.deepEqual(await settledHandles(handles), handles);
+    });
+  }
+});
+
+test('wall-clock corrections cannot shorten or prolong the recovery cool-down', async (t) => {
+  let elapsed = 0;
+  const f = await mapFixture(t, { dependencies: { mapMonotonicNow: () => elapsed } });
+  await f.get(mapPath(ID_A), STREAM);
+  const first = await nextDemand(f, 1);
+  first.end('cancel_unconfirmed', { cancellationConfirmed: false, cleanupConfirmed: true });
+  await settled(f);
+  const displayedDeadline = f.bridge.state().maps?.recovery?.probe_after;
+  f.clock.now += 24 * 60 * 60_000;
+  elapsed = MAP_CANCEL_COOLDOWN_MS - 1;
+  await f.get(mapPath(ID_A), STREAM);
+  assert.equal(f.maps.created.length, 1, 'a forward clock jump does not permit an early probe');
+  f.clock.now = T0 - 24 * 60 * 60_000;
+  elapsed += 1;
+  await f.get(mapPath(ID_A));
+  await nextDemand(f, 2);
+  assert.equal(displayedDeadline, iso(T0 + MAP_CANCEL_COOLDOWN_MS));
+  assert.equal(f.bridge.state().maps?.recovery?.state, 'probing', 'a backward clock jump cannot prolong the elapsed wait');
 });

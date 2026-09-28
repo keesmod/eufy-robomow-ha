@@ -112,8 +112,8 @@ and the settings route also writes the mow speed and the blade speed.
   acquisition. File mode retains the operator-supplied file route. Without
   configured provisioning the state document reports
   `routes.maps` as `false` and the map route answers `404`.
-- No native-map recovery after an unconfirmed cancellation without a restart,
-  see #71. Bridge 0.13.0 on library 0.25.1 passed docked acquisitions and a
+- Native-map recovery after an unconfirmed cancellation is software-verified
+  in 0.13.3, with hardware observation still open in #71. Bridge 0.13.0 on library 0.25.1 passed docked acquisitions and a
   short supervised E15 moving-map run, with cancellation and cleanup
   confirmed. Bridge 0.13.1 on library 0.25.2 renews the cloud session before
   map provisioning would be refused. On 2026-09-27 it renewed during a running
@@ -304,6 +304,8 @@ acquisition without any geometry, for example:
   "error": null,
   "acquiring": false,
   "streaming": false,
+  "recovery": null,
+  "last_recovery": null,
   "last_demand": { "started_at": "2026-09-23T09:59:48.000Z", "ended_at": "2026-09-23T10:00:01.000Z", "end": "aborted", "cancellation_confirmed": true, "cleanup_confirmed": true, "published": 2, "rejected": 0 }
 }
 ```
@@ -316,8 +318,13 @@ served but the last demand failed, with that demand's code in `error`.
 the library reports it, whether the peer confirmed the cancellation and the
 local cleanup, and how many snapshots it published and rejected.
 Since 0.13.0 a failed demand remains an error even when it produced a valid
-map. Unconfirmed cancellation or cleanup prevents further acquisition until
-the bridge restarts. The latest good bundle stays available. When supplied by
+map. Since 0.13.3 an unconfirmed cancellation with confirmed local shutdown
+allows one fresh probe after fifteen minutes. `recovery` reports `cooldown`
+with `probe_after`, `probing`, or `blocked` with a null deadline. A successful
+probe returns it to null. `last_recovery` retains the latest probe's demand
+summary after normal demands resume. Failed provisioning starts no demand
+and therefore does not replace that summary. Any failed probe or unconfirmed
+cleanup requires restart. The latest good bundle stays available. When supplied by
 the library, `cancellation_failure` is a fixed diagnostic category, never raw
 protocol content or exception text.
 
@@ -722,6 +729,12 @@ Acquisition follows the requests, one demand at a time:
   releases the library's retained bytes and shuts the instance down. An
   unconfirmed local cleanup stops all further demands until a restart, as the
   library refuses further acquisition on that instance.
+- After an unconfirmed cancellation with confirmed local cleanup and returned
+  shutdown, wait fifteen minutes before one fresh probe. Concurrent requests
+  and stream leases cannot bypass this wait or the active acquisition. A valid
+  new map, confirmed cancellation and confirmed cleanup are all required to
+  resume. Any failed probe blocks until restart. This is a conservative recovery
+  policy, not a proven firmware timeout. [Evidence and limits](../docs/map-recovery.md).
 
 The gate runs the library's `decodeMowerMapSnapshot`. Every file holds 1 byte
 to 5 MiB, the integration's limit, all three files decode without a fault and
@@ -737,7 +750,7 @@ document's `maps.error`:
 | `map_provisioning_insecure`                                                                                                   | Group or others may write the file, or others may read it                  |
 | `mower_map_invalid_provisioning`                                                                                              | The library refused the provisioning, for example because it expired, before any network I/O |
 | `mower_map_incomplete`                                                                                                        | The demand ended without a complete snapshot                               |
-| `mower_map_negotiation_timeout`, `mower_map_connection_failed`, `mower_map_protocol_error`, `mower_map_stream_ended`, `mower_map_cancel_unconfirmed` | The library's failed demand reason, also after a valid map. Unconfirmed cancellation blocks further acquisition |
+| `mower_map_negotiation_timeout`, `mower_map_connection_failed`, `mower_map_protocol_error`, `mower_map_stream_ended`, `mower_map_cancel_unconfirmed` | The library's failed demand reason, also after a valid map. Unconfirmed cancellation permits one probe after fifteen minutes |
 | `mower_map_cleanup_unconfirmed`                                                                                               | Local cleanup was not confirmed, no further demand until a restart         |
 | `map_undecodable`, `map_boundary_missing`, `map_file_size`                                                                    | The demand's snapshots failed the gate                                     |
 | `request_aborted`                                                                                                             | The bridge stopped during the demand, or a session renewal ended its provisioning |

@@ -33,6 +33,8 @@ export const DEFAULT_MAP_STREAM_LEASE_MS = 30_000;
 export const DEFAULT_MAP_IDLE_INTERVAL_MS = 5 * 60_000;
 /** After a demand that published nothing, the next one waits this long. */
 export const DEFAULT_MAP_RETRY_INTERVAL_MS = 60_000;
+/** One recovery probe after confirmed local shutdown. This is not a peer timeout guarantee. */
+export const MAP_CANCEL_COOLDOWN_MS = 15 * 60_000;
 /** How often a running demand's retained files are checked for a newer complete snapshot. */
 export const DEFAULT_MAP_WATCH_INTERVAL_MS = 1_000;
 
@@ -236,6 +238,10 @@ export interface MapDemandSummary {
   rejected: number;
 }
 
+export type MapRecovery =
+  | { state: 'cooldown'; probe_after: string }
+  | { state: 'probing' | 'blocked'; probe_after: null };
+
 /** Map acquisition status in the bridge state document. It never contains geometry. */
 export interface MapStatus {
   /** Receipt time of the served snapshot, or null before the first one. */
@@ -249,7 +255,11 @@ export interface MapStatus {
   acquiring: boolean;
   /** A stream request arrived within the lease. */
   streaming: boolean;
+  /** One bounded recovery attempt. Local cleanup failures and failed probes require a restart. */
+  recovery: MapRecovery | null;
   last_demand: MapDemandSummary | null;
+  /** Retains the latest probe outcome after normal demands resume, for hardware observation. */
+  last_recovery: MapDemandSummary | null;
 }
 
 interface Demand {
@@ -279,14 +289,15 @@ function etagMatches(header: string | undefined, etag: string): boolean {
  * `stream` request keeps demands running for the lease, otherwise one demand per idle interval
  * refreshes the map and ends once the full cleaning path arrived. Every complete snapshot passes
  * the library's decoder before it replaces the bundle, and a failed demand never removes it.
- * Nothing is replayed. Failed demands back off, and uncertain cancellation or cleanup blocks
- * further acquisition until the bridge restarts.
+ * Nothing is replayed. After uncertain cancellation and confirmed local shutdown, a cool-down
+ * permits one fresh probe. Failed probes and uncertain cleanup block until the bridge restarts.
  */
 export class MowerMaps {
   readonly #provision: (id: string, signal: AbortSignal) => Promise<MapSessionProvisioning>;
   readonly #create: CreateMapAcquisition;
   readonly #timings: MapTimings;
   readonly #now: () => number;
+  readonly #monotonicNow: () => number;
   readonly #lifetime: AbortSignal;
   #bundle: MapBundle | undefined;
   #error: string | null = null;
@@ -294,20 +305,24 @@ export class MowerMaps {
   #lastStartAt: number | undefined;
   #retryAt = Number.NEGATIVE_INFINITY;
   #leaseUntil = Number.NEGATIVE_INFINITY;
-  #disabled = false;
+  #recovery: MapStatus['recovery'] = null;
+  #probeAt = Number.POSITIVE_INFINITY;
   #lastDemand: MapDemandSummary | null = null;
+  #lastRecovery: MapDemandSummary | null = null;
 
   constructor(options: {
     provision: (id: string, signal: AbortSignal) => Promise<MapSessionProvisioning>;
     create: CreateMapAcquisition;
     timings: MapTimings;
     now: () => number;
+    monotonicNow: () => number;
     lifetime: AbortSignal;
   }) {
     this.#provision = options.provision;
     this.#create = options.create;
     this.#timings = options.timings;
     this.#now = options.now;
+    this.#monotonicNow = options.monotonicNow;
     this.#lifetime = options.lifetime;
   }
 
@@ -343,7 +358,9 @@ export class MowerMaps {
       error: this.#error,
       acquiring: this.#active !== undefined,
       streaming: now < this.#leaseUntil,
+      recovery: this.#recovery ? { ...this.#recovery } : null,
       last_demand: this.#lastDemand ? { ...this.#lastDemand } : null,
+      last_recovery: this.#lastRecovery ? { ...this.#lastRecovery } : null,
     };
   }
 
@@ -354,13 +371,16 @@ export class MowerMaps {
   }
 
   #due(id: string, now: number): boolean {
-    if (this.#disabled || this.#active || this.#lifetime.aborted || now < this.#retryAt) return false;
+    if (this.#recovery?.state === 'blocked' || this.#active || this.#lifetime.aborted) return false;
+    if (this.#recovery?.state === 'cooldown') return this.#monotonicNow() >= this.#probeAt;
+    if (now < this.#retryAt) return false;
     if (now < this.#leaseUntil) return true;
     const last = this.#lastStartAt;
     return this.#bundle?.deviceId !== id || last === undefined || now - last >= this.#timings.idleIntervalMs;
   }
 
   #start(id: string, now: number): void {
+    if (this.#recovery?.state === 'cooldown') this.#recovery = { state: 'probing', probe_after: null };
     const demand: Demand = {
       id,
       controller: new AbortController(),
@@ -381,6 +401,7 @@ export class MowerMaps {
 
   async #run(demand: Demand): Promise<void> {
     let maps: MapAcquisitionPort;
+    const probe = this.#recovery?.state === 'probing';
     const signal = AbortSignal.any([this.#lifetime, demand.controller.signal]);
     try {
       const provisioning = await this.#provision(demand.id, signal);
@@ -423,19 +444,26 @@ export class MowerMaps {
         published: demand.published,
         rejected: demand.rejected,
       };
+      if (probe) this.#lastRecovery = { ...this.#lastDemand };
     }
     if (!cleanupConfirmed) {
       // The library refuses further acquisition on an instance without confirmed cleanup. The
       // bridge stops acquiring as well until it restarts, the last good bundle stays served.
-      this.#disabled = true;
+      this.#recovery = { state: 'blocked', probe_after: null };
       failure = 'mower_map_cleanup_unconfirmed';
     } else if (result?.reason === 'cancel_unconfirmed') {
-      // Closing our sockets does not confirm the peer stopped its transfer. Do not start
-      // another demand after uncertain cancellation, even when this one produced a map.
-      this.#disabled = true;
+      // shutdown() has returned. Never reuse this instance, overlap it or immediately reconnect.
+      // A probe gets no further automatic attempt, even if it published a valid map.
+      this.#recovery = this.#recovery?.state === 'probing'
+        ? { state: 'blocked', probe_after: null }
+        : { state: 'cooldown', probe_after: iso(this.#now() + MAP_CANCEL_COOLDOWN_MS) };
+      this.#probeAt = this.#monotonicNow() + MAP_CANCEL_COOLDOWN_MS;
       failure = 'mower_map_cancel_unconfirmed';
     } else if (failure === null && result && !['demand_expired', 'aborted', 'disconnected', 'shutdown', 'stream_ended'].includes(result.reason)) {
       failure = `mower_map_${result.reason}`;
+    }
+    if (this.#recovery?.state === 'probing' && !result?.cancellationConfirmed && failure === null) {
+      failure = 'mower_map_cancel_unconfirmed';
     }
     if (failure === null && demand.published === 0) failure = result ? endCode(demand, result.reason) : 'internal_error';
     this.#finish(failure);
@@ -479,6 +507,9 @@ export class MowerMaps {
   }
 
   #finish(failure: string | null): void {
+    if (this.#recovery?.state === 'probing') {
+      this.#recovery = failure === null ? null : { state: 'blocked', probe_after: null };
+    }
     if (failure === null) {
       this.#error = null;
       this.#retryAt = Number.NEGATIVE_INFINITY;
