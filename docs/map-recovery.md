@@ -87,7 +87,8 @@ establishes a remote transfer lifetime. Neither the 30-second demand nor the
 65-second provisioning validity requirement is a peer timeout. The delay is
 therefore a conservative operator policy, not proof that the peer has stopped.
 The code guarantees no overlapping local acquisition instances. Remote cleanup
-and successful recovery without a process restart still need E15 observation.
+and successful recovery without a process restart were not observed on the
+E15, see [closure](#closure-of-71).
 
 `maps.recovery` exposes the state and planned probe time. `maps.last_recovery`
 retains the latest probe's timestamps, end reason, publication count and
