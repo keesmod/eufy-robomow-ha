@@ -304,6 +304,13 @@ Integration with the bridge backend:
 - The cloud session renewed before map provisioning would be refused, between
   idle demands and during a running stream demand, which ended normally
   (bridge 0.13.1 on library 0.25.2, 2026-09-27).
+- Start from `docked` through the service the card's Start button sends,
+  confirmed by the bridge's fresh report 1.2 seconds after the call, and dock,
+  confirmed at the arrival's map save, both checked in the eufy app. The
+  charger contact cleared after the start and returned after the arrival, and
+  the session was recorded without an observation gap (0.17.0 with bridge
+  0.14.0 on library 0.27.0, 2026-09-29,
+  [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/86#issuecomment-5892585855)).
 - No command was repeated after an uncertain answer, a bridge restart or a
   backend switch (2026-09-24).
 
@@ -402,6 +409,8 @@ below retain their stated scope.
 - Edge distance, pad direction and path distance in bridge mode, read only
   there since 0.15.0.
 - The standalone container image outside CI.
+- The app on aarch64. The app declares it, but map acquisition and control
+  have run only on the owner's amd64 host.
 - The opt-in planning package. Automatic mowing stays off.
 - Any model other than the E15. E18 support is not claimed.
 
@@ -434,7 +443,7 @@ Combinations run on the owner's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
-| 0.17.0 | 0.14.0 (0.27.0) | the current candidate, exact installed sources and preserved identities/options/session storage. On 2026-09-29 the E15 charger contact passed the station, lawn-stop and return checks through library 0.27.0, bridge and HA. Physical commands used BatteryCam. The existing map recovery policy also recovered once without a restart, see the #86 receipt |
+| 0.17.0 | 0.14.0 (0.27.0) | the current candidate, exact installed sources and preserved identities/options/session storage. On 2026-09-29 the E15 charger contact passed the station, lawn-stop and return checks through library 0.27.0, bridge and HA. Physical commands used BatteryCam. The existing map recovery policy also recovered once without a restart, see the #86 receipt. Later that day a Start from `docked` and a dock through HA were each confirmed by the bridge and the eufy app |
 | 0.16.3 | 0.13.4 (0.25.2) | the previous candidate, whose integration matched file for file after the 2026-09-28 update, with the entry, its entity ids and the stored sessions kept. A task recorded from cloud readings is not yet observed |
 | 0.16.2 | 0.13.4 (0.25.2) | the previous candidate, whose integration matched file for file after the 2026-09-28 update with card 0.7.4, the entry and its entity ids unchanged |
 | 0.16.1 | 0.13.4 (0.25.2) | an earlier candidate, whose app matched file for file after the 2026-09-28 update, with `control_read_back_ms` lowered to 54000 within the enforced budget, identities and integration unchanged and native-map acquisition healthy. Recovery after an unconfirmed cancellation was unobserved at that installation, see the #71 waiver |
