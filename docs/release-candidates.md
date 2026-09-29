@@ -17,9 +17,16 @@ backends and rollback are described in
 
 | Component | Version | Pinned inputs |
 | --- | --- | --- |
-| Integration `eufy_robomow` | 0.16.3 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.4 |
-| Mower bridge, container image | 0.13.4 | `@keesmod/eufy-mega-client` 0.25.2 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
-| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.13.4 | the same inputs, built by the Supervisor on the host |
+| Integration `eufy_robomow` | 0.17.0 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.4 |
+| Mower bridge, container image | 0.14.0 | `@keesmod/eufy-mega-client` 0.27.0 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
+| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.14.0 | the same inputs, built by the Supervisor on the host |
+
+Integration 0.17.0 and bridge/app 0.14.0 consume the charger contact from
+[library 0.27.0](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.27.0).
+A fresh connected contact shows `docked` unless equal or newer local activity takes precedence.
+Card 0.7.4 already offers Start from that state with the existing control opt-ins.
+The contact remains display evidence. Hardware acceptance is tracked in
+[#86](https://github.com/keesmod/eufy-robomow-ha/issues/86).
 
 Integration 0.16.3 from `db343c7` (#84) records bridge-mode sessions from the
 bridge's bounded cloud readings, see
@@ -402,7 +409,8 @@ Combinations run on the owner's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
-| 0.16.3 | 0.13.4 (0.25.2) | the current candidate, whose integration matched file for file after the 2026-09-28 update, with the entry, its entity ids and the stored sessions kept. A task recorded from cloud readings is not yet observed |
+| 0.17.0 | 0.14.0 (0.27.0) | the current candidate, software-verified charger contact, with installation and hardware acceptance pending in #86 |
+| 0.16.3 | 0.13.4 (0.25.2) | the previous candidate, whose integration matched file for file after the 2026-09-28 update, with the entry, its entity ids and the stored sessions kept. A task recorded from cloud readings is not yet observed |
 | 0.16.2 | 0.13.4 (0.25.2) | the previous candidate, whose integration matched file for file after the 2026-09-28 update with card 0.7.4, the entry and its entity ids unchanged |
 | 0.16.1 | 0.13.4 (0.25.2) | an earlier candidate, whose app matched file for file after the 2026-09-28 update, with `control_read_back_ms` lowered to 54000 within the enforced budget, identities and integration unchanged and native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified, see the #71 waiver |
 | 0.16.1 | 0.13.3 (0.25.2) | an earlier candidate, whose app matched file for file after the 2026-09-28 update, with identities, settings and integration unchanged and ordinary native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified |

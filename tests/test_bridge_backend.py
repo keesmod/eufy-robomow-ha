@@ -789,6 +789,95 @@ def test_cloud_activity_expires_between_bridge_polls_and_stops_streaming(tmp_pat
     _run(scenario, tmp_path)
 
 
+@pytest.mark.parametrize("mission", ["idle", "mowing", "missing", "invalid"])
+@pytest.mark.parametrize("connected", [True, False])
+def test_contact_shows_docked_without_inventing_local_or_command_evidence(
+    mission: str, connected: bool, tmp_path: Path,
+) -> None:
+    async def scenario(hass: HomeAssistant) -> None:
+        status = {"state": mission} if mission in ("missing", "invalid") else {"state": "reported", "value": mission}
+        bridge = _FakeBridge([_document(cloud_status=_cloud_status(
+            status=status, charger={"state": "reported", "connected": connected},
+        ))])
+        coordinator = _coordinator(hass, bridge, OPERATING_MODE_OBSERVE_ONLY)
+        entity = EufyRobomowEntity(coordinator, cast(Any, _entry(**{CONF_BACKEND: BACKEND_BRIDGE})))
+        with _clock(datetime(2026, 9, 19, 10, 0, 2, tzinfo=UTC)):
+            await coordinator._async_update_data()
+            expected = LawnMowerActivity.DOCKED if connected else (LawnMowerActivity.MOWING if mission == "mowing" else None)
+            assert entity.activity == expected
+            assert coordinator.bridge_task_active is (not connected and mission == "mowing")
+            assert coordinator.bridge_local_activity_evidence is None
+            assert coordinator.bridge_command_activity is None
+            assert coordinator.command is None
+            assert not coordinator.commands_available
+            attrs = entity.extra_state_attributes
+            assert attrs["bridge_cloud_charger_status"] == "reported"
+            assert attrs["bridge_cloud_charger_connected"] is connected
+            if connected:
+                assert attrs["bridge_activity_source"] == "cloud"
+                assert attrs["bridge_activity_observed_at"] == attrs["bridge_cloud_observed_at"]
+            assert not bridge.commands and not bridge.settings and not bridge.work_parameters
+
+    _run(scenario, tmp_path)
+
+
+@pytest.mark.parametrize("metadata, elapsed_ms, accepted", [
+    ({}, 90_000, True),
+    ({"age_ms": 90_000}, 90_000, True),
+    ({"age_ms": 90_001}, 1, False),
+    ({"age_ms": 0}, 90_001, False),
+    ({"age_ms": 0}, -1, False),
+    ({"stale": True}, 1, False),
+    ({"error": "mower_request_failed"}, 1, False),
+    ({"charger": {"state": "missing", "connected": True}}, 1, False),
+    ({"charger": {"state": "invalid", "connected": True}}, 1, False),
+    ({"charger": {"state": "reported", "connected": 1}}, 1, False),
+])
+def test_contact_needs_a_valid_bounded_receipt(
+    metadata: dict[str, Any], elapsed_ms: int, accepted: bool, tmp_path: Path,
+) -> None:
+    async def scenario(hass: HomeAssistant) -> None:
+        cloud = _cloud_status(status={"state": "reported", "value": "idle"}, charger={"state": "reported", "connected": True})
+        cloud.update(metadata)
+        coordinator = _coordinator(hass, _FakeBridge([_document(cloud_status=cloud)]))
+        now = datetime(2026, 9, 19, 10, 0, 1, 250000, tzinfo=UTC) + timedelta(milliseconds=elapsed_ms)
+        with _clock(now):
+            await coordinator._async_update_data()
+            evidence = coordinator.bridge_activity_evidence
+            assert (evidence is not None and evidence[0] == "docked") is accepted
+        with _clock(now + timedelta(seconds=91)):
+            assert coordinator.bridge_activity_evidence is None
+
+    _run(scenario, tmp_path)
+
+
+@pytest.mark.parametrize("activity", ["mowing", "paused", "returning"])
+@pytest.mark.parametrize("source", ["report", "command"])
+@pytest.mark.parametrize("local_offset", [-300, -1, 0, 1])
+def test_only_equal_or_newer_local_task_wins_over_connected_contact(
+    activity: str, source: str, local_offset: int, tmp_path: Path,
+) -> None:
+    async def scenario(hass: HomeAssistant) -> None:
+        cloud_at = datetime(2026, 9, 19, 10, 0, tzinfo=UTC)
+        local_at = cloud_at + timedelta(seconds=local_offset)
+        local = {"status": _reported_status(activity), "observed_at": local_at.isoformat()} if source == "report" else {}
+        coordinator = _coordinator(hass, _FakeBridge([_document(cloud_status=_cloud_status(
+            observed_at="2026-09-19T10:00:00Z", status={"state": "reported", "value": "idle"},
+            charger={"state": "reported", "connected": True},
+        ), **local)]))
+        with _clock(datetime(2026, 9, 19, 10, 0, 2, tzinfo=UTC)):
+            await coordinator._async_update_data()
+            if source == "command":
+                coordinator.bridge_command_activity = activity
+                coordinator.bridge_command_activity_at = local_at
+            evidence = coordinator.bridge_activity_evidence
+            expected = (activity, source) if local_offset >= 0 else ("docked", "cloud")
+            assert evidence is not None and evidence[:2] == expected
+            assert coordinator.bridge_task_active is (local_offset >= 0)
+
+    _run(scenario, tmp_path)
+
+
 def test_local_report_and_confirmed_command_take_precedence_over_newer_cloud_receipt(tmp_path: Path) -> None:
     async def scenario(hass: HomeAssistant) -> None:
         cloud = _cloud_status(observed_at="2026-09-24T08:40:01.000Z")
@@ -853,6 +942,31 @@ def test_cloud_activity_cannot_confirm_a_command_or_select_resume(tmp_path: Path
             assert bridge.commands == [(MOWER_ID, "start")], "cloud display data does not choose resume"
             assert coordinator.command is not None and coordinator.command.state == "uncertain"
             assert coordinator.bridge_command_activity is None
+
+    _run(scenario, tmp_path)
+
+
+def test_start_at_the_station_does_not_resume_an_older_local_pause(tmp_path: Path) -> None:
+    async def scenario(hass: HomeAssistant) -> None:
+        bridge = _FakeBridge(
+            [_document(cloud_status=_cloud_status(
+                status={"state": "reported", "value": "idle"},
+                charger={"state": "reported", "connected": True},
+            ))],
+            state=_control_state(),
+            command_answers=[_outcome("start", result="uncertain", activity=None, stage="acknowledged", end="timed_out")],
+        )
+        coordinator = _coordinator(hass, bridge)
+        entity = EufyRobomowEntity(coordinator, cast(Any, _entry(**{CONF_BACKEND: BACKEND_BRIDGE})))
+        with _clock(datetime(2026, 9, 19, 10, 0, 2, tzinfo=UTC)):
+            await coordinator._async_update_data()
+            coordinator.bridge_command_activity = "paused"
+            coordinator.bridge_command_activity_at = datetime(2026, 9, 19, 9, 55, tzinfo=UTC)
+            assert entity.activity == LawnMowerActivity.DOCKED
+            with pytest.raises(HomeAssistantError, match="did not confirm"):
+                await entity.async_start_mowing()
+            assert bridge.commands == [(MOWER_ID, "start")]
+            assert coordinator.command is not None and coordinator.command.state == "uncertain"
 
     _run(scenario, tmp_path)
 

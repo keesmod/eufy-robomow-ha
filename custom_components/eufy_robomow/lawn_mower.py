@@ -146,6 +146,8 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
             cloud = self.coordinator.bridge_cloud_status
             attributes["bridge_cloud_status"] = cloud.status if cloud else None
             attributes["bridge_cloud_activity"] = cloud.activity if cloud else None
+            attributes["bridge_cloud_charger_status"] = cloud.charger_status if cloud else None
+            attributes["bridge_cloud_charger_connected"] = cloud.charger_connected if cloud else None
             attributes["bridge_cloud_source"] = cloud.source if cloud else None
             attributes["bridge_cloud_observed_at"] = (
                 cloud.observed_at.isoformat() if cloud and cloud.observed_at else None
@@ -157,10 +159,15 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
 
     async def async_start_mowing(self) -> None:
         if self.coordinator.backend == BACKEND_BRIDGE:
-            # Cloud display data never selects a physical command. The bridge
-            # still validates its own fresh local state before any write.
+            # Resume needs local pause evidence that still supplies the display.
+            # A newer station contact supersedes an older pause, so Start at the
+            # station cannot replay that pause. The bridge validates each write.
             local = self.coordinator.bridge_local_activity_evidence
-            paused = local is not None and local[0] == "paused"
+            paused = (
+                local is not None
+                and local[0] == "paused"
+                and self.activity == LawnMowerActivity.PAUSED
+            )
         else:
             paused = self.activity == LawnMowerActivity.PAUSED
         action = "resume" if paused else "start"

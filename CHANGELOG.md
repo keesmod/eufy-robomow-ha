@@ -21,6 +21,29 @@ The session store has kept storage version 1 since 0.7.0 and the options have
 kept their keys since 0.11.0. An older version ignores an option it does not
 know, but saving the options there drops it.
 
+## 0.17.0 - 2026-09-29
+
+### Show the station contact on the bridge backend
+
+- With bridge 0.14.0 and library 0.27.0, a reported connected charger contact
+  shows `docked`. The existing card then offers Start in control mode.
+- The contact shares the cloud activity's receipt and both 90-second age
+  bounds. Equal or newer local reports and confirmed commands retain precedence.
+  A disconnected, absent, invalid, failed or expired contact cannot supply
+  `docked`. No state is inferred from battery level or inactivity.
+- The charger status and contact are separate entity attributes. They never
+  enter local telemetry, command confirmation or session observations.
+  Older bridges keep their current behavior.
+
+Evidence: software tests cover the contact states, metadata validation, age
+boundaries, local precedence and unchanged command safeguards. The first
+library-to-bridge hardware check is tracked in
+[#86](https://github.com/keesmod/eufy-robomow-ha/issues/86).
+Upgrade: install bridge/app 0.14.0 and replace the integration folder, run the
+configuration check and restart Home Assistant. Card 0.7.4 already enables
+Start from `docked`. Rollback: restore integration 0.16.3 and bridge/app
+0.13.4. Config entries, entity ids and session storage keep their format.
+
 ## 0.16.3 - 2026-09-28
 
 ### Record bridge-mode sessions from bounded cloud readings

@@ -18,7 +18,9 @@ the last confirmed command, so resume works through Home Assistant. Version
 the dock with its task flag set. Version 0.13.0 shows the drive home after a
 dock in bridge mode. Version 0.13.2 shows the drive home in the local backend.
 Version 0.13.3 confirms a start right after a map save and refuses a pause
-without a running task. Version 0.13.4 confirms a start while the mower rests in
+without a running task. Bridge 0.14.0 and integration 0.17.0 show `docked`
+from a fresh connected charger contact supplied by library 0.27.0, which also
+enables Start on the card in control mode. Version 0.13.4 confirms a start while the mower rests in
 the dock and shows the drive home right after a dock.
 Version 0.14.0 reads the local settings through the mower bridge and writes
 cut height, volume and two lawn options through its opt-in settings route.

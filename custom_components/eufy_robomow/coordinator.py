@@ -426,26 +426,32 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
 
     @property
     def bridge_activity_evidence(self) -> tuple[str, str, datetime | None] | None:
-        """Local evidence first, then bounded cloud activity for display and maps.
+        """Use a newer charger contact, otherwise local evidence then cloud activity.
 
         A recent cloud receipt does not prove that the device recently updated
         the cloud record. Its source stays explicit and cannot confirm commands.
         Both the bridge's age and this process's clock must accept the receipt.
         """
         local = self.bridge_local_activity_evidence
+        cloud = self.fresh_bridge_cloud_status
+        if (
+            cloud is not None
+            and cloud.charger_connected is True
+            and cloud.observed_at is not None
+            and (local is None or (local[2] is not None and local[2] < cloud.observed_at))
+        ):
+            return "docked", "cloud", cloud.observed_at
         if local is not None:
             return local
         return self.bridge_cloud_activity_evidence
 
     @property
-    def bridge_cloud_activity_evidence(self) -> tuple[str, str, datetime] | None:
-        """The bridge's cloud reading, if it is reported, fresh and within both age bounds."""
+    def fresh_bridge_cloud_status(self) -> BridgeCloudStatus | None:
+        """The shared cloud receipt, fresh and within both age bounds."""
         cloud = self.bridge_cloud_status
         if (
             cloud is None
             or cloud.source != "cloud"
-            or cloud.status != "reported"
-            or cloud.activity is None
             or cloud.stale
             or cloud.error is not None
             or cloud.observed_at is None
@@ -454,6 +460,15 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
             or not timedelta(0) <= dt_util.utcnow() - cloud.observed_at <= BRIDGE_CLOUD_STATUS_MAX_AGE
         ):
             return None
+        return cloud
+
+    @property
+    def bridge_cloud_activity_evidence(self) -> tuple[str, str, datetime] | None:
+        """Bounded mission activity for display and session observations."""
+        cloud = self.fresh_bridge_cloud_status
+        if cloud is None or cloud.status != "reported" or cloud.activity is None:
+            return None
+        assert cloud.observed_at is not None
         return cloud.activity, "cloud", cloud.observed_at
 
     @property
