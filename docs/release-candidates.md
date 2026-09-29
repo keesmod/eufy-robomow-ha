@@ -25,8 +25,31 @@ Integration 0.17.0 and bridge/app 0.14.0 consume the charger contact from
 [library 0.27.0](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.27.0).
 A fresh connected contact shows `docked` unless equal or newer local activity takes precedence.
 Card 0.7.4 already offers Start from that state with the existing control opt-ins.
-The contact remains display evidence. Hardware acceptance is tracked in
-[#86](https://github.com/keesmod/eufy-robomow-ha/issues/86).
+The contact remains display evidence. Candidate `4fed5ea` replaced integration
+0.16.3 and bridge/app 0.13.4 on 2026-09-29 after private source and storage
+backups, Supervisor app backup `d1b492f9` and passing configuration checks.
+Readback at 13:18:55 UTC verified exact installed sources, runtime library
+0.27.0, unchanged identities, options and stored sessions, no unavailable
+integration entities and a healthy map. Core and the app were restarted.
+
+The owner's app-controlled E15 window then read connected at the station,
+disconnected while mowing and after a stop on the lawn, and connected again
+on return. HA showed `docked`, `mowing`, `unknown`, `returning` and `docked`.
+At arrival the contact supplied `docked` while mission status still said
+`returning`. Card 0.7.4's control function, evaluated against the captured HA
+states, enabled Start at the station and disabled it after the lawn stop.
+The physical commands used BatteryCam, so Start through HA was not retested.
+A map cancellation failed during the window with confirmed local cleanup.
+The existing recovery policy then recovered without a restart: one probe
+started at 13:37:04 UTC, confirmed cancellation and cleanup, and HA showed a
+healthy map at 13:38:14 UTC. See the
+[installation receipt](https://github.com/keesmod/eufy-robomow-ha/issues/86#issuecomment-5891236606)
+and [recovery receipt](https://github.com/keesmod/eufy-robomow-ha/issues/86#issuecomment-5891459242).
+
+The integration archive SHA-256 is
+`7365660a0c2ba25a8a59a96e411dd852550a6aca4939a8ed1223573885c74a85`.
+The app archive SHA-256 is
+`57fa270e010572473f86c1568023702bca7d258d39fa2e335882e2f78b3a79f6`.
 
 Integration 0.16.3 from `db343c7` (#84) records bridge-mode sessions from the
 bridge's bounded cloud readings, see
@@ -365,8 +388,10 @@ below retain their stated scope.
   with no map error, and 14 session renewals passed without error, see the
   [daily-use receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5864644965).
   Bridge 0.13.3 adds one recovery probe after a fifteen-minute cool-down.
-  Hardware recovery was not observed, and #71 was closed at the owner's
-  request with that observation waived, see [recovery limits](map-recovery.md).
+  One natural unconfirmed cancellation recovered without a bridge restart
+  on 2026-09-29, using bridge 0.14.0 and library 0.27.0. The probe confirmed
+  cancellation and cleanup and HA returned to a healthy map. This does not
+  establish a remote expiry bound, see [recovery evidence and limits](map-recovery.md).
 - The compatible `external` HTTPS map source remains available as a manual
   recovery route.
 - The no-go zones on the map since 0.15.1, from map-record field 12. The
@@ -409,11 +434,11 @@ Combinations run on the owner's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
-| 0.17.0 | 0.14.0 (0.27.0) | the current candidate, software-verified charger contact, with installation and hardware acceptance pending in #86 |
+| 0.17.0 | 0.14.0 (0.27.0) | the current candidate, exact installed sources and preserved identities/options/session storage. On 2026-09-29 the E15 charger contact passed the station, lawn-stop and return checks through library 0.27.0, bridge and HA. Physical commands used BatteryCam. The existing map recovery policy also recovered once without a restart, see the #86 receipt |
 | 0.16.3 | 0.13.4 (0.25.2) | the previous candidate, whose integration matched file for file after the 2026-09-28 update, with the entry, its entity ids and the stored sessions kept. A task recorded from cloud readings is not yet observed |
 | 0.16.2 | 0.13.4 (0.25.2) | the previous candidate, whose integration matched file for file after the 2026-09-28 update with card 0.7.4, the entry and its entity ids unchanged |
-| 0.16.1 | 0.13.4 (0.25.2) | an earlier candidate, whose app matched file for file after the 2026-09-28 update, with `control_read_back_ms` lowered to 54000 within the enforced budget, identities and integration unchanged and native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified, see the #71 waiver |
-| 0.16.1 | 0.13.3 (0.25.2) | an earlier candidate, whose app matched file for file after the 2026-09-28 update, with identities, settings and integration unchanged and ordinary native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified |
+| 0.16.1 | 0.13.4 (0.25.2) | an earlier candidate, whose app matched file for file after the 2026-09-28 update, with `control_read_back_ms` lowered to 54000 within the enforced budget, identities and integration unchanged and native-map acquisition healthy. Recovery after an unconfirmed cancellation was unobserved at that installation, see the #71 waiver |
+| 0.16.1 | 0.13.3 (0.25.2) | an earlier candidate, whose app matched file for file after the 2026-09-28 update, with identities, settings and integration unchanged and ordinary native-map acquisition healthy. Recovery after an unconfirmed cancellation was unobserved at that installation |
 | 0.16.1 | 0.13.2 (0.25.2) | an earlier candidate, whose app matched file for file after its deployment on 2026-09-28, while integration 0.16.1 differed from the candidate only by one code comment until the 0.16.2 update |
 | 0.16.1 | 0.13.1 (0.25.2) | an earlier candidate, matched file for file after its deployment, control window, session renewals and host reboot of 2026-09-27, run with `local_timeout_ms: 10000` on 2026-09-28 until the 0.13.2 update |
 | 0.15.1 | 0.11.0 (0.23.0) | matched file for file after its deployment on 2026-09-25 |

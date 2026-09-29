@@ -36,9 +36,14 @@ know, but saving the options there drops it.
   Older bridges keep their current behavior.
 
 Evidence: software tests cover the contact states, metadata validation, age
-boundaries, local precedence and unchanged command safeguards. The first
-library-to-bridge hardware check is tracked in
-[#86](https://github.com/keesmod/eufy-robomow-ha/issues/86).
+boundaries, timestamp precedence and unchanged command safeguards. On the
+owned E15 the installed library-to-bridge path read connected at the station,
+disconnected while mowing and after a stop on the lawn, and connected on
+return. HA showed `docked` only for the connected contact in those resting
+observations. Card gating passed against the captured real HA states.
+Physical commands used BatteryCam, not HA. See the
+[#86 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/86#issuecomment-5891236606)
+for the 2026-09-29 installation and observations.
 Upgrade: install bridge/app 0.14.0 and replace the integration folder, run the
 configuration check and restart Home Assistant. Card 0.7.4 already enables
 Start from `docked`. Rollback: restore integration 0.16.3 and bridge/app
