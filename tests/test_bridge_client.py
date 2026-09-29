@@ -302,6 +302,59 @@ def test_malformed_cloud_block_does_not_lose_local_telemetry(value: Any) -> None
     assert telemetry.dps["8"] == 85
 
 
+@pytest.mark.parametrize("connected", [True, False])
+@pytest.mark.parametrize("status", ["reported", "missing", "invalid"])
+def test_charger_contact_is_independent_of_mission_status(connected: bool, status: str) -> None:
+    telemetry = parse_state_document(_document(cloud_status=_cloud_status(
+        status={"state": status, "value": "idle"},
+        charger={"state": "reported", "connected": connected},
+    )), MOWER_ID)
+    cloud = telemetry.cloud_status
+    assert cloud is not None
+    assert (cloud.charger_status, cloud.charger_connected) == ("reported", connected)
+    assert cloud.status == status
+    assert telemetry.command_activity is None
+    assert "108" not in telemetry.dps
+
+
+@pytest.mark.parametrize("charger, expected", [
+    ({"state": "missing", "connected": True}, "missing"),
+    ({"state": "invalid", "connected": True}, "invalid"),
+    ({"state": "unavailable", "connected": True}, "unavailable"),
+    ({"state": "reported"}, "invalid"),
+    ({"state": "reported", "connected": 1}, "invalid"),
+    ({"state": "reported", "connected": "true"}, "invalid"),
+    ({"state": "reported", "connected": None}, "invalid"),
+    ({"state": []}, "invalid"),
+    ({"state": "unconfirmed", "connected": True}, "invalid"),
+    (None, "invalid"),
+    ([], "invalid"),
+    (True, "invalid"),
+])
+def test_invalid_charger_does_not_lose_activity_or_local_telemetry(charger: Any, expected: str) -> None:
+    telemetry = parse_state_document(_document(cloud_status=_cloud_status(charger=charger)), MOWER_ID)
+    cloud = telemetry.cloud_status
+    assert cloud is not None
+    assert (cloud.charger_status, cloud.charger_connected) == (expected, None)
+    assert cloud.activity == "mowing"
+    assert telemetry.dps["8"] == 85
+
+
+def test_old_bridge_has_no_charger_contact() -> None:
+    cloud = parse_state_document(_document(cloud_status=_cloud_status()), MOWER_ID).cloud_status
+    assert cloud is not None
+    assert (cloud.charger_status, cloud.charger_connected) == ("unavailable", None)
+
+
+@pytest.mark.parametrize("metadata", [{"observed_at": None}, {"age_ms": None}])
+def test_reported_charger_requires_receipt_metadata(metadata: dict[str, Any]) -> None:
+    cloud = parse_state_document(_document(cloud_status=_cloud_status(
+        status={"state": "missing"}, charger={"state": "reported", "connected": True}, **metadata,
+    )), MOWER_ID).cloud_status
+    assert cloud is not None
+    assert (cloud.charger_status, cloud.charger_connected) == ("invalid", None)
+
+
 @pytest.mark.parametrize(
     "overrides",
     [

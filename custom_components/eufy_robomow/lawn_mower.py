@@ -146,6 +146,8 @@ class EufyRobomowEntity(CoordinatorEntity[EufyMowerCoordinator], LawnMowerEntity
             cloud = self.coordinator.bridge_cloud_status
             attributes["bridge_cloud_status"] = cloud.status if cloud else None
             attributes["bridge_cloud_activity"] = cloud.activity if cloud else None
+            attributes["bridge_cloud_charger_status"] = cloud.charger_status if cloud else None
+            attributes["bridge_cloud_charger_connected"] = cloud.charger_connected if cloud else None
             attributes["bridge_cloud_source"] = cloud.source if cloud else None
             attributes["bridge_cloud_observed_at"] = (
                 cloud.observed_at.isoformat() if cloud and cloud.observed_at else None

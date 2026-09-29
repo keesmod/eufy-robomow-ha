@@ -21,6 +21,26 @@ files, because the mower id the integration stores depends on them. A rollback
 of the app restores the app backup that the update created, which brings back
 the previous version with its options and data.
 
+## 0.14.0 - 2026-09-29
+
+### Serve the cloud charger contact
+
+- Pin library 0.27.0 from its published tarball with verified integrity.
+- Serve `cloud_status.charger` beside activity. Both fields come from the
+  same cloud record, share its receipt time and 90-second age bound, refresh
+  together, and retain their last values marked stale after a failed read.
+- The contact remains cloud evidence and never confirms a command. A failed
+  cloud read does not invalidate local telemetry. No raw DP 108 is served.
+
+Evidence: the release tarball matches its published SHA-256 checksum.
+Software tests cover connected, disconnected, missing, invalid and unavailable
+contacts, caching, failure, expiry and local command gates. The first hardware
+read through this library is tracked in
+[#86](https://github.com/keesmod/eufy-robomow-ha/issues/86).
+Upgrade: rebuild the app or container and use integration 0.17.0 to display
+`docked` from the contact. Rollback: restore bridge/app 0.13.4 and its lockfile.
+Existing options and data directories keep their format.
+
 ## 0.13.4 - 2026-09-28
 
 ### Keep a command within the integration's timeout

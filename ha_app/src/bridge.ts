@@ -32,6 +32,7 @@ import {
   type MowerWorkParameterOutcome,
   type MowerWorkParameters,
   type MowerCloudStatus,
+  type MowerCloudCharger,
 } from '@keesmod/eufy-mega-client';
 import { MOWER_ID, SETTINGS_MODE_WRITE, type BridgeConfig, type ControlConfig } from './config.ts';
 import { ApiError, BridgeError } from './errors.ts';
@@ -140,10 +141,11 @@ export interface CloudStatusDocument {
   stale: boolean;
   error: string | null;
   status: MowerCloudStatus | { state: 'unavailable' };
+  charger: MowerCloudCharger | { state: 'unavailable' };
 }
 
 interface CloudStatusEntry {
-  stored: { observedAt: string; status: MowerCloudStatus } | null;
+  stored: { observedAt: string; status: MowerCloudStatus; charger: MowerCloudCharger } | null;
   error: string | null;
   askedAt: number;
 }
@@ -993,7 +995,11 @@ export class MowerBridge {
       let error: string | null = null;
       try {
         const reading = await mowers.queryCloudState(id, this.#lifetime.signal);
-        status = { observedAt: reading.observedAt, status: structuredClone(reading.status) };
+        status = {
+          observedAt: reading.observedAt,
+          status: structuredClone(reading.status),
+          charger: structuredClone(reading.charger),
+        };
         const parameters = reading.workParameters;
         stored = {
           state: parameters.state,
@@ -1056,6 +1062,7 @@ export class MowerBridge {
       stale: !stored || entry?.error != null || age === null || age < 0 || age > CLOUD_STATUS_MAX_AGE_MS,
       error: entry?.error ?? null,
       status: stored ? structuredClone(stored.status) : { state: 'unavailable' },
+      charger: stored ? structuredClone(stored.charger) : { state: 'unavailable' },
     };
   }
 

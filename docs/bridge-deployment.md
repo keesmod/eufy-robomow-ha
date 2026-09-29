@@ -3,11 +3,11 @@
 How to run the dedicated mower bridge from `bridge/` as a container or as a
 local Home Assistant app, and how to upgrade, restart, back up and roll it
 back. Everything here is local: no image is published and no app repository is
-listed. Version 0.13.4 serves state routes with the typed settings and, only
+listed. Version 0.14.0 serves state routes with the typed settings and, only
 behind the explicit `operating_mode: control` opt-in with a stop route, the
 start, pause, resume and stop routes. The separate `settings_mode: write`
 opt-in enables the settings route for mow height, volume, smart no-go zones
-and sparse lawn optimization. It pins library 0.25.2, which reads DP 107 as
+and sparse lawn optimization. It pins library 0.27.0, which reads DP 107 as
 the mower's mission status, confirms the start, pause, resume and stop commands,
 and reads and writes the settings behind its own opt-in.
 On the owned E15 a stop ends the task and returns the mower to the dock. With
@@ -249,9 +249,16 @@ Activity reports mowing, paused, returning and idle from the E15 mission
 status read by library 0.22.0, see [DP 107 activity](protocol-provenance.md#dp-107-activity).
 Every mowing mission counts, the Box, zone and scheduled tasks included. Idle
 ends a bridge-mode session. Since integration 0.16.0 it no longer reads as
-docked, because it also occurs away from the dock. Docked, charging and error
-have no confirmed payload and are never inferred, and mowing progress stays
-unconfirmed. Commands need two opt-ins: the integration's operating mode
+docked, because it also occurs away from the dock. Since bridge 0.14.0 and
+integration 0.17.0, the separate DP 108 charger contact from library 0.27.0
+supplies `docked` when reported connected. It shares cloud activity's receipt
+metadata and both 90-second age bounds. Local reports and recent confirmed
+commands retain precedence. A disconnected, missing, invalid, failed or expired
+contact cannot supply `docked`. It never confirms a command or enters local
+telemetry or session observations. `bridge_cloud_charger_status` and
+`bridge_cloud_charger_connected` expose the reading with the existing cloud
+source, receipt, age, error and stale attributes. Charging, error and mowing
+progress still have no confirmed reading. Commands need two opt-ins: the integration's operating mode
 `control` and the bridge's `operating_mode: control` with its required
 `control_stop_route`. The integration reads `routes.control` from the bridge
 state on every poll and exposes start, pause and dock only while it is true.

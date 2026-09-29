@@ -211,6 +211,9 @@ class BridgeCloudStatus:
     error: str | None
     status: str
     activity: str | None
+    # Optional before bridge 0.14.0. The contact shares this cloud receipt's age.
+    charger_status: str = "unavailable"
+    charger_connected: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -374,6 +377,21 @@ def _cloud_status(document: Any) -> BridgeCloudStatus:
         ):
             return invalid
         activity = value
+    charger = document.get("charger", {"state": "unavailable"})
+    charger_status = "invalid"
+    charger_connected: bool | None = None
+    if isinstance(charger, dict):
+        state = charger.get("state")
+        if isinstance(state, str) and state in _CLOUD_STATUS_STATES:
+            if state != "reported":
+                charger_status = state
+            elif (
+                isinstance(charger.get("connected"), bool)
+                and observed_at is not None
+                and age_ms is not None
+            ):
+                charger_status = state
+                charger_connected = charger["connected"]
     return BridgeCloudStatus(
         source="cloud",
         observed_at=observed_at,
@@ -382,6 +400,8 @@ def _cloud_status(document: Any) -> BridgeCloudStatus:
         error=error,
         status=status["state"],
         activity=activity,
+        charger_status=charger_status,
+        charger_connected=charger_connected,
     )
 
 
