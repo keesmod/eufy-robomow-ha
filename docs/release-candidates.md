@@ -39,15 +39,16 @@ At arrival the contact supplied `docked` while mission status still said
 `returning`. Card 0.7.4's control function, evaluated against the captured HA
 states, enabled Start at the station and disabled it after the lawn stop.
 The physical commands used BatteryCam, so Start through HA was not retested
-in that window. A supervised window later that day confirmed Start from
-`docked` and dock through HA, see the
-[Start receipt](https://github.com/keesmod/eufy-robomow-ha/issues/86#issuecomment-5892585855).
+in that window.
 A map cancellation failed during the window with confirmed local cleanup.
 The existing recovery policy then recovered without a restart: one probe
 started at 13:37:04 UTC, confirmed cancellation and cleanup, and HA showed a
 healthy map at 13:38:14 UTC. See the
 [installation receipt](https://github.com/keesmod/eufy-robomow-ha/issues/86#issuecomment-5891236606)
 and [recovery receipt](https://github.com/keesmod/eufy-robomow-ha/issues/86#issuecomment-5891459242).
+A supervised window later that day confirmed Start from
+`docked` and dock through HA, see the
+[Start receipt](https://github.com/keesmod/eufy-robomow-ha/issues/86#issuecomment-5892585855).
 
 The integration archive SHA-256 is
 `7365660a0c2ba25a8a59a96e411dd852550a6aca4939a8ed1223573885c74a85`.
