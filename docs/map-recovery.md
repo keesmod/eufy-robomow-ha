@@ -1,10 +1,11 @@
 # Map recovery after an unconfirmed cancellation
 
 This is the evidence and recovery policy for [#71](https://github.com/keesmod/eufy-robomow-ha/issues/71).
-Bridge/app 0.13.3 adds one automatic read-only probe. Library 0.25.2 and
-integration 0.16.1 stay unchanged. Recovery on the owned E15 was not observed.
-#71 was closed on 2026-09-28 at the owner's request with that observation
-waived, see [closure](#closure-of-71).
+Bridge/app 0.13.3 introduced one automatic read-only probe. #71 was closed on
+2026-09-28 at the owner's request with hardware observation waived, see
+[closure](#closure-of-71). The unchanged policy subsequently recovered from
+one natural unconfirmed cancellation on the owned E15 on 2026-09-29, see
+[observed recovery](#observed-recovery-on-2026-09-29).
 
 On 2026-09-28 the owner explicitly accepted the unknown remote transfer lifetime
 for this recovery rule, including future use of the same rule. The code guarantees
@@ -86,9 +87,10 @@ observed network interruptions and local teardown, but no permitted evidence
 establishes a remote transfer lifetime. Neither the 30-second demand nor the
 65-second provisioning validity requirement is a peer timeout. The delay is
 therefore a conservative operator policy, not proof that the peer has stopped.
-The code guarantees no overlapping local acquisition instances. Remote cleanup
-and successful recovery without a process restart were not observed on the
-E15, see [closure](#closure-of-71).
+The code guarantees no overlapping local acquisition instances. The original
+remote transfer's lifetime remains unknown. One successful recovery without a
+process restart was observed on the E15 on 2026-09-29. This does not establish
+a remote expiry bound or prove recovery for other failure modes.
 
 `maps.recovery` exposes the state and planned probe time. `maps.last_recovery`
 retains the latest probe's timestamps, end reason, publication count and
@@ -138,7 +140,33 @@ not restart and both recovery fields stayed null.
 At 15:52 UTC the owner closed #71 and waived the remaining hardware
 criterion, because recurrence seems unlikely, see the
 [closing comment](https://github.com/keesmod/eufy-robomow-ha/issues/71#issuecomment-5873618452).
-Automatic recovery after a real `mower_map_cancel_unconfirmed` therefore
-remains unobserved. The recovery policy above is unchanged. If the failure
-recurs, reopen #71 with the original failure, the recovery outcome and the
-bridge process start.
+At closure, automatic recovery after a real `mower_map_cancel_unconfirmed`
+remained unobserved. The later recurrence and successful recovery below add
+hardware evidence without changing the accepted policy.
+
+
+## Observed recovery on 2026-09-29
+
+During the app-controlled charger-contact check in #86, on bridge/app 0.14.0,
+library 0.27.0 and integration 0.17.0, a map demand naturally ended with
+unconfirmed cancellation. No fault was injected. The operator made no further
+physical command after returning the mower to its station.
+
+| UTC time | Observation |
+| --- | --- |
+| 13:21:05.789 | Demand ended `cancel_unconfirmed`, cancellation failure `connection_failed`, local cleanup confirmed, one map published |
+| 13:36:05.789 | Displayed earliest probe time after the accepted fifteen-minute wait |
+| 13:37:04.364 | The next normal map request started one fresh probe |
+| 13:37:05.548 | Probe ended with one valid publication, no rejected maps, cancellation and cleanup confirmed |
+| 13:38:14.912 | HA map healthy, mower `docked`, fresh connected charger contact, no unavailable integration entities |
+
+The probe's end was `aborted`, the normal bounded-demand stop after obtaining
+its map, with both confirmations true. `maps.recovery` and `maps.error`
+cleared, and `maps.last_recovery` retained the probe result. The bridge
+container start was `2026-09-29T13:17:16.744879339Z` both before and after the
+observation. It was not restarted. The bounded observer stopped after HA
+reported the healthy map. See the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/86#issuecomment-5891459242).
+
+This is one observed recovery on the owned E15. The original remote transfer's
+expiry and the cause of its connection failure remain unknown. No broader
+model, network-failure or remote-cleanup claim follows from this result.
