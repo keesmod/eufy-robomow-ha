@@ -252,7 +252,7 @@ ends a bridge-mode session. Since integration 0.16.0 it no longer reads as
 docked, because it also occurs away from the dock. Since bridge 0.14.0 and
 integration 0.17.0, the separate DP 108 charger contact from library 0.27.0
 supplies `docked` when reported connected. It shares cloud activity's receipt
-metadata and both 90-second age bounds. Local reports and recent confirmed
+metadata and both 90-second age bounds. Equal or newer local reports and confirmed
 commands retain precedence. A disconnected, missing, invalid, failed or expired
 contact cannot supply `docked`. It never confirms a command or enters local
 telemetry or session observations. `bridge_cloud_charger_status` and

@@ -426,18 +426,23 @@ class EufyMowerCoordinator(DataUpdateCoordinator[dict]):
 
     @property
     def bridge_activity_evidence(self) -> tuple[str, str, datetime | None] | None:
-        """Local evidence first, then bounded cloud activity for display and maps.
+        """Use a newer charger contact, otherwise local evidence then cloud activity.
 
         A recent cloud receipt does not prove that the device recently updated
         the cloud record. Its source stays explicit and cannot confirm commands.
         Both the bridge's age and this process's clock must accept the receipt.
         """
         local = self.bridge_local_activity_evidence
+        cloud = self.fresh_bridge_cloud_status
+        if (
+            cloud is not None
+            and cloud.charger_connected is True
+            and cloud.observed_at is not None
+            and (local is None or (local[2] is not None and local[2] < cloud.observed_at))
+        ):
+            return "docked", "cloud", cloud.observed_at
         if local is not None:
             return local
-        cloud = self.fresh_bridge_cloud_status
-        if cloud is not None and cloud.charger_connected is True:
-            return "docked", "cloud", cloud.observed_at
         return self.bridge_cloud_activity_evidence
 
     @property

@@ -28,7 +28,7 @@ know, but saving the options there drops it.
 - With bridge 0.14.0 and library 0.27.0, a reported connected charger contact
   shows `docked`. The existing card then offers Start in control mode.
 - The contact shares the cloud activity's receipt and both 90-second age
-  bounds. Local reports and recent confirmed commands retain precedence.
+  bounds. Equal or newer local reports and confirmed commands retain precedence.
   A disconnected, absent, invalid, failed or expired contact cannot supply
   `docked`. No state is inferred from battery level or inactivity.
 - The charger status and contact are separate entity attributes. They never

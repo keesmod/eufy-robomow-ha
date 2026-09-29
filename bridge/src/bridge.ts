@@ -290,7 +290,7 @@ export interface MowerStateDocument extends TelemetryFields {
   command: InFlightCommandDocument | null;
   /** The DP 155 work parameters, since bridge 0.11.0. Their own source and time, never merged into the query. */
   work_parameters: WorkParametersDocument;
-  /** Separately sourced cloud DP 107. Never a local report or command confirmation. */
+  /** Cloud mission status and charger contact. Never local reports or command confirmation. */
   cloud_status: CloudStatusDocument;
 }
 

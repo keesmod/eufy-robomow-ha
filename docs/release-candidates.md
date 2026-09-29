@@ -23,7 +23,7 @@ backends and rollback are described in
 
 Integration 0.17.0 and bridge/app 0.14.0 consume the charger contact from
 [library 0.27.0](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.27.0).
-A fresh connected contact shows `docked` unless local activity takes precedence.
+A fresh connected contact shows `docked` unless equal or newer local activity takes precedence.
 Card 0.7.4 already offers Start from that state with the existing control opt-ins.
 The contact remains display evidence. Hardware acceptance is tracked in
 [#86](https://github.com/keesmod/eufy-robomow-ha/issues/86).
