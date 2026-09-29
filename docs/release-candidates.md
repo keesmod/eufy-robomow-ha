@@ -25,8 +25,28 @@ Integration 0.17.0 and bridge/app 0.14.0 consume the charger contact from
 [library 0.27.0](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.27.0).
 A fresh connected contact shows `docked` unless equal or newer local activity takes precedence.
 Card 0.7.4 already offers Start from that state with the existing control opt-ins.
-The contact remains display evidence. Hardware acceptance is tracked in
-[#86](https://github.com/keesmod/eufy-robomow-ha/issues/86).
+The contact remains display evidence. Candidate `4fed5ea` replaced integration
+0.16.3 and bridge/app 0.13.4 on 2026-09-29 after private source and storage
+backups, Supervisor app backup `d1b492f9` and passing configuration checks.
+Readback at 13:18:55 UTC verified exact installed sources, runtime library
+0.27.0, unchanged identities, options and stored sessions, no unavailable
+integration entities and a healthy map. Core and the app were restarted.
+
+The owner's app-controlled E15 window then read connected at the station,
+disconnected while mowing and after a stop on the lawn, and connected again
+on return. HA showed `docked`, `mowing`, `unknown`, `returning` and `docked`.
+At arrival the contact supplied `docked` while mission status still said
+`returning`. Card 0.7.4's control function, evaluated against the captured HA
+states, enabled Start at the station and disabled it after the lawn stop.
+The physical commands used BatteryCam, so Start through HA was not retested.
+A map cancellation failed during the window with confirmed local cleanup.
+The existing recovery wait is recorded in the
+[#86 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/86#issuecomment-5891236606).
+
+The integration archive SHA-256 is
+`7365660a0c2ba25a8a59a96e411dd852550a6aca4939a8ed1223573885c74a85`.
+The app archive SHA-256 is
+`57fa270e010572473f86c1568023702bca7d258d39fa2e335882e2f78b3a79f6`.
 
 Integration 0.16.3 from `db343c7` (#84) records bridge-mode sessions from the
 bridge's bounded cloud readings, see
@@ -409,7 +429,7 @@ Combinations run on the owner's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
-| 0.17.0 | 0.14.0 (0.27.0) | the current candidate, software-verified charger contact, with installation and hardware acceptance pending in #86 |
+| 0.17.0 | 0.14.0 (0.27.0) | the current candidate, exact installed sources and preserved identities/options/session storage. On 2026-09-29 the E15 charger contact passed the station, lawn-stop and return checks through library 0.27.0, bridge and HA. Physical commands used BatteryCam. See the #86 receipt for the separate map recovery observation |
 | 0.16.3 | 0.13.4 (0.25.2) | the previous candidate, whose integration matched file for file after the 2026-09-28 update, with the entry, its entity ids and the stored sessions kept. A task recorded from cloud readings is not yet observed |
 | 0.16.2 | 0.13.4 (0.25.2) | the previous candidate, whose integration matched file for file after the 2026-09-28 update with card 0.7.4, the entry and its entity ids unchanged |
 | 0.16.1 | 0.13.4 (0.25.2) | an earlier candidate, whose app matched file for file after the 2026-09-28 update, with `control_read_back_ms` lowered to 54000 within the enforced budget, identities and integration unchanged and native-map acquisition healthy. Recovery after an unconfirmed cancellation remains unverified, see the #71 waiver |

@@ -35,8 +35,11 @@ the previous version with its options and data.
 Evidence: the release tarball matches its published SHA-256 checksum.
 Software tests cover connected, disconnected, missing, invalid and unavailable
 contacts, caching, failure, expiry and local command gates. The first hardware
-read through this library is tracked in
-[#86](https://github.com/keesmod/eufy-robomow-ha/issues/86).
+read through this library passed on the owned E15 on 2026-09-29: connected
+at the station, disconnected during mowing and a stop on the lawn, connected
+on return. See the
+[#86 receipt](https://github.com/keesmod/eufy-robomow-ha/issues/86#issuecomment-5891236606),
+including the separate map cancellation and recovery observation.
 Upgrade: rebuild the app or container and use integration 0.17.0 to display
 `docked` from the contact. Rollback: restore bridge/app 0.13.4 and its lockfile.
 Existing options and data directories keep their format.
