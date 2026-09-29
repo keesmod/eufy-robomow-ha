@@ -38,7 +38,10 @@ on return. HA showed `docked`, `mowing`, `unknown`, `returning` and `docked`.
 At arrival the contact supplied `docked` while mission status still said
 `returning`. Card 0.7.4's control function, evaluated against the captured HA
 states, enabled Start at the station and disabled it after the lawn stop.
-The physical commands used BatteryCam, so Start through HA was not retested.
+The physical commands used BatteryCam, so Start through HA was not retested
+in that window. A supervised window later that day confirmed Start from
+`docked` and dock through HA, see the
+[Start receipt](https://github.com/keesmod/eufy-robomow-ha/issues/86#issuecomment-5892585855).
 A map cancellation failed during the window with confirmed local cleanup.
 The existing recovery policy then recovered without a restart: one probe
 started at 13:37:04 UTC, confirmed cancellation and cleanup, and HA showed a
@@ -306,9 +309,10 @@ Integration with the bridge backend:
   (bridge 0.13.1 on library 0.25.2, 2026-09-27).
 - Start from `docked` through the service the card's Start button sends,
   confirmed by the bridge's fresh report 1.2 seconds after the call, and dock,
-  confirmed at the arrival's map save, both checked in the eufy app. The
-  charger contact cleared after the start and returned after the arrival, and
-  the session was recorded without an observation gap (0.17.0 with bridge
+  confirmed at the map save about 10 seconds before the charger contact
+  returned, both checked in the eufy app. The charger contact cleared after
+  the start and returned at the station, and the session was recorded
+  without an observation gap (0.17.0 with bridge
   0.14.0 on library 0.27.0, 2026-09-29,
   [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/86#issuecomment-5892585855)).
 - No command was repeated after an uncertain answer, a bridge restart or a
@@ -409,8 +413,9 @@ below retain their stated scope.
 - Edge distance, pad direction and path distance in bridge mode, read only
   there since 0.15.0.
 - The standalone container image outside CI.
-- The app on aarch64. The app declares it, but map acquisition and control
-  have run only on the owner's amd64 host.
+- The app on aarch64. The app declares it and an early bridge image passed an
+  offline health check on arm64 in #23, but CI builds on amd64 only and map
+  acquisition and control have run only on the owner's amd64 host.
 - The opt-in planning package. Automatic mowing stays off.
 - Any model other than the E15. E18 support is not claimed.
 
