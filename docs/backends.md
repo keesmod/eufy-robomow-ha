@@ -10,7 +10,7 @@ on a switch. The switch itself and its rollback are described in
 | | `local` (default) | `bridge` |
 | --- | --- | --- |
 | Reads the mower | Home Assistant over the Tuya local protocol, every 10 s | the [mower bridge](../bridge/README.md), whose typed state Home Assistant reads every 10 s |
-| Cloud access | Home Assistant's own cloud client, settings every 5 min | none from Home Assistant, the bridge reads the cloud |
+| Cloud access | Home Assistant's own cloud client, settings every 5 min in daylight | none from Home Assistant, the bridge reads the cloud |
 | Commands in `control` mode | start, pause, resume and dock | start, pause, resume and dock, also behind the bridge's own `control` opt-in |
 | Setting writes in `control` mode | every setting entity | Cut Height, Volume, Smart No-Go Suggestions, Mow Yellow Grass, Travel Speed and Blade Speed, behind the bridge's `settings_mode: write` |
 | Session distance, area and progress | from the local telemetry | unknown |
@@ -64,6 +64,12 @@ poll, and a fresh confirmed `mowing` payload confirms it with evidence
 `cloud_mowing_reported`. This is the only command the cloud confirms. During
 the drive home the E15 ignores a pause, so the local backend refuses one while
 DP 1 is false, before any write.
+
+A dock is confirmed by DP 118 between 5 and 99, with evidence
+`returning_reported`, or by DP 1 turning false, with evidence `task_inactive`.
+Neither proves arrival at the dock. A command that stays unconfirmed ends as
+`timeout` after 35 seconds. It may still execute, so check the mower before
+retrying. The integration never repeats it.
 
 ## Bridge backend
 
@@ -156,15 +162,18 @@ three kinds of evidence:
    failed or expired contact never supplies `docked`.
 2. Otherwise the newest local evidence: the reported status of the last poll,
    or the activity a confirmed command reflected, for at most 30 minutes.
-   That is `mowing` after start or resume, `paused` after pause and `docked`
-   after a confirmed dock. A newer reported poll replaces a command's activity.
-   An uncertain command or a `mower_command_already_set` refusal clears it.
+   That is `mowing` after start or resume, `paused` after pause, `returning`
+   while a dock runs and `docked` after a confirmed dock. A newer reported
+   poll replaces a command's activity. An uncertain command clears only
+   evidence older than its request, so a report the command itself produced
+   stays. A `mower_command_already_set` refusal clears it.
 3. Otherwise a fresh cloud activity reading, reported and within both
    90-second age bounds. It is shown but never confirms a command or changes
    which command is sent.
 
-Without any of these the activity is unknown, which on the bridge backend is
-the normal state of a resting mower. Mission status `idle` does not mean
+Without any of these the activity is unknown. That is normal for a mower
+resting away from the station, and for any resting mower with a bridge older
+than 0.14.0. Mission status `idle` does not mean
 `docked`, because the payload also occurs while an inactive mower is away from
 the dock. Nothing is inferred from battery level, age, absence or inactivity.
 
@@ -183,8 +192,9 @@ only.
 ### Session history
 
 Session history observes reported activities, the activity a confirmed command
-reflected, and each new cloud reading the entity accepts for display. The
-bridge refreshes that reading about every 30 seconds. It never observes a
+reflected, and each new cloud activity reading that is reported and within
+both 90-second age bounds. The bridge refreshes that reading about every 30
+seconds. The charger contact is never observed. Session history never observes a
 missing, invalid or unconfirmed status, age or absence. A confirmed dock ends
 the session. A differing cloud reading received from 90 seconds before to 120
 seconds after local evidence is not observed, because the cloud record can lag

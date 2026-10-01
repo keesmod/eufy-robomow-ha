@@ -22,10 +22,11 @@ opt in, controls the mower with confirmed commands.
 - **Local status** every 10 seconds over the Tuya local protocol, with no
   manual key extraction. Sign-in discovers the mower and its local key.
 - **Cloud settings** such as edge distance, path angle and speeds, read every
-  5 minutes and written back through the Tuya mobile API.
+  5 minutes in daylight and written back through the Tuya mobile API.
 - **Safe control.** Start, pause, resume, dock and setting writes appear only
   after an explicit opt-in. Each command is sent once and ends as confirmed,
-  rejected, failed or uncertain. An uncertain command is never repeated
+  rejected or failed, or stays unconfirmed: `timeout` on the local backend and
+  `uncertain` on the bridge. An unconfirmed command is never repeated
   automatically.
 - **Live read-only map** with boundary, no-go zones, obstacles, pathways,
   mowing lanes and the mower position, updated every two seconds while mowing.
@@ -58,6 +59,7 @@ opt in, controls the mower with confirmed commands.
 | Child Protection | `switch` | Child and pet protection mode |
 | Smart No-Go Suggestions | `switch` | AI-assisted no-go zone suggestions |
 | Mow Yellow Grass | `switch` | Allow mowing on dry or yellow grass |
+| Real Lawn Map | `switch` | The app's real lawn map option, disabled by default |
 | Map | `image` | Optional read-only map, see [Map](#map) |
 
 Edge Distance, Pad Direction, the speeds and Path Distance are cloud settings
@@ -111,8 +113,9 @@ Configure**:
 In `observe_only` the mower entity reports state, but physical commands and
 setting writes are disabled. Entries upgraded from the original integration
 without an operating mode also start here. Switch to `control` only after
-supervised read-only validation. The mower's own rain and child protections
-are never bypassed.
+supervised read-only validation. In `control` the Stop on Rain and Child
+Protection switches become writable. Never use them to bypass the mower's
+safety protections, see [SECURITY.md](SECURITY.md).
 
 ### Mower backend
 
@@ -150,14 +153,15 @@ Set `view` to `overview`, `history`, `planning` or `settings` to show one
 section, or omit it for the combined view. The card follows the active Home
 Assistant theme and supports map zoom and pan, battery and session telemetry,
 settings, and start or resume, pause and return. It shows pending, confirmed,
-failed and uncertain results. Start asks for confirmation. Unavailable or stale
-telemetry, an unknown activity and `observe_only` disable the controls, and
-pause is offered only while mowing.
+rejected, failed and unconfirmed results. Start asks for confirmation. An
+inactive task after Return is not proof that the mower reached the dock.
+Unavailable or stale telemetry, an unknown activity and `observe_only` disable
+the controls, and pause is offered only while mowing.
 
 Fifty observed session summaries are stored privately in Home Assistant, and
 the card shows the latest twenty. Pauses and telemetry gaps stay visible, and a
 restart never invents mowing time. Area stays in raw units until its scale is
-validated.
+validated. Existing lifetime counters are not reconstructed as sessions.
 
 ## Rain-aware planning
 
@@ -172,8 +176,9 @@ it started, without retries.
 It expects the documented Buienalarm precipitation array and separate
 irrigation valve, active-session, planned-session and start-time entities.
 Replace every `example_*` entity with your own. Missing or stale sources block
-automatic starts, and automatic mowing starts switched off. Schedules in the
-Eufy app run independently of this package.
+automatic starts, and automatic mowing starts switched off. Configure it and
+supervise its validation before switching it on. Schedules in the Eufy app run
+independently of this package.
 
 ## Mower bridge
 
@@ -218,8 +223,10 @@ candidate. No image is published. See the
 - **Entities unavailable**: check the IP address and that the mower is on
   Wi-Fi, not cellular only. In bridge mode, check that the bridge is reachable
   and reports fresh telemetry.
-- **Cloud settings not updating**: cloud data refreshes every 5 minutes, so a
-  change in the Eufy app appears after the next refresh.
+- **Cloud settings not updating**: cloud data refreshes every 5 minutes in
+  daylight, so a change in the Eufy app appears after the next refresh. At
+  night the regular refresh pauses and only activity checks reach the cloud.
+  After repeated failures the refresh backs off up to one hour.
 - **Debug logging**:
 
 ```yaml
@@ -234,6 +241,10 @@ logger:
 Replace the installed `custom_components/eufy_robomow` folder, run the
 configuration check and restart Home Assistant. Entity unique ids never change
 between versions.
+
+Runtime dependencies are pinned to the versions validated with Home Assistant
+2026.7.1 and the E15's Tuya 3.5 transport. TinyTuya stays at 1.20.0 until
+another version passes the same local protocol tests.
 
 - [CHANGELOG.md](CHANGELOG.md) lists every integration version with its
   evidence, upgrade and rollback.
