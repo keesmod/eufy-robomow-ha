@@ -65,9 +65,9 @@ poll, and a fresh confirmed `mowing` payload confirms it with evidence
 the drive home the E15 ignores a pause, so the local backend refuses one while
 DP 1 is false, before any write.
 
-A dock is confirmed by DP 118 between 5 and 99, with evidence
-`returning_reported`, or by DP 1 turning false, with evidence `task_inactive`.
-Neither proves arrival at the dock. A command that stays unconfirmed ends as
+A dock is confirmed when the first poll after the write shows DP 1 true with
+DP 118 between 5 and 99, with evidence `returning_reported`, or DP 1 false,
+with evidence `task_inactive`. Neither proves arrival at the dock. A command that stays unconfirmed ends as
 `timeout` after 35 seconds. It may still execute, so check the mower before
 retrying. The integration never repeats it.
 

@@ -113,9 +113,9 @@ Configure**:
 In `observe_only` the mower entity reports state, but physical commands and
 setting writes are disabled. Entries upgraded from the original integration
 without an operating mode also start here. Switch to `control` only after
-supervised read-only validation. In `control` the Stop on Rain and Child
-Protection switches become writable. Never use them to bypass the mower's
-safety protections, see [SECURITY.md](SECURITY.md).
+supervised read-only validation. In `control` on the local backend the Stop
+on Rain and Child Protection switches become writable. Never use them to
+bypass the mower's safety protections, see [SECURITY.md](SECURITY.md).
 
 ### Mower backend
 
@@ -243,7 +243,7 @@ configuration check and restart Home Assistant. Entity unique ids never change
 between versions.
 
 Runtime dependencies are pinned to the versions validated with Home Assistant
-2026.7.1 and the E15's Tuya 3.5 transport. TinyTuya stays at 1.20.0 until
+2026.7.2 and the E15's Tuya 3.5 transport. TinyTuya stays at 1.20.0 until
 another version passes the same local protocol tests.
 
 - [CHANGELOG.md](CHANGELOG.md) lists every integration version with its
