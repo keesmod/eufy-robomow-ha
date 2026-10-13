@@ -18,12 +18,17 @@ backends and rollback are described in
 | Component | Version | Pinned inputs |
 | --- | --- | --- |
 | Integration `eufy_robomow` | 0.17.0 | `requests` 2.34.2, `tinytuya` 1.20.0, dashboard card 0.7.4 |
-| Mower bridge, container image | 0.14.0 | `@keesmod/eufy-mega-client` 0.27.0 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
-| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.14.0 | the same inputs, built by the Supervisor on the host |
+| Mower bridge, container image | 0.14.1 | `@keesmod/eufy-mega-client` 0.27.0 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
+| Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.14.1 | the same inputs, built by the Supervisor on the host |
 
 The integration's runtime dependencies are pinned to the versions validated
 with Home Assistant 2026.7.2 and the E15's Tuya 3.5 transport. TinyTuya stays
 at 1.20.0 until another version passes the same local protocol tests.
+
+Bridge/app 0.14.1 differs from 0.14.0 only by the locked `http-cache-semantics`,
+4.3.0 instead of 4.2.0, for
+[GHSA-ch52-4w7c-c8xp](https://github.com/advisories/GHSA-ch52-4w7c-c8xp). The
+evidence below was recorded on 0.14.0.
 
 Integration 0.17.0 and bridge/app 0.14.0 consume the charger contact from
 [library 0.27.0](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.27.0).

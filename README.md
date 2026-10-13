@@ -227,7 +227,7 @@ card version changes, update the `?v=` part of the dashboard resource.
 - Steps and rollback: [integration](docs/migration-and-rollback.md#upgrade-and-rollback-of-the-integration),
   [bridge app](docs/migration-and-rollback.md#upgrade-and-rollback-of-the-bridge-app)
   and [Docker bridge](docs/bridge-deployment.md#upgrade).
-- Current versions: integration 0.17.0 with card 0.7.4, bridge and app 0.14.0
+- Current versions: integration 0.17.0 with card 0.7.4, bridge and app 0.14.1
   on library 0.27.0. See
   [Release candidates](docs/release-candidates.md#current-candidate).
 - Per-version notes: [CHANGELOG.md](CHANGELOG.md) and
