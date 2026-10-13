@@ -33,8 +33,10 @@ library passes no response cache to `got`, so that logic is not in use. On
 2026-10-13 bridge/app 0.14.1 replaced 0.14.0 on the maintainer's installation
 after Supervisor app backup `d0cb0f14`, with the mower docked and automatic
 mowing off. Readback matched the 17 installed app files by SHA-256 against
-`ha_app` of the PR #93 head `c9864b8`, which the merge carries unchanged. The
-bridge reported 0.14.1 running with library 0.27.0 connected and a fresh map.
+`ha_app` at commit `c9864b8` of
+[PR #93](https://github.com/keesmod/eufy-robomow-ha/pull/93), the head at the
+time of the update. The merge carries that `ha_app` unchanged. The bridge
+reported 0.14.1 running with library 0.27.0 connected and a fresh map.
 Options, the config entry and the entity registry count were unchanged, and no
 integration entity was unavailable. The evidence below was recorded on 0.14.0.
 
