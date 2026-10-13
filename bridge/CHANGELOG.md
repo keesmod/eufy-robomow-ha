@@ -21,6 +21,29 @@ files, because the mower id the integration stores depends on them. A rollback
 of the app restores the app backup that the update created, which brings back
 the previous version with its options and data.
 
+## 0.14.1 - 2026-10-13
+
+### Lock http-cache-semantics 4.3.0
+
+- The bridge and app lockfiles resolve `http-cache-semantics` 4.3.0 instead of
+  4.2.0. It reaches the bridge through library 0.27.0, `got` and
+  `cacheable-request`.
+  [GHSA-ch52-4w7c-c8xp](https://github.com/advisories/GHSA-ch52-4w7c-c8xp)
+  lists versions up to 4.2.0 and made the bridge dependency audit fail.
+  4.3.0 is outside that range and clears the audit. Its `max-stale` handling
+  is unchanged, and the upstream maintainer disputes the report.
+- The library passes no response cache to `got`, so that cache logic is not
+  in use in the bridge. No other package, library, route, option or behavior
+  changes. The library pin stays 0.27.0.
+
+Evidence: software-verified. The 4.3.0 tarball from the npm registry matches
+the locked sha512 integrity. The bridge dependency audit, the bridge tests and
+the container and app smoke tests pass in CI.
+
+Upgrade: install the matching app with a backup. Options, data, the session
+and the mower id stay unchanged. The integration needs no update.
+Rollback: restore the 0.14.0 app backup.
+
 ## 0.14.0 - 2026-09-29
 
 ### Serve the cloud charger contact

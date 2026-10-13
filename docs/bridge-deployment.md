@@ -3,7 +3,7 @@
 How to run the dedicated mower bridge from `bridge/` as a container or as a
 local Home Assistant app, and how to upgrade, restart, back up and roll it
 back. Everything here is local: no image is published and no app repository is
-listed. Version 0.14.0 serves state routes with the typed settings and, only
+listed. Version 0.14.1 serves state routes with the typed settings and, only
 behind the explicit `operating_mode: control` opt-in with a stop route, the
 start, pause, resume and stop routes. The separate `settings_mode: write`
 opt-in enables the settings route for mow height, volume, smart no-go zones,
@@ -53,7 +53,7 @@ in `ha_app/` (run `python3 scripts/prepare_ha_app.py`).
 ## Install with Docker
 
 ```bash
-docker build -t eufy-mower-bridge:0.14.0 ./bridge
+docker build -t eufy-mower-bridge:0.14.1 ./bridge
 ```
 
 ```bash
@@ -65,7 +65,7 @@ docker run -d --name eufy-mower-bridge --restart unless-stopped \
   -e EUFY_MOWER_PASSWORD=<eufy account password> \
   -e EUFY_MOWER_COUNTRY=NL \
   -e EUFY_MOWER_HOST=<mower LAN address> \
-  eufy-mower-bridge:0.14.0
+  eufy-mower-bridge:0.14.1
 ```
 
 Bind the published port to an address that only Home Assistant can reach, or
@@ -148,7 +148,7 @@ docker run -d --name eufy-mower-bridge --restart unless-stopped \
   -e EUFY_MOWER_PASSWORD=<eufy account password> \
   -e EUFY_MOWER_COUNTRY=NL \
   -e EUFY_MOWER_HOST=<mower LAN address> \
-  eufy-mower-bridge:0.14.0
+  eufy-mower-bridge:0.14.1
 ```
 
 Mount the directory rather than the file, so a file replaced by renaming
