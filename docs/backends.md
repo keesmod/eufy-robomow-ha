@@ -1,7 +1,7 @@
 # Mower backends
 
 The integration has two mower backends and exactly one of them owns the mower.
-Choose it under **Settings → Devices & Services → Eufy Robomow → Configure →
+Choose it under **Settings → Devices & services → Eufy Robomow → Configure →
 Mower backend**. Entity unique ids are the same for both backends, so switching
 back and forth never duplicates or renames entities, and no command is replayed
 on a switch. The switch itself and its rollback are described in
@@ -17,6 +17,20 @@ on a switch. The switch itself and its rollback are described in
 
 Existing entries keep the `local` backend until you change it. In
 `observe_only` mode neither backend exposes a command or a setting write.
+
+## Session history
+
+Home Assistant stores the latest 50 observed sessions privately. The Mowing
+Session sensor's `recent_sessions` attribute and the
+[dashboard card](../README.md#dashboard-card) show the latest 20. When two
+observations are more than 45 seconds apart, the time between them counts as
+an observation gap. A restart also marks the running session with a gap, so
+the history never invents mowing time.
+Lifetime counters are not rebuilt into sessions, so a new installation starts
+with an empty history. Area, distance and progress come from the local
+telemetry, and area stays in raw units because its scale is unconfirmed.
+[Sessions in bridge mode](#sessions-in-bridge-mode) describes what the bridge
+backend observes.
 
 ## Local backend
 
@@ -41,7 +55,7 @@ it, and `robot_power_mode` its power mode: `running`, `standby` or `hibernate`.
 
 The local status does not show the drive home either. After a stop or at the
 end of a task DP 1 turns false while the mower drives to the dock, 25 to 60
-seconds on the owned E15. At the arrival DP 1 is true again for about eighteen
+seconds on the maintainer's E15. At the arrival DP 1 is true again for about eighteen
 seconds while the map is saved and DP 118 rises from 1 to 100. When DP 1 turns
 false after a mowing, paused or returning reading, the integration asks the
 cloud at once and at every local poll for two minutes, also at night, and after
@@ -99,8 +113,8 @@ its state. The integration reads that state on every poll, so the mower entity
 exposes start, pause and dock only while both hold. It exposes nothing in
 `observe_only`, where every write still raises before any transport.
 
-Dock goes through the bridge's `stop` route. On the owned E15 firmware a stop
-over DP 1 false ends the task and the mower returns to the dock by itself,
+Dock goes through the bridge's `stop` route. On the maintainer's E15 firmware a
+stop over DP 1 false ends the task and the mower returns to the dock by itself,
 while the library's return over DP 3 is ignored from paused and from the
 stopped task. So there is no return route and no stop in place. A confirmed
 dock carries the evidence `bridge:map_saving`, the map-saving payload the
@@ -189,7 +203,7 @@ The charger contact needs bridge 0.14.0 or later, and the cloud activity needs
 bridge 0.13.0 or later. An older bridge keeps the local and command evidence
 only.
 
-### Session history
+### Sessions in bridge mode
 
 Session history observes reported activities, the activity a confirmed command
 reflected, and each new cloud activity reading that is reported and within

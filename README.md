@@ -2,104 +2,92 @@
 
 [![CI](https://github.com/keesmod/eufy-robomow-ha/actions/workflows/ci.yml/badge.svg)](https://github.com/keesmod/eufy-robomow-ha/actions/workflows/ci.yml)
 
-A Home Assistant custom integration for the **Eufy E15** robotic lawn mower,
-with an optional dedicated mower bridge. It reads the mower over your local
-network, pulls the cloud-managed settings from your Eufy account and, once you
-opt in, controls the mower with confirmed commands.
+A Home Assistant custom integration for the **Eufy E15** robotic lawn mower.
+By default Home Assistant reads the mower over the Tuya local protocol and its
+cloud settings through your Eufy account.
 
 > [!IMPORTANT]
-> **Private alpha.** Only the Eufy E15 is supported. The design anticipates the
-> E18, but E18 support is not hardware-validated. Nothing is published as a
-> release or through HACS. New installations start read only (`observe_only`).
+> **Private alpha.** The repository is public, but the integration is still
+> being validated. Only the Eufy E15 is supported. No other model, including
+> the E18, is claimed. Nothing is published as a release, a tag or through
+> HACS.
 
 <p align="center">
   <img src="docs/map-preview.svg" alt="Synthetic Eufy E15 map preview showing the boundary, live mowing coverage, mower, charging station, pathway, obstacle and no-go zone" width="480">
 </p>
 <p align="center"><sub>Map preview with synthetic geometry. No private lawn map or device data is stored in this repository.</sub></p>
 
-## Features
+## What you get
 
-- **Local status** every 10 seconds over the Tuya local protocol, with no
-  manual key extraction. Sign-in discovers the mower and its local key.
-- **Cloud settings** such as edge distance, path angle and speeds, read every
-  5 minutes in daylight and written back through the Tuya mobile API.
-- **Safe control.** Start, pause, resume, dock and setting writes appear only
-  after an explicit opt-in. Each command is sent once and ends as confirmed,
-  rejected or failed, or stays unconfirmed: `timeout` on the local backend and
-  `uncertain` on the bridge. An unconfirmed command is never repeated
-  automatically.
-- **Live read-only map** with boundary, no-go zones, obstacles, pathways,
-  mowing lanes and the mower position, updated every two seconds while mowing.
-- **Dashboard card and session history** with fifty observed sessions stored
-  privately in Home Assistant.
-- **Optional rain-aware planning** as a Home Assistant package.
-- **Optional mower bridge**, a dedicated Node 24 service that can own the mower
-  instead of Home Assistant.
+- [Entities](#entities) for the mower's activity, battery, session progress
+  and connection, with the latest mowing sessions.
+- Start, pause, resume and dock, and the mower settings, only after an
+  explicit opt-in to `control`. See the [safety model](#safety-model).
+- A read-only [map](#map), which needs the mower bridge or a compatible map
+  service.
+- A [dashboard card](#dashboard-card) with Dutch labels.
+- An experimental, opt-in [rain-aware planning](#rain-aware-planning) package.
+- An optional [mower bridge](#mower-bridge) that owns the mower instead of
+  Home Assistant.
 
-## Entities
+## Safety model
 
-| Entity | Type | Description |
-|--------|------|-------------|
-| Mower | `lawn_mower` | Activity state, and start, pause and dock after control is enabled |
-| Battery | `sensor` | Battery level (%) |
-| Mowed Area | `sensor` | Area covered in the current or last session |
-| Mowing Progress | `sensor` | Session completion (%) from the DP 113 telemetry |
-| Return Progress | `sensor` | DP 118, the map-save progress (%) at the dock arrival and after a Stop |
-| Session Distance | `sensor` | Distance travelled in the current session (m) |
-| Network | `sensor` | Wi-Fi or cellular connection type |
-| Signal Strength | `sensor` | Wi-Fi signal strength (%) as the mower declares it |
-| Cut Height | `number` | Blade height 25 to 75 mm in 5 mm steps |
-| Volume | `number` | Speaker volume 0 to 100 % |
-| Edge Distance | `number` | −15 to +15 cm, how far inside or outside the border wire the mower cuts |
-| Pad Direction | `number` | Mowing path angle 0 to 359° |
-| Travel Speed | `select` | Driving speed: slow, normal or fast |
-| Blade Speed | `select` | Blade motor speed: slow, normal or fast |
-| Path Distance | `select` | Lane spacing: 8, 10 or 12 cm |
-| Stop on Rain | `switch` | Pause mowing when rain is detected |
-| Child Protection | `switch` | Child and pet protection mode |
-| Smart No-Go Suggestions | `switch` | AI-assisted no-go zone suggestions |
-| Mow Yellow Grass | `switch` | Allow mowing on dry or yellow grass |
-| Real Lawn Map | `switch` | The app's real lawn map option, disabled by default |
-| Map | `image` | Optional read-only map, see [Map](#map) |
+- New entries start in `observe_only`, and so do entries created by the
+  [original integration](#origin-and-license). The mower entity reports state
+  but offers no commands, and no setting entities are created.
+- `control` is an explicit opt-in in the integration options. The
+  [mower bridge](#mower-bridge) needs its own opt-ins as well.
+- Each command is sent once. It ends confirmed, rejected or failed, or stays
+  unconfirmed, for example after a timeout or when a later pause or dock
+  replaces it. An unconfirmed command may still execute, so check the mower
+  before you try again. On the local backend a confirmed dock does not prove
+  that the mower reached the dock. See
+  [Mower backends](docs/backends.md#commands).
+- Nothing is repeated automatically or replayed after a reload, a restart or a
+  backend switch.
+- Enable `control` only after supervised read-only validation. Use it only in
+  daylight, with a clear lawn and a known way to stop the mower.
+- Never use the integration to bypass the mower's safety protections, such as
+  Child Protection or Stop on Rain Detection.
 
-Edge Distance, Pad Direction, the speeds and Path Distance are cloud settings
-and need your Eufy account credentials. Some entities, such as generic raw DP
-sensors and map coverage, are disabled by default. Enable them in Home
-Assistant to explore unconfirmed data points.
+[SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md#safety-and-privacy)
+have the full safety rules.
 
 ## Requirements
 
-- Home Assistant **2026.7** or newer.
-- An Eufy E15 reachable from Home Assistant on the local network.
-- The Eufy account of the mower, with the email and password you use in the
-  Eufy app.
-- Optional: the [mower bridge](#mower-bridge) as a container or a local Home
-  Assistant app, and a map source for the map.
+- Home Assistant 2026.7.2 or newer, the version CI tests. The maintainer's
+  installation was tested on 2026.9.3.
+- A Eufy E15 on Wi-Fi, reachable from Home Assistant on the local network.
+- The email and password of the Eufy account that owns the mower.
+- Optional, for the map: the [mower bridge](#mower-bridge) with
+  [map provisioning](docs/bridge-deployment.md#map-provisioning-optional), or
+  your own compatible HTTPS map service.
 
 ## Installation
 
 1. Copy `custom_components/eufy_robomow/` into the `custom_components/` folder
-   of your Home Assistant configuration.
+   of your Home Assistant configuration. Take it from `main`, or build and
+   verify a candidate as described in
+   [Release candidates](docs/release-candidates.md#build-and-verify).
 2. Restart Home Assistant.
 
-HACS packaging is deferred until the integration has passed protocol, safety
-and reliability validation and its licensing is resolved.
+HACS installation is not offered or supported. HACS packaging waits for
+protocol, safety and reliability validation and for the
+[license question](#origin-and-license).
 
 ## Configuration
 
-Go to **Settings → Devices & Services → Add Integration → Eufy Robomow**.
-
-1. **Sign in** with your Eufy account. The integration discovers your devices
-   and fetches their local keys.
-2. **Select the mower** and enter its local IP address. Your router's DHCP
-   table or the device info in the Eufy app shows it.
+Go to **Settings → Devices & services → Add integration → Eufy Robomow** and
+sign in with your Eufy account. The integration discovers your devices and
+fetches their local keys. Select the mower and enter its local IP address,
+which your router's DHCP table shows.
 
 > [!WARNING]
-> The cloud client stores the Eufy account password in the Home Assistant
-> config entry so it can renew sessions. Restrict access to Home Assistant
-> backups and `.storage`.
+> The config entry stores your Eufy email and password, the mower's local key
+> and, with the bridge backend, the bridge token. Restrict access to Home
+> Assistant backups and `.storage`.
 
-Later changes go through **Settings → Devices & Services → Eufy Robomow →
+Later changes go through **Settings → Devices & services → Eufy Robomow →
 Configure**:
 
 | Option | Choices | Default |
@@ -108,150 +96,176 @@ Configure**:
 | Mower backend | `local` or `bridge` | `local` |
 | Map source | `external` or `bridge` | `external` |
 
-### Operating mode
-
-In `observe_only` the mower entity reports state, but physical commands and
-setting writes are disabled. Entries upgraded from the original integration
-without an operating mode also start here. Switch to `control` only after
-supervised read-only validation. In `control` on the local backend the Stop
-on Rain and Child Protection switches become writable. Never use them to
-bypass the mower's safety protections, see [SECURITY.md](SECURITY.md).
+Read the [safety model](#safety-model) before you switch to `control`.
 
 ### Mower backend
 
-Exactly one backend owns the mower.
+Exactly one of the two [mower backends](docs/backends.md) owns the mower:
 
-- **local**: Home Assistant polls the mower over the Tuya local protocol and,
-  with account credentials, polls the cloud settings and the DP 107 mission
-  status that shows the drive home and a resting mower.
-- **bridge**: Home Assistant reads typed state from the
-  [mower bridge](#mower-bridge) and opens no mower or cloud connection of its
-  own. Commands and setting writes need the bridge's own opt-ins as well.
-
-[Mower backends](docs/backends.md) describes how each backend derives the
-activity, confirms commands, handles settings and records sessions.
+- **local**: Home Assistant reads the mower every 10 seconds over the Tuya
+  local protocol, and the cloud settings every 5 minutes in daylight with its
+  own Eufy client.
+- **bridge**: Home Assistant reads the mower state from the
+  [mower bridge](#mower-bridge) at the URL and with the token you enter. It
+  opens no mower or cloud connection of its own.
 
 ### Map
 
-E15 maps travel over a separate P2P transport that this integration does not
-bundle. The map entity therefore reads a validated, read-only map bundle from
-either an **external** HTTPS map source, such as the Android map helper, or the
-**bridge** map route. Home Assistant validates every bundle, keeps the last
-good map when an acquisition fails, and renders it locally as a script-free
-SVG. Map bundles contain private lawn geometry, so never commit them or attach
-them to issues. See [Map sources](docs/map-sources.md).
+The map entity reads a validated, read-only map bundle from one of two sources:
+
+- **external**: a compatible HTTPS map service at the URL you enter, with an
+  optional certificate pin. This project does not include such a service.
+  Without a URL no map entity is created, so a default setup shows no map.
+- **bridge**: the experimental map route of the [mower bridge](#mower-bridge).
+  It needs the bridge backend and
+  [map provisioning](docs/bridge-deployment.md#map-provisioning-optional).
+
+The map is display-only and never drives mower control. It refreshes every two
+seconds while a task runs, and every one to five minutes otherwise. Home
+Assistant keeps the last good map when an acquisition fails. Map bundles
+contain private lawn geometry, so never commit them or attach them to issues.
+See [Map sources](docs/map-sources.md).
+
+## Entities
+
+DP numbers refer to the mower's Tuya data points. Created for every entry:
+
+| Entity | Type | Description |
+| --- | --- | --- |
+| Mower | `lawn_mower` | Activity, and start or resume, pause and dock in `control` |
+| Battery | `sensor` | Battery level (%) |
+| Mowing Progress | `sensor` | Session completion (%) from DP 113 |
+| Session Distance | `sensor` | Distance travelled in the current session (m) from DP 113 |
+| Mowed Area | `sensor` | Mowed area counter from DP 126, in raw units with an unconfirmed scale |
+| Total Mow Time | `sensor` | Total mowing time (h) from DP 125 |
+| Return Progress | `sensor` | Map-save progress (%) from DP 118, at the dock arrival and after a stop |
+| Network | `sensor` | Wi-Fi or cellular connection type |
+| Signal Strength | `sensor` | Wi-Fi signal strength (%) as the mower declares it |
+| Live View State | `sensor` | Live view camera state code from DP 114 |
+| Mowing Session | `sensor` | Phase of the current session, with the latest 20 [sessions](docs/backends.md#session-history) as attributes |
+
+A configured [map source](#map) adds the read-only Map (`image`).
+
+Created only in `control`:
+
+| Entity | Type | Description |
+| --- | --- | --- |
+| Cut Height | `number` | Blade height 25 to 75 mm in 5 mm steps |
+| Volume | `number` | Speaker volume 0 to 100 % |
+| Edge Distance | `number` | −15 to +15 cm, inside or outside the boundary |
+| Pad Direction | `number` | Mowing path angle 0 to 359° |
+| Path Distance | `select` | Lane spacing 8, 10 or 12 cm |
+| Travel Speed | `select` | Driving speed: slow, normal or fast |
+| Blade Speed | `select` | Blade motor speed: slow, normal or fast |
+| Stop on Rain Detection | `switch` | The mower's rain stop |
+| Child Protection | `switch` | Child and pet protection mode |
+| Smart No-Go Suggestions | `switch` | The app's suggested no-go zones |
+| Mow Yellow Grass | `switch` | Allow mowing on dry or yellow grass |
+| Real Lawn Map | `switch` | The app's real lawn map option, disabled by default |
+
+- Edge Distance, Pad Direction, Path Distance and the two speeds are cloud
+  settings (DP 155). The local backend reads them with the stored credentials.
+- On the bridge backend only the mower entity, Battery, Network, Signal
+  Strength, Mowing Session, the map and the setting entities have data, and
+  only some settings are writable. See
+  [Mower backends](docs/backends.md#settings).
+- Map Coverage and the generic `DP<n>` sensors for unmapped data points are
+  disabled by default.
 
 ## Dashboard card
 
-1. Add `/eufy_robomow/eufy-mower-card.js?v=0.7.4` as a JavaScript module under
-   **Settings → Dashboards → Resources**. Advanced mode may be needed.
-2. Create a dashboard from [`examples/dashboard.yaml`](examples/dashboard.yaml)
-   and replace the entity ids with your own. It has four tabs: mower, history,
-   planning and settings. The card also works in an existing dashboard.
+1. Enable Advanced mode in your user profile. Then add
+   `/eufy_robomow/eufy-mower-card.js?v=0.7.4` as a JavaScript module under
+   **Settings → Dashboards → ⋮ → Resources**. The integration serves the file
+   but does not add the resource.
+2. Create a dashboard from [`examples/dashboard.yaml`](examples/dashboard.yaml),
+   or copy its `custom:eufy-mower-card` cards into an existing one, and
+   replace the entity ids with your own.
 
-Set `view` to `overview`, `history`, `planning` or `settings` to show one
-section, or omit it for the combined view. The card follows the active Home
-Assistant theme and supports map zoom and pan, battery and session telemetry,
-settings, and start or resume, pause and return. It shows pending, confirmed,
-rejected, failed and unconfirmed results. Start asks for confirmation. An
-inactive task after Return is not proof that the mower reached the dock.
-Unavailable or stale telemetry, an unknown activity and `observe_only` disable
-the controls, and pause is offered only while mowing.
-
-Fifty observed session summaries are stored privately in Home Assistant, and
-the card shows the latest twenty. Pauses and telemetry gaps stay visible, and a
-restart never invents mowing time. Area stays in raw units until its scale is
-validated. Existing lifetime counters are not reconstructed as sessions.
+The card uses Dutch labels and shows all sections. Set `view` to `overview`,
+`history`, `planning` or `settings` to show one. Its start, pause and dock
+buttons need `control` mode, telemetry younger than 45 seconds and a known
+activity. Start asks for confirmation, pause is offered only while mowing, and
+the card shows each command's result.
 
 ## Rain-aware planning
 
 [`examples/eufy_mower_planning.yaml`](examples/eufy_mower_planning.yaml) is an
-opt-in Home Assistant package. It offers weekday and time-window selection, a
-minimum battery level, a dry hold and a maximum session duration. Before a
-start it checks radar coverage for the whole session, irrigation conflicts,
-daylight and the mower's rain and child protections. It makes at most one
-start attempt per day, and its watchdog sends one pause or return for sessions
-it started, without retries.
-
-It expects the documented Buienalarm precipitation array and separate
-irrigation valve, active-session, planned-session and start-time entities.
-Replace every `example_*` entity with your own. Missing or stale sources block
-automatic starts, and automatic mowing starts switched off. Configure it and
-supervise its validation before switching it on. Schedules in the Eufy app run
-independently of this package.
+opt-in, [experimental](docs/release-candidates.md#experimental) package with
+Dutch entity names. At most once a day it starts a docked mower in `control`
+in a dry daylight window, with the rain stop and child protection on. Its
+watchdog sends one pause or dock for sessions it started, without retries.
+Automatic mowing starts switched off. Read
+[Rain-aware planning](docs/planning.md) before you switch it on.
 
 ## Mower bridge
 
-[`bridge/`](bridge/README.md) contains a dedicated Node 24 service that owns
-the mower side of this project. It uses
-[`@keesmod/eufy-mega-client`](https://github.com/keesmod/eufy-mega-client) as
-a library, with its own token, credentials, session, data directory, port and
-lifecycle, and runs with or without a camera bridge. Bridge and app 0.14.0
-pin library 0.27.0.
+[`bridge/`](bridge/README.md) holds the mower bridge for the `bridge` backend,
+a dedicated Node 24 service built on the
+[Eufy Mega client](https://github.com/keesmod/eufy-mega-client) library
+(`@keesmod/eufy-mega-client`). It runs with or without the
+[Eufy Security Viewer Bridge](https://github.com/keesmod/ha-eufy-cam). You
+build it yourself as a Docker image or install it as the local Home Assistant
+app **Eufy Mower Bridge**. No image or app repository is published.
 
-It serves the mower state, and the read-only map route when map provisioning is
-configured. It starts in `observe_only`. With `operating_mode: control` it adds
-start, pause, resume and stop routes, and with `settings_mode: write` a
-settings route. Every command is checked for mode, mower, ownership and
-telemetry age and answered once, without retry or replay.
+The bridge starts in `observe_only` and has its own opt-ins:
+`operating_mode: control` for start, pause, resume and stop, and
+`settings_mode: write` for setting writes. `control` mode also requires
+`control_stop_route`, your own description of how to stop the mower when a
+command misbehaves. Home Assistant's Dock command sends the bridge's `stop`
+command. On the maintainer's E15 the mower then drives back to the dock by
+itself. See the [deployment guide](docs/bridge-deployment.md) and the
+[bridge README](bridge/README.md#configuration) for all options.
 
-It ships as a reproducible container image and as a local Home Assistant app
-candidate. No image is published. See the
-[deployment guide](docs/bridge-deployment.md) and
-[ADR 0003](docs/architecture/0003-dedicated-mower-bridge.md).
+## Upgrading
+
+Back up the installed `custom_components/eufy_robomow` folder and Home
+Assistant's `.storage`, replace the folder, run the configuration check and
+restart Home Assistant. Entity ids stay the same across versions. When the
+card version changes, update the `?v=` part of the dashboard resource.
+
+- Steps and rollback: [integration](docs/migration-and-rollback.md#upgrade-and-rollback-of-the-integration),
+  [bridge app](docs/migration-and-rollback.md#upgrade-and-rollback-of-the-bridge-app)
+  and [Docker bridge](docs/bridge-deployment.md#upgrade).
+- Current versions: integration 0.17.0 with card 0.7.4, bridge and app 0.14.0
+  on library 0.27.0. See
+  [Release candidates](docs/release-candidates.md#current-candidate).
+- Per-version notes: [CHANGELOG.md](CHANGELOG.md) and
+  [bridge/CHANGELOG.md](bridge/CHANGELOG.md).
 
 ## Known limitations
 
-- **E15 only.** The E18 is not hardware-validated and not claimed.
 - **Zone mowing.** The app's Zone, Box and Spot modes have no validated area
   identifiers or command transport, so no zone action is exposed. See
   [zone research](docs/zone-control-research.md).
-- **Map acquisition is experimental.** Moving-map updates, cloud session
-  renewal, a host reboot and 13 hours of daily use passed on the owned E15,
-  and one unconfirmed cancellation recovered through the bounded recovery
-  probe. Short stream drops occur at the weakest Wi-Fi readings. No remote
-  expiry bound is established. See [map recovery](docs/map-recovery.md) and
-  the [hardware receipts](https://github.com/keesmod/eufy-robomow-ha/issues/8).
-- **Bridge backend activity.** The E15's local answers carry no activity, so a
-  resting mower can show an unknown activity. Session distance, area and
-  progress are unknown on the bridge backend.
-- **Live marker semantics** match repeated E15 observations but are not a
-  vendor-documented contract. They are display-only and never drive control.
+- **Experimental parts**, such as the bridge map source and the local
+  backend's cloud settings, are listed with what passed on the maintainer's
+  E15 in [Release candidates](docs/release-candidates.md#experimental).
+- **aarch64.** The bridge app declares it, but map acquisition and control
+  have only run on amd64.
+- **Bridge backend activity** can be unknown while the mower rests. See
+  [Mower backends](docs/backends.md#bridge-backend).
 
 ## Troubleshooting
 
 - **Entities unavailable**: check the IP address and that the mower is on
-  Wi-Fi, not cellular only. In bridge mode, check that the bridge is reachable
-  and reports fresh telemetry.
-- **Cloud settings not updating**: cloud data refreshes every 5 minutes in
-  daylight, so a change in the Eufy app appears after the next refresh. At
-  night the regular refresh pauses and only activity checks reach the cloud.
-  After repeated failures the refresh backs off up to one hour.
-- **Debug logging**:
+  Wi-Fi, not cellular only. With the bridge backend, check that the bridge is
+  reachable and reports fresh telemetry.
+- **Cloud settings not updating**: a change in the Eufy app appears after the
+  next cloud refresh. At night only activity checks reach the cloud, and after
+  repeated failures the refresh backs off up to one hour.
+- **Debug logging** in `configuration.yaml`:
 
 ```yaml
-# configuration.yaml
 logger:
   logs:
     custom_components.eufy_robomow: debug
 ```
 
-## Upgrading
-
-Replace the installed `custom_components/eufy_robomow` folder, run the
-configuration check and restart Home Assistant. Entity unique ids never change
-between versions.
-
-Runtime dependencies are pinned to the versions validated with Home Assistant
-2026.7.2 and the E15's Tuya 3.5 transport. TinyTuya stays at 1.20.0 until
-another version passes the same local protocol tests.
-
-- [CHANGELOG.md](CHANGELOG.md) lists every integration version with its
-  evidence, upgrade and rollback.
-- [bridge/CHANGELOG.md](bridge/CHANGELOG.md) does the same for the bridge and
-  its app.
-- [Migration and rollback](docs/migration-and-rollback.md) covers switching
-  backends and retiring the Android map helper.
+**Still stuck?** Open an [issue](https://github.com/keesmod/eufy-robomow-ha/issues)
+with a short description and redacted log lines. Never attach credentials,
+local keys, full device identifiers, coordinates, lawn geometry or raw
+captures.
 
 ## Documentation
 
@@ -259,34 +273,33 @@ another version passes the same local protocol tests.
 | --- | --- |
 | [Mower backends](docs/backends.md) | Activity, commands, settings and sessions per backend |
 | [Map sources](docs/map-sources.md) | External and bridge map source contract, validation and caching |
+| [Rain-aware planning](docs/planning.md) | Settings, start conditions and watchdog of the planning package |
 | [Bridge deployment](docs/bridge-deployment.md) | Running, upgrading and backing up the mower bridge |
-| [Migration and rollback](docs/migration-and-rollback.md) | Moving between backends and map sources |
-| [Map recovery](docs/map-recovery.md) | Recovery policy after an unconfirmed map cancellation |
+| [Bridge README](bridge/README.md) | Bridge options, private API routes and map provisioning |
+| [Bridge app](ha_app/README.md) | Installing and operating the local Home Assistant app |
+| [Migration and rollback](docs/migration-and-rollback.md) | Moving between backends and map sources, upgrades and rollbacks |
 | [Release candidates](docs/release-candidates.md) | How a candidate is built and what is hardware-confirmed |
-| [Protocol provenance](docs/protocol-provenance.md) | Accepted evidence and the confirmed data points |
-| [Zone control research](docs/zone-control-research.md) | Why zone mowing is not exposed |
-| [Architecture decisions](docs/architecture/) | ADRs for the fork, GitHub development and the bridge |
+
+For contributors: [protocol provenance](docs/protocol-provenance.md) of the
+confirmed data points, the [map recovery](docs/map-recovery.md) policy,
+[zone control research](docs/zone-control-research.md) and the
+[architecture decisions](docs/architecture/).
 
 ## Contributing and security
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, checks and protocol
 provenance rules, and [SECURITY.md](SECURITY.md) for reporting a vulnerability.
-Never attach credentials, local keys, full device identifiers, coordinates,
-lawn geometry or raw captures to an issue.
 
 ## Origin and license
 
-This project started as a fork of
+This is an independent project, not affiliated with Eufy or Anker. It started
+as a fork of
 [jnicolaes/eufy-robomow-ha](https://github.com/jnicolaes/eufy-robomow-ha) and
-keeps its history up to upstream 0.4.0 and the fixes that followed. Its Eufy
-sign-in, local-key discovery, local polling and cloud settings come from that
-work. See [ADR 0001](docs/architecture/0001-adopt-github-fork.md).
+keeps its history up to upstream 0.4.0 and the fixes that followed
+([ADR 0001](docs/architecture/0001-adopt-github-fork.md)). Its Eufy sign-in,
+local-key discovery, local polling and cloud settings come from that work. The
+authentication and local-key discovery build on eufy-clean-local-key-grabber,
+and the local protocol uses [tinytuya](https://github.com/jasonacox/tinytuya).
 
 The upstream repository declares no license, and this repository does not add
 one. Releases, HACS publication and relicensing wait until that is resolved.
-
-## Credits
-
-- [jnicolaes/eufy-robomow-ha](https://github.com/jnicolaes/eufy-robomow-ha), the original integration.
-- [eufy-clean-local-key-grabber](https://github.com/albaintor/eufy-clean-local-key-grabber), the basis of the authentication and local-key discovery.
-- [tinytuya](https://github.com/jasonacox/tinytuya) for the local protocol.
