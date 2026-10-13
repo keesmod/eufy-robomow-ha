@@ -29,8 +29,13 @@ Bridge/app 0.14.1 differs from 0.14.0 only by the locked `http-cache-semantics`,
 4.3.0 instead of 4.2.0. That version is outside the range of
 [GHSA-ch52-4w7c-c8xp](https://github.com/advisories/GHSA-ch52-4w7c-c8xp) and
 clears the bridge dependency audit. The bridge passes no response cache to
-`got`, so the affected logic is not in use. The evidence below was recorded on
-0.14.0.
+`got`, so the affected logic is not in use. On 2026-10-13 bridge/app 0.14.1
+from commit `c9864b8` replaced 0.14.0 on the maintainer's installation after
+Supervisor app backup `d0cb0f14`, with the mower docked and automatic mowing
+off. Readback verified the installed app files against that commit, unchanged
+options, entity registry and config entry, library 0.27.0 connected, a fresh
+map and no unavailable integration entities. The evidence below was recorded
+on 0.14.0.
 
 Integration 0.17.0 and bridge/app 0.14.0 consume the charger contact from
 [library 0.27.0](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.27.0).
@@ -460,7 +465,8 @@ Combinations run on the maintainer's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
-| 0.17.0 | 0.14.0 (0.27.0) | the current candidate, exact installed sources and preserved identities/options/session storage. On 2026-09-29 the E15 charger contact passed the station, lawn-stop and return checks through library 0.27.0, bridge and HA. Physical commands used BatteryCam. The existing map recovery policy also recovered once without a restart, see the #86 receipt. Later that day a Start from `docked` and a dock through HA were each confirmed by the bridge and the eufy app |
+| 0.17.0 | 0.14.1 (0.27.0) | the current candidate since 2026-10-13, whose app matched file for file after the update, with options, identities and integration unchanged. It differs from 0.14.0 only by the locked `http-cache-semantics` |
+| 0.17.0 | 0.14.0 (0.27.0) | the previous candidate, exact installed sources and preserved identities/options/session storage. On 2026-09-29 the E15 charger contact passed the station, lawn-stop and return checks through library 0.27.0, bridge and HA. Physical commands used BatteryCam. The existing map recovery policy also recovered once without a restart, see the #86 receipt. Later that day a Start from `docked` and a dock through HA were each confirmed by the bridge and the eufy app |
 | 0.16.3 | 0.13.4 (0.25.2) | the previous candidate, whose integration matched file for file after the 2026-09-28 update, with the entry, its entity ids and the stored sessions kept. A task recorded from cloud readings is not yet observed |
 | 0.16.2 | 0.13.4 (0.25.2) | the previous candidate, whose integration matched file for file after the 2026-09-28 update with card 0.7.4, the entry and its entity ids unchanged |
 | 0.16.1 | 0.13.4 (0.25.2) | an earlier candidate, whose app matched file for file after the 2026-09-28 update, with `control_read_back_ms` lowered to 54000 within the enforced budget, identities and integration unchanged and native-map acquisition healthy. Recovery after an unconfirmed cancellation was unobserved at that installation, see the #71 waiver |
