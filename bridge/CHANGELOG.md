@@ -27,11 +27,13 @@ the previous version with its options and data.
 
 - The bridge and app lockfiles resolve `http-cache-semantics` 4.3.0 instead of
   4.2.0. It reaches the bridge through library 0.27.0, `got` and
-  `cacheable-request`. Version 4.2.0 is affected by
-  [GHSA-ch52-4w7c-c8xp](https://github.com/advisories/GHSA-ch52-4w7c-c8xp),
-  which made the bridge dependency audit fail.
-- The library passes no response cache to `got`, so the affected cache logic
-  was not in use. No other package, library, route, option or behavior
+  `cacheable-request`.
+  [GHSA-ch52-4w7c-c8xp](https://github.com/advisories/GHSA-ch52-4w7c-c8xp)
+  lists versions up to 4.2.0 and made the bridge dependency audit fail.
+  4.3.0 is outside that range and clears the audit. Its `max-stale` handling
+  is unchanged, and the upstream maintainer disputes the report.
+- The library passes no response cache to `got`, so that cache logic is not
+  in use in the bridge. No other package, library, route, option or behavior
   changes. The library pin stays 0.27.0.
 
 Evidence: software-verified. The 4.3.0 tarball from the npm registry matches
