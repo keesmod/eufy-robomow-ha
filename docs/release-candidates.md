@@ -28,14 +28,15 @@ at 1.20.0 until another version passes the same local protocol tests.
 Bridge/app 0.14.1 differs from 0.14.0 only by the locked `http-cache-semantics`,
 4.3.0 instead of 4.2.0. That version is outside the range of
 [GHSA-ch52-4w7c-c8xp](https://github.com/advisories/GHSA-ch52-4w7c-c8xp) and
-clears the bridge dependency audit. The bridge passes no response cache to
-`got`, so the affected logic is not in use. On 2026-10-13 bridge/app 0.14.1
-from commit `c9864b8` replaced 0.14.0 on the maintainer's installation after
-Supervisor app backup `d0cb0f14`, with the mower docked and automatic mowing
-off. Readback verified the installed app files against that commit, unchanged
-options, entity registry and config entry, library 0.27.0 connected, a fresh
-map and no unavailable integration entities. The evidence below was recorded
-on 0.14.0.
+clears the bridge dependency audit. Its `max-stale` handling is unchanged. The
+library passes no response cache to `got`, so that logic is not in use. On
+2026-10-13 bridge/app 0.14.1 replaced 0.14.0 on the maintainer's installation
+after Supervisor app backup `d0cb0f14`, with the mower docked and automatic
+mowing off. Readback matched the 17 installed app files by SHA-256 against
+`ha_app` of the PR #93 head `c9864b8`, which the merge carries unchanged. The
+bridge reported 0.14.1 running with library 0.27.0 connected and a fresh map.
+Options, the config entry and the entity registry count were unchanged, and no
+integration entity was unavailable. The evidence below was recorded on 0.14.0.
 
 Integration 0.17.0 and bridge/app 0.14.0 consume the charger contact from
 [library 0.27.0](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.27.0).
@@ -465,10 +466,10 @@ Combinations run on the maintainer's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
-| 0.17.0 | 0.14.1 (0.27.0) | the current candidate since 2026-10-13, whose app matched file for file after the update, with options, identities and integration unchanged. It differs from 0.14.0 only by the locked `http-cache-semantics` |
+| 0.17.0 | 0.14.1 (0.27.0) | the current candidate since 2026-10-13, whose app matched file for file after the update, with options, config entry and entity registry count unchanged. It differs from 0.14.0 only by the locked `http-cache-semantics` |
 | 0.17.0 | 0.14.0 (0.27.0) | the previous candidate, exact installed sources and preserved identities/options/session storage. On 2026-09-29 the E15 charger contact passed the station, lawn-stop and return checks through library 0.27.0, bridge and HA. Physical commands used BatteryCam. The existing map recovery policy also recovered once without a restart, see the #86 receipt. Later that day a Start from `docked` and a dock through HA were each confirmed by the bridge and the eufy app |
-| 0.16.3 | 0.13.4 (0.25.2) | the previous candidate, whose integration matched file for file after the 2026-09-28 update, with the entry, its entity ids and the stored sessions kept. A task recorded from cloud readings is not yet observed |
-| 0.16.2 | 0.13.4 (0.25.2) | the previous candidate, whose integration matched file for file after the 2026-09-28 update with card 0.7.4, the entry and its entity ids unchanged |
+| 0.16.3 | 0.13.4 (0.25.2) | an earlier candidate, whose integration matched file for file after the 2026-09-28 update, with the entry, its entity ids and the stored sessions kept. A task recorded from cloud readings is not yet observed |
+| 0.16.2 | 0.13.4 (0.25.2) | an earlier candidate, whose integration matched file for file after the 2026-09-28 update with card 0.7.4, the entry and its entity ids unchanged |
 | 0.16.1 | 0.13.4 (0.25.2) | an earlier candidate, whose app matched file for file after the 2026-09-28 update, with `control_read_back_ms` lowered to 54000 within the enforced budget, identities and integration unchanged and native-map acquisition healthy. Recovery after an unconfirmed cancellation was unobserved at that installation, see the #71 waiver |
 | 0.16.1 | 0.13.3 (0.25.2) | an earlier candidate, whose app matched file for file after the 2026-09-28 update, with identities, settings and integration unchanged and ordinary native-map acquisition healthy. Recovery after an unconfirmed cancellation was unobserved at that installation |
 | 0.16.1 | 0.13.2 (0.25.2) | an earlier candidate, whose app matched file for file after its deployment on 2026-09-28, while integration 0.16.1 differed from the candidate only by one code comment until the 0.16.2 update |
