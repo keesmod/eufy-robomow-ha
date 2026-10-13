@@ -2,12 +2,12 @@
 
 How the mower moves between the integration's local backend and the mower
 bridge, how the integration and the bridge app are upgraded and rolled back,
-and how the Android map helper can be retired later. The procedures keep one
-control owner and one map owner at any time. They keep the config entry, the
-entity ids, the unique ids and the session history, and they never retry or
-replay a command.
+and how an external map source is stopped. The procedures keep one control
+owner and one map owner at any time. They keep the config entry, the entity
+ids, the unique ids and the session history, and they never retry or replay a
+command.
 
-These procedures were rehearsed on the owner's installation on 2026-09-25,
+These procedures were rehearsed on the maintainer's installation on 2026-09-25,
 without mower movement. The rehearsal covered:
 
 - A switch refused while the bridge was unreachable.
@@ -34,8 +34,8 @@ command was sent. See the [receipt](https://github.com/keesmod/eufy-robomow-ha/i
 
 **Map.** Exactly one source feeds the map entity.
 
-- `external` is the Android map helper or another compatible HTTPS source. It
-  is the default and the manual recovery path.
+- `external` is a compatible HTTPS map source, which this project does not
+  include. It is the default and the manual recovery path.
 - `bridge` is the bridge's read-only map route. It needs the `bridge` backend
   and a bridge that reports `routes.maps`.
 - Each source keeps its own latest-good file, `latest.mapbundle` and
@@ -54,7 +54,7 @@ mode, keep their registry entries and return with the local backend.
 Before switching, check that the bridge's health check reports `running` and
 that no supervised window runs on the mower.
 
-1. Open **Settings → Devices & Services → Eufy Robomow → Configure**. Choose
+1. Open **Settings → Devices & services → Eufy Robomow → Configure**. Choose
    the backend `bridge` with the bridge URL and token, and keep the map source
    `external` unless the bridge serves maps.
 2. Saving asks the bridge's state route with the token and resolves the mower.
@@ -141,44 +141,24 @@ A rollback is the same with the previous folder.
   seconds.
 - Keep `mower-session.json` and `bridge-id` in the data directory. The mower id
   the integration stores depends on them. The library's changelog records no
-  change of either from library 0.13.0 to 0.22.0.
+  change of either from library 0.13.0 to the pinned 0.27.0, except that
+  library 0.24.0, pinned since bridge 0.12.0, adds private MQTT credentials to
+  the session file without changing the mower ids.
 - Docker: start the previous image tag with the same volume, see the
   [deployment guide](bridge-deployment.md#rollback).
 
-## Retiring an Android map source
+## Stopping an external map source
 
-Nothing in this repository automatically stops or removes an external map
-source. Retiring a particular installation requires its owner's explicit
-decision, a working replacement and verified recovery material.
+Nothing in this repository stops or removes an external map source
+automatically. Keep one map owner: stop an external source's acquisition
+before you select the `bridge` map source. A source left running next to the
+bridge is not a passive standby, because it can start acquisitions on its own
+schedule. Keep the external URL, certificate pin and `latest.mapbundle` for
+recovery.
 
-Before a normal retirement, confirm fresh provisioning and acquisition without
-Android, the source switch and rollback, restart and outage recovery, and
-observed updates during mowing. Record the actual observation period and gaps.
-An owner can choose earlier retirement with a private recovery archive. That
-decision does not satisfy the remaining hardware acceptance criteria.
-
-1. **One active map owner.** Stop the helper's acquisition service before its
-   emulator when selecting native maps. Keeping the helper running alongside
-   the bridge is not passive standby: it starts acquisitions on its own idle
-   schedule. Keep the external URL, certificate pin and `latest.mapbundle` for
-   recovery. In lasting bridge use, enable the bridge app's **Start on boot**.
-2. **Recovery.** Disable native acquisition before starting Android. If the
-   runtime was removed, restore the verified private archive with container,
-   emulator and helper autostart disabled, then start the restored container.
-   Start the emulator, wait until it is ready, then start the acquisition
-   service and select `external`. In the owned installation, allowing 60
-   seconds before starting the helper restored fresh acquisition after a cold
-   emulator start.
-   Confirm a fresh source timestamp and a healthy HA map, not just running
-   services. Restore the recorded backend and operating mode deliberately.
-3. **Archive.** Before removing the active runtime, preserve its configuration,
-   certificates, vendor libraries, emulator data, map caches and research
-   backups privately. Verify the archive, keep an independent copy and test a
-   cold restore without starting another map owner. A cold restore proves file
-   recovery, not fresh acquisition from the restored emulator.
-4. **Remove the dedicated runtime only with the owner's approval.** Verify the
-   exact target and its dependencies, then check the native source again and
-   confirm that unrelated workloads remain unchanged. Keep the recovery
-   archive and the HA caches.
+The maintainer's former external map source was an Android map helper running
+in an emulator. It was retired on 2026-09-25.
+See the [retirement receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5839090826).
+This project does not include such a helper.
 
 The public external-source API and the `external` option remain supported.

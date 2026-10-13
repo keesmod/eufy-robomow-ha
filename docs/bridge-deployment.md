@@ -6,17 +6,18 @@ back. Everything here is local: no image is published and no app repository is
 listed. Version 0.14.0 serves state routes with the typed settings and, only
 behind the explicit `operating_mode: control` opt-in with a stop route, the
 start, pause, resume and stop routes. The separate `settings_mode: write`
-opt-in enables the settings route for mow height, volume, smart no-go zones
-and sparse lawn optimization. It pins library 0.27.0, which reads DP 107 as
-the mower's mission status, confirms the start, pause, resume and stop commands,
-and reads and writes the settings behind its own opt-in.
-On the owned E15 a stop ends the task and returns the mower to the dock. With
+opt-in enables the settings route for mow height, volume, smart no-go zones,
+sparse lawn optimization and the mow and blade speeds. It pins library 0.27.0,
+which reads DP 107 as the mower's mission status, confirms the start, pause,
+resume and stop commands, and reads and writes the settings behind its own
+opt-in.
+On the maintainer's E15 a stop ends the task and returns the mower to the dock. With
 cloud provisioning or an operator-supplied file it also serves the read-only map
 route, see [Map provisioning](#map-provisioning-optional).
 
 ## What is separate from a camera installation
 
-| Item | Mower bridge | Camera bridge (ha-eufy-cam) |
+| Item | Mower bridge | Eufy Security Viewer Bridge |
 | --- | --- | --- |
 | Port | `8090` | `8080` (Docker) or `8063` (app) |
 | Variables | `EUFY_MOWER_*` | `EUFY_BRIDGE_*`, `EUFY_*` |
@@ -52,7 +53,7 @@ in `ha_app/` (run `python3 scripts/prepare_ha_app.py`).
 ## Install with Docker
 
 ```bash
-docker build -t eufy-mower-bridge:0.10.1 ./bridge
+docker build -t eufy-mower-bridge:0.14.0 ./bridge
 ```
 
 ```bash
@@ -64,7 +65,7 @@ docker run -d --name eufy-mower-bridge --restart unless-stopped \
   -e EUFY_MOWER_PASSWORD=<eufy account password> \
   -e EUFY_MOWER_COUNTRY=NL \
   -e EUFY_MOWER_HOST=<mower LAN address> \
-  eufy-mower-bridge:0.10.1
+  eufy-mower-bridge:0.14.0
 ```
 
 Bind the published port to an address that only Home Assistant can reach, or
@@ -110,7 +111,7 @@ permissions and drops root before the bridge starts.
 3. Configure `token`, `email`, `password`, `country` and `host` (or `hosts`),
    save, start, read **Logs**.
 4. Use `http://<home-assistant-ip>:8090` as the bridge URL in the integration.
-   The app publishes port 8090 on the host; the Supervisor network also
+   The app publishes port 8090 on the host. The Supervisor network also
    reaches it as `local-eufy-mower-bridge`.
 
 The app data lives in the app's `/data`, which Home Assistant backups include.
@@ -120,12 +121,11 @@ The app data lives in the app's `/data`, which Home Assistant backups include.
 For fresh account-based provisioning, set app option
 `map_provisioning_mode: cloud`, or environment variable
 `EUFY_MOWER_MAP_PROVISIONING_MODE=cloud`. Leave `map_provisioning_file` unset.
-Bridge 0.13.1 on library 0.25.2 requests fresh private provisioning for each
-acquisition and uses its existing session renewal when needed. Since 0.13.1
-that renewal runs before the session gets too short for a new map session. No file needs
+The bridge requests fresh private provisioning for each acquisition and renews
+its cloud session before it gets too short for a new map session. No file needs
 manual renewal. Back up the private data directory and options before enabling
-this experimental route. Native map acceptance and controlled source migration
-remain required before retiring the existing external map source.
+this experimental route. Its hardware status is recorded in
+[Release candidates](release-candidates.md#experimental).
 
 The default file route remains available. The operator supplies a private file
 and keeps it fresh, see
@@ -148,7 +148,7 @@ docker run -d --name eufy-mower-bridge --restart unless-stopped \
   -e EUFY_MOWER_PASSWORD=<eufy account password> \
   -e EUFY_MOWER_COUNTRY=NL \
   -e EUFY_MOWER_HOST=<mower LAN address> \
-  eufy-mower-bridge:0.10.1
+  eufy-mower-bridge:0.14.0
 ```
 
 Mount the directory rather than the file, so a file replaced by renaming
@@ -264,12 +264,12 @@ progress still have no confirmed reading. Commands need two opt-ins: the integra
 state on every poll and exposes start, pause and dock only while it is true.
 Each command is sent once, the bridge's confirmed, failed or uncertain answer
 is the result, and an uncertain command is never repeated automatically. Dock
-is the bridge's `stop` class: on the owned E15 a stop over DP 1 false ends the
+is the bridge's `stop` class: on the maintainer's E15 a stop over DP 1 false ends the
 task and the mower returns to the dock by itself, and a confirmed dock carries
 the map-saving payload the library received at dock arrival. The library's
-`return` over DP 3 is ignored by the owned firmware from paused and from the
+`return` over DP 3 is ignored by that mower from paused and from the
 stopped task, so the bridge has no return route and cannot stop the mower in
-place. Leave the bridge at `observe_only` unless the owner opts in to control.
+place. Leave the bridge at `observe_only` unless you opt in to control.
 The bridge ran in control in supervised windows on 2026-09-24, 2026-09-25 and
 2026-09-27, see keesmod/eufy-robomow-ha#8. Since integration 0.14.0 the cut
 height, volume and the five local switches read the bridge's state document in
@@ -298,5 +298,5 @@ cleanup still require restart. One natural failure recovered without a bridge
 restart on 2026-09-29, with bridge 0.14.0 and library 0.27.0. The probe confirmed
 cancellation and cleanup and HA returned to a healthy map. The remote expiry
 bound remains unknown, see [recovery evidence and limits](map-recovery.md). The current installation runs in
-`control` after the owner's opt-in, with settings writes disabled. Physical
+`control` after the maintainer's opt-in, with settings writes disabled. Physical
 control keeps its explicit opt-in and supervised validation.

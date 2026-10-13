@@ -5,12 +5,13 @@ the mower's normal local DPS connection. The integration does not bundle that
 transport or its Android-only vendor libraries. Its read-only map entity reads
 a validated map bundle from one of two sources instead.
 
-**Settings → Devices & Services → Eufy Robomow → Configure → Map source**
+**Settings → Devices & services → Eufy Robomow → Configure → Map source**
 selects exactly one source for the map entity:
 
-- **external** (default): a compatible HTTPS map source such as the existing
-  Android map helper, configured by URL. Existing entries keep it until you
-  change it, and it stays the manual recovery path.
+- **external** (default): a compatible HTTPS map service that implements the
+  API below, configured by URL. This project does not include such a service.
+  Existing entries keep it until you change it, and it stays the manual
+  recovery path.
 - **bridge**: the read-only map route of the dedicated
   [mower bridge](../bridge/README.md). It needs the **bridge** mower backend,
   see [Mower backends](backends.md), and a bridge that serves maps.

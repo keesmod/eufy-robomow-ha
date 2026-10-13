@@ -21,6 +21,10 @@ backends and rollback are described in
 | Mower bridge, container image | 0.14.0 | `@keesmod/eufy-mega-client` 0.27.0 by release tarball and sha512 integrity, `node:24-bookworm-slim` by digest |
 | Mower bridge, Home Assistant app `eufy_mower_bridge` | 0.14.0 | the same inputs, built by the Supervisor on the host |
 
+The integration's runtime dependencies are pinned to the versions validated
+with Home Assistant 2026.7.2 and the E15's Tuya 3.5 transport. TinyTuya stays
+at 1.20.0 until another version passes the same local protocol tests.
+
 Integration 0.17.0 and bridge/app 0.14.0 consume the charger contact from
 [library 0.27.0](https://github.com/keesmod/eufy-mega-client/releases/tag/v0.27.0).
 A fresh connected contact shows `docked` unless equal or newer local activity takes precedence.
@@ -32,7 +36,7 @@ Readback at 13:18:55 UTC verified exact installed sources, runtime library
 0.27.0, unchanged identities, options and stored sessions, no unavailable
 integration entities and a healthy map. Core and the app were restarted.
 
-The owner's app-controlled E15 window then read connected at the station,
+The maintainer's app-controlled E15 window then read connected at the station,
 disconnected while mowing and after a stop on the lawn, and connected again
 on return. HA showed `docked`, `mowing`, `unknown`, `returning` and `docked`.
 At arrival the contact supplied `docked` while mission status still said
@@ -148,7 +152,7 @@ was published separately with the owner's approval from `c41af2c`
 renews a map-enabled cloud session before map provisioning would be refused.
 Its downloaded archive matched the release manifest and checksums, with SHA-256
 `296876ef8dc52a9d931ef4f0efe3cf258563f11a06e853c7a4bebce32f71fd9f`, and is
-byte-identical to the release rehearsal of the same commit. On the owned E15
+byte-identical to the release rehearsal of the same commit. On the maintainer's E15
 the bridge renewed 79 seconds before the local expiry between idle demands,
 and once during a running stream demand, which ended normally, see the
 [first](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857287766) and [second](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5857986097) receipts.
@@ -212,8 +216,8 @@ The repeated native-source switch, outage recovery and rollback passed on
 CI runs the
 tests on Home Assistant 2026.7.2, and the rehearsal ran on Home Assistant
 2026.9.3 with Supervisor 2026.09.2. The hardware evidence below comes from the
-owner's Home Assistant OS installation with the owned E15 (T2880) on firmware
-6.9.28. A read-only check of the owner's running Anker eufy app on
+maintainer's Home Assistant OS installation and E15 (T2880) on firmware
+6.9.28. A read-only check of the maintainer's running Anker eufy app on
 2026-09-25 confirmed that version again. The earlier control and settings
 windows did not re-read the firmware during each window, and the 2026-09-27
 receipts do not record it.
@@ -416,7 +420,7 @@ below retain their stated scope.
 - The standalone container image outside CI.
 - The app on aarch64. The app declares it and an early bridge image passed an
   offline health check on arm64 in #23, but CI builds on amd64 only and map
-  acquisition and control have run only on the owner's amd64 host.
+  acquisition and control have run only on the maintainer's amd64 host.
 - The opt-in planning package. Automatic mowing stays off.
 - Any model other than the E15. E18 support is not claimed.
 
@@ -445,7 +449,7 @@ missing optional field: the `command` block is optional since integration
 | Box, zone and scheduled tasks | 0.10.1 on library 0.22.0 |
 | Work parameters: travel and blade speed written, the other three read | 0.11.0 on library 0.23.0 |
 
-Combinations run on the owner's installation:
+Combinations run on the maintainer's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
@@ -464,7 +468,7 @@ Combinations run on the owner's installation:
 | 0.12.0 | 0.8.0 (0.18.0) | second control window, 2026-09-24 |
 | 0.11.0 | 0.7.1 (0.18.0) | first control window, 2026-09-24 |
 
-The local backend does not use the bridge. The camera bridge of ha-eufy-cam
+The local backend does not use the bridge. The Eufy Security Viewer Bridge
 shares no port, token, account, data directory or library instance with the
 mower bridge, and either runs while the other is absent or stopped.
 
@@ -504,5 +508,5 @@ Update the bridge app first, then the integration.
 - Before a bridge older than 0.7.0, switch the integration's map source to
   `external`.
 
-These steps were rehearsed on the owner's installation on 2026-09-25, see
+These steps were rehearsed on the maintainer's installation on 2026-09-25, see
 the [receipt](https://github.com/keesmod/eufy-robomow-ha/issues/8#issuecomment-5832886365).
