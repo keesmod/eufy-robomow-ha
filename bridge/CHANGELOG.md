@@ -21,6 +21,29 @@ files, because the mower id the integration stores depends on them. A rollback
 of the app restores the app backup that the update created, which brings back
 the previous version with its options and data.
 
+## 0.14.2 - 2026-11-22
+
+### Lock qs 6.17.1
+
+- The bridge and app lockfiles resolve `qs` 6.17.1 instead of 6.16.0. It
+  reaches the bridge as a dependency of library 0.27.0.
+  [GHSA-6pq8-jhm2-2vcw](https://github.com/advisories/GHSA-6pq8-jhm2-2vcw)
+  lists versions 6.7.0 to 6.16.0 and made the bridge dependency audit fail.
+  6.17.1 is outside that range. The library's main branch and the camera
+  bridge already lock it.
+- The library calls `qs.stringify` once, in its push registration, with fixed
+  string values and the default array format. The advisory needs
+  `arrayFormat: 'comma'`, so that path is not in use. No other package,
+  library, route, option or behavior changes. The library pin stays 0.27.0.
+
+Evidence: software-verified. The 6.17.1 tarball from the npm registry matches
+the locked sha512 integrity. The bridge dependency audit, the bridge tests and
+the container and app smoke tests pass in CI.
+
+Upgrade: install the matching app with a backup. Options, data, the session
+and the mower id stay unchanged. The integration needs no update.
+Rollback: restore the 0.14.1 app backup.
+
 ## 0.14.1 - 2026-10-13
 
 ### Lock http-cache-semantics 4.3.0
