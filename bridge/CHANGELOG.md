@@ -31,8 +31,8 @@ the previous version with its options and data.
   lists versions 6.7.0 to 6.16.0 and made the bridge dependency audit fail.
   6.17.1 is outside that range. The library's main branch and the camera
   bridge already lock it.
-- The library calls `qs.stringify` once, in its push registration, with fixed
-  string values and the default array format. The advisory needs
+- The library calls `qs.stringify` once, in its push registration, with string
+  values only, no arrays and no options. The advisory needs
   `arrayFormat: 'comma'`, so that path is not in use. No other package,
   library, route, option or behavior changes. The library pin stays 0.27.0.
 

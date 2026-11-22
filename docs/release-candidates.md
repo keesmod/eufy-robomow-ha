@@ -29,8 +29,8 @@ Bridge/app 0.14.2 differs from 0.14.1 only by the locked `qs`, 6.17.1 instead
 of 6.16.0. That version is outside the range of
 [GHSA-6pq8-jhm2-2vcw](https://github.com/advisories/GHSA-6pq8-jhm2-2vcw) and
 clears the bridge dependency audit. The library calls `qs.stringify` only in
-its push registration, with fixed string values and the default array format,
-so the affected `arrayFormat: 'comma'` path is not in use.
+its push registration, with string values only, no arrays and no options, so
+the affected `arrayFormat: 'comma'` path is not in use.
 
 Bridge/app 0.14.1 differs from 0.14.0 only by the locked `http-cache-semantics`,
 4.3.0 instead of 4.2.0. That version is outside the range of
