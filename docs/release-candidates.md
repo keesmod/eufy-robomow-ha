@@ -30,7 +30,16 @@ of 6.16.0. That version is outside the range of
 [GHSA-6pq8-jhm2-2vcw](https://github.com/advisories/GHSA-6pq8-jhm2-2vcw) and
 clears the bridge dependency audit. The library calls `qs.stringify` only in
 its push registration, with string values only, no arrays and no options, so
-the affected `arrayFormat: 'comma'` path is not in use.
+the affected `arrayFormat: 'comma'` path is not in use. On 2026-11-22
+bridge/app 0.14.2 replaced 0.14.1 on the maintainer's installation after
+Supervisor app backup `dee28fe7`, with the mower docked. Before the update the
+17 installed app files matched `ha_app` on main by SHA-256. Readback after the
+update matched them against `ha_app` at commit `ed3a407` of
+[PR #95](https://github.com/keesmod/eufy-robomow-ha/pull/95), the head at the
+time of the update. The merge carries that `ha_app` unchanged. The bridge
+reported 0.14.2 healthy with library 0.27.0 connected and a map captured after
+the start. Options, the config entry and the 24 mower entities in Home
+Assistant were unchanged, and no entity was unavailable.
 
 Bridge/app 0.14.1 differs from 0.14.0 only by the locked `http-cache-semantics`,
 4.3.0 instead of 4.2.0. That version is outside the range of
@@ -475,6 +484,7 @@ Combinations run on the maintainer's installation:
 
 | Integration | Bridge (library) | Record |
 | --- | --- | --- |
+| 0.17.0 | 0.14.2 (0.27.0) | the current candidate since 2026-11-22, whose app matched file for file after the update, with options, config entry and mower entities unchanged. It differs from 0.14.1 only by the locked `qs` |
 | 0.17.0 | 0.14.1 (0.27.0) | the previous candidate, current from 2026-10-13, whose app matched file for file after the update, with options, config entry and entity registry count unchanged. It differs from 0.14.0 only by the locked `http-cache-semantics` |
 | 0.17.0 | 0.14.0 (0.27.0) | an earlier candidate, exact installed sources and preserved identities/options/session storage. On 2026-09-29 the E15 charger contact passed the station, lawn-stop and return checks through library 0.27.0, bridge and HA. Physical commands used BatteryCam. The existing map recovery policy also recovered once without a restart, see the #86 receipt. Later that day a Start from `docked` and a dock through HA were each confirmed by the bridge and the eufy app |
 | 0.16.3 | 0.13.4 (0.25.2) | an earlier candidate, whose integration matched file for file after the 2026-09-28 update, with the entry, its entity ids and the stored sessions kept. A task recorded from cloud readings is not yet observed |
